@@ -15,16 +15,6 @@ pnpm start run
 
 第一次使用某个 Telegram 会话时，运行时会在终端请求登录信息，并把会话保存到 `telegram.sessionsDir`。凭据、会话、日志和数据库都已加入忽略规则，不应提交到仓库。
 
-如果已有旧版 SQLite 会话文件，可以先转换到纸鸢格式：
-
-```bash
-pnpm start sessions migrate \
-  --source /path/to/old/sessions \
-  --target data/accounts
-```
-
-转换不会复制实体缓存，也不会覆盖目标目录已有文件；目标文件已存在时只有显式增加 `--force` 才会替换。
-
 ## 插件边界
 
 每个实际插件都是一个独立 workspace 项目，并且拥有自己的 `package.json` 与 `paperkite.plugin` manifest：
@@ -41,6 +31,8 @@ pnpm start sessions migrate \
 `@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储与控制台都属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
 
 ## 插件安装
+
+核心自带的内置插件（`paperkite.bundles`）随核心安装目录解析、默认可用；`plugin add` 可安装第三方插件，或安装同名包覆盖内置插件。
 
 插件管理使用 profile 目录中的 `package.json` 保存依赖和启用清单：
 

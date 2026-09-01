@@ -1,10 +1,11 @@
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { PluginCapability, PluginManifest, PluginModule, RuntimeLogger } from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
-import { BUILTIN_PLUGINS, profileDirectory, readProfile } from "./profile.js";
+import { profileDirectory, readProfile } from "./profile.js";
 
 interface PackagePluginMeta {
   readonly plugin?: boolean | { readonly entry?: string; readonly capabilities?: readonly PluginCapability[] };
@@ -30,7 +31,7 @@ export async function loadExtensions(
   const configured = Array.isArray(profileManifest.paperkite?.profile?.plugins)
     ? profileManifest.paperkite.profile.plugins
     : [];
-  const pluginNames = unique([...BUILTIN_PLUGINS, ...configured]);
+  const pluginNames = unique([...configured, ...(await readBundles())]);
   const candidates: PluginCandidate[] = [];
   for (const name of pluginNames) {
     const candidate = await inspectPlugin(name, profile);
@@ -130,7 +131,7 @@ function assertManifestMatches(candidate: PluginCandidate, manifest: PluginManif
 }
 
 function resolvePackageJson(name: string, profile: string): string | undefined {
-  const roots = [profile, process.cwd()];
+  const roots = [profile, coreRoot()];
   for (const root of roots) {
     try {
       return createRequire(join(root, "package.json")).resolve(name + "/package.json");
@@ -143,4 +144,30 @@ function resolvePackageJson(name: string, profile: string): string | undefined {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+interface CoreManifest {
+  readonly paperkite?: { readonly bundles?: readonly string[] };
+}
+
+async function readBundles(): Promise<string[]> {
+  try {
+    const manifest = JSON.parse(await readFile(join(coreRoot(), "package.json"), "utf8")) as CoreManifest;
+    const bundles = manifest.paperkite?.bundles;
+    return Array.isArray(bundles)
+      ? bundles.filter((name): name is string => typeof name === "string" && Boolean(name.trim()))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function coreRoot(): string {
+  let directory = dirname(fileURLToPath(import.meta.url));
+  for (;;) {
+    if (existsSync(join(directory, "package.json"))) return directory;
+    const parent = dirname(directory);
+    if (parent === directory) return directory;
+    directory = parent;
+  }
 }

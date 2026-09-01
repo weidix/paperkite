@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { BUILTIN_PLUGINS, profileDirectory, type ProfileManifest } from "./profile.js";
+import { profileDirectory, type ProfileManifest } from "./profile.js";
 
 export function managePlugins(profile: string, args: readonly string[]): number {
   const directory = profileDirectory(profile);
@@ -43,7 +43,7 @@ function initProfileSync(directory: string, profile: string): void {
           private: true,
           type: "module",
           dependencies: {},
-          paperkite: { profile: { plugins: [...BUILTIN_PLUGINS] } }
+          paperkite: { profile: { plugins: [] } }
         },
         null,
         2
@@ -76,7 +76,7 @@ function reconcileProfileSync(directory: string, before: ProfileManifest): void 
   }
   const dependencySet = new Set(dependencies);
   for (const name of [...configured]) {
-    if (!isBuiltin(name) && (!dependencySet.has(name) || !readPluginMeta(name, directory))) {
+    if (!dependencySet.has(name) || !readPluginMeta(name, directory)) {
       configured.splice(configured.indexOf(name), 1);
       changed = true;
     }
@@ -110,10 +110,6 @@ function resolvePackageJson(name: string, directory: string): string | undefined
     join(process.cwd(), "node_modules", name, "package.json")
   ];
   return candidates.find((candidate) => existsSync(candidate));
-}
-
-function isBuiltin(name: string): boolean {
-  return name.startsWith("@paperkite/");
 }
 
 function anchorPath(value: string, cwd: string): string {

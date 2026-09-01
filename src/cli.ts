@@ -7,7 +7,6 @@ import { managePlugins } from "./extensions/manager.js";
 import { createApp, defaultLockFile, type PaperkiteApp } from "./app.js";
 import { acquireProcessLock } from "./control/process-lock.js";
 import { requestControl, startControlServer, type ControlServer } from "./control/socket.js";
-import { migrateSessionDirectory } from "./telegram/session-migration.js";
 
 const program = new Command()
   .name("paperkite")
@@ -78,21 +77,6 @@ service
   .action(async (options: { flows: string }) => {
     const catalog = await loadCatalog(options.flows);
     process.stdout.write(JSON.stringify(catalog.definitions("service"), null, 2) + "\n");
-  });
-
-const sessions = program
-  .command("sessions")
-  .description("manage local Telegram session files");
-
-sessions
-  .command("migrate")
-  .description("convert SQLite session files into the Node session format")
-  .requiredOption("--source <directory>", "source session directory")
-  .option("--target <directory>", "target session directory", "data/accounts")
-  .option("--force", "replace existing target files")
-  .action(async (options: { source: string; target: string; force?: boolean }) => {
-    const result = await migrateSessionDirectory(options.source, options.target, options.force === true);
-    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   });
 
 service

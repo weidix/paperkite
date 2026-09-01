@@ -1,15 +1,6 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-export const BUILTIN_PLUGINS = [
-  "@paperkite/plugin-telegram-messages",
-  "@paperkite/plugin-bark",
-  "@paperkite/plugin-conversation-watch",
-  "@paperkite/plugin-account-watch",
-  "@paperkite/plugin-message-archive",
-  "@paperkite/plugin-process-command"
-] as const;
-
 export function profileDirectory(profile = "default"): string {
   const home = process.env.PAPERKITE_HOME?.trim() || join(process.cwd(), "data", ".paperkite");
   return resolve(home, "profiles", profile);
@@ -28,7 +19,7 @@ export async function ensureProfile(profile = "default"): Promise<string> {
       private: true,
       type: "module",
       dependencies: {},
-      paperkite: { profile: { plugins: [...BUILTIN_PLUGINS] } }
+      paperkite: { profile: { plugins: [] } }
     });
   }
   const workspacePath = join(directory, "pnpm-workspace.yaml");

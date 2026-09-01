@@ -19,4 +19,3 @@ data/hooks/
 *.session
 *.session-shm
 *.session-wal
-debug-test.ts

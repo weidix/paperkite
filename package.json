@@ -9,6 +9,16 @@
   "engines": {
     "node": ">=22.14"
   },
+  "paperkite": {
+    "bundles": [
+      "@paperkite/plugin-telegram-messages",
+      "@paperkite/plugin-bark",
+      "@paperkite/plugin-conversation-watch",
+      "@paperkite/plugin-account-watch",
+      "@paperkite/plugin-message-archive",
+      "@paperkite/plugin-process-command"
+    ]
+  },
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json && esbuild packages/message-archive/src/console/client.ts --bundle --format=esm --target=es2022 --outfile=packages/message-archive/public/app.js",
