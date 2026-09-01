@@ -1,0 +1,23 @@
+{
+  "name": "@paperkite/plugin-conversation-watch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@paperkite/sdk": "workspace:*",
+    "telegram": "^2.26.22"
+  },
+  "paperkite": {
+    "plugin": {
+      "entry": "./src/index.ts",
+      "capabilities": [
+        { "kind": "trigger", "name": "watch.group" },
+        { "kind": "trigger", "name": "watch.poll" }
+      ]
+    }
+  }
+}

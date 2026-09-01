@@ -1,0 +1,21 @@
+{
+  "name": "@paperkite/plugin-bark",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@paperkite/sdk": "workspace:*"
+  },
+  "paperkite": {
+    "plugin": {
+      "entry": "./src/index.ts",
+      "capabilities": [
+        { "kind": "action", "name": "notifications.bark" }
+      ]
+    }
+  }
+}

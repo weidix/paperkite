@@ -1,0 +1,41 @@
+{
+  "name": "paperkite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "paperkite": "./dist/src/cli.js"
+  },
+  "engines": {
+    "node": ">=22.14"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json && esbuild packages/message-archive/src/console/client.ts --bundle --format=esm --target=es2022 --outfile=packages/message-archive/public/app.js",
+    "start": "node --import tsx/esm dist/src/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "@paperkite/sdk": "workspace:*",
+    "@paperkite/plugin-account-watch": "workspace:*",
+    "@paperkite/plugin-bark": "workspace:*",
+    "@paperkite/plugin-conversation-watch": "workspace:*",
+    "@paperkite/plugin-message-archive": "workspace:*",
+    "@paperkite/plugin-process-command": "workspace:*",
+    "@paperkite/plugin-telegram-messages": "workspace:*",
+    "commander": "^15.0.0",
+    "cron-parser": "^5.10.0",
+    "telegram": "^2.26.22",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.6.2",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
+    "esbuild": "^0.25.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

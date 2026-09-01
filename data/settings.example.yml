@@ -1,0 +1,8 @@
+telegram:
+  apiId: 123456
+  apiHash: replace-with-your-api-hash
+  sessionsDir: data/accounts
+
+logging:
+  level: info
+  directory: data/logs

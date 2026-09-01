@@ -1,0 +1,516 @@
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import {
+  type AlbumRow,
+  type ArchiveContextResult,
+  type ArchiveQuery,
+  type ArchiveSearchResult,
+  type ArchiveStore,
+  type BatchResult,
+  type ChatRecord,
+  type LastMessageInfo,
+  type MediaRow,
+  type MessageRecord,
+  type MessageRow,
+  type StoredMediaFile,
+  groupKey,
+  mediaKey,
+  normalizeContextLimit,
+  normalizeLimit,
+  normalizeOffset,
+  normalizeRowId,
+  normalizeTimeMode,
+  splitTerms,
+  toIsoDate
+} from "./model.js";
+
+const MESSAGE_COLUMNS = `
+  m.id AS row_id, m.message_id, m.chat_id, m.grouped_id, m.chat_title, m.date,
+  m.sender_id, m.sender_username, m.sender_first_name, m.sender_last_name,
+  m.has_media, m.media_type, m.message_type, m.text
+`;
+
+const MIME_SUBQUERY = `(
+  SELECT mf.mime_type FROM media_files mf
+   WHERE mf.chat_id = m.chat_id AND mf.message_id = m.message_id
+   ORDER BY mf.id DESC LIMIT 1
+)`;
+
+export class SqliteArchiveStore implements ArchiveStore {
+  private readonly database: DatabaseSync;
+
+  constructor(readonly file: string) {
+    mkdirSync(dirname(resolve(file)), { recursive: true });
+    this.database = new DatabaseSync(resolve(file));
+  }
+
+  async init(): Promise<void> {
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL,
+        chat_id TEXT NOT NULL,
+        grouped_id TEXT,
+        chat_title TEXT,
+        sender_id TEXT,
+        sender_username TEXT,
+        sender_first_name TEXT,
+        sender_last_name TEXT,
+        date TEXT NOT NULL,
+        text TEXT,
+        message_type TEXT DEFAULT 'text',
+        reply_to_msg_id INTEGER,
+        forward_from_id TEXT,
+        forward_from_name TEXT,
+        has_media INTEGER NOT NULL DEFAULT 0,
+        media_type TEXT,
+        media_path TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(message_id, chat_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_date ON messages(chat_id, date);
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_date_id ON messages(chat_id, date, id);
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped ON messages(chat_id, grouped_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+      CREATE TABLE IF NOT EXISTS media_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL,
+        chat_id TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_size INTEGER,
+        mime_type TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (message_id, chat_id) REFERENCES messages (message_id, chat_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_media_message ON media_files(message_id, chat_id);
+      CREATE TABLE IF NOT EXISTS chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT UNIQUE NOT NULL,
+        title TEXT,
+        username TEXT,
+        type TEXT,
+        description TEXT,
+        members_count INTEGER,
+        last_sync TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sync_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        start_date TEXT,
+        end_date TEXT,
+        messages_count INTEGER,
+        media_count INTEGER,
+        sync_started_at TEXT,
+        sync_completed_at TEXT,
+        status TEXT DEFAULT 'running'
+      );
+    `);
+  }
+
+  async close(): Promise<void> {
+    this.database.close();
+  }
+
+  async saveChat(chat: ChatRecord): Promise<boolean> {
+    const statement = this.database.prepare(`
+      INSERT INTO chats (chat_id, title, username, type, description, members_count, last_sync, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(chat_id) DO UPDATE SET
+        title = excluded.title,
+        username = excluded.username,
+        type = excluded.type,
+        description = excluded.description,
+        members_count = excluded.members_count,
+        last_sync = excluded.last_sync
+    `);
+    const now = new Date().toISOString();
+    statement.run(
+      chat.chatId,
+      chat.title ?? null,
+      chat.username ?? null,
+      chat.type ?? null,
+      chat.description ?? null,
+      chat.membersCount ?? null,
+      now,
+      now
+    );
+    return true;
+  }
+
+  async startSyncSession(chatId: string, startDate: string, endDate: string): Promise<number> {
+    const result = this.database.prepare(`
+      INSERT INTO sync_history (chat_id, start_date, end_date, sync_started_at, status)
+      VALUES (?, ?, ?, ?, 'running')
+    `).run(chatId, startDate, endDate, new Date().toISOString());
+    return Number(result.lastInsertRowid);
+  }
+
+  async completeSyncSession(
+    sessionId: number,
+    messagesCount: number,
+    mediaCount: number
+  ): Promise<void> {
+    if (sessionId < 0) return;
+    this.database.prepare(`
+      UPDATE sync_history
+         SET sync_completed_at = ?, messages_count = ?, media_count = ?, status = 'completed'
+       WHERE id = ?
+    `).run(new Date().toISOString(), messagesCount, mediaCount, sessionId);
+  }
+
+  async getLastMessageInfo(chatId: string): Promise<LastMessageInfo | undefined> {
+    const row = this.database.prepare(`
+      SELECT message_id, date FROM messages
+       WHERE chat_id = ?
+       ORDER BY date DESC, message_id DESC
+       LIMIT 1
+    `).get(chatId) as { message_id: number; date: string } | undefined;
+    return row ? { messageId: Number(row.message_id), date: row.date } : undefined;
+  }
+
+  async messageIdsExist(chatId: string, messageIds: readonly number[]): Promise<ReadonlySet<number>> {
+    const ids = [...new Set(messageIds.map(Number))];
+    if (!ids.length) return new Set();
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = this.database.prepare(`
+      SELECT message_id FROM messages
+       WHERE chat_id = ? AND message_id IN (${placeholders})
+    `).all(chatId, ...ids) as readonly Record<string, unknown>[];
+    return new Set(rows.map((row) => Number(row.message_id)));
+  }
+
+  async saveBatch(messages: readonly MessageRow[], media: readonly MediaRow[]): Promise<BatchResult> {
+    if (!messages.length) return { messages: 0, media: 0 };
+    const messageStatement = this.database.prepare(`
+      INSERT OR IGNORE INTO messages
+        (message_id, chat_id, grouped_id, chat_title, sender_id, sender_username,
+         sender_first_name, sender_last_name, date, text, message_type,
+         reply_to_msg_id, forward_from_id, forward_from_name,
+         has_media, media_type, media_path, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const mediaStatement = this.database.prepare(`
+      INSERT INTO media_files
+        (message_id, chat_id, media_type, file_name, file_path, file_size, mime_type, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    this.database.exec("BEGIN");
+    try {
+      let inserted = 0;
+      for (const row of messages) {
+        const result = messageStatement.run(
+          row.messageId,
+          row.chatId,
+          row.groupedId ?? null,
+          row.chatTitle ?? null,
+          row.senderId ?? null,
+          row.senderUsername ?? null,
+          row.senderFirstName ?? null,
+          row.senderLastName ?? null,
+          row.date,
+          row.text,
+          row.messageType ?? "text",
+          row.replyToMsgId ?? null,
+          row.forwardFromId ?? null,
+          row.forwardFromName ?? null,
+          row.hasMedia ? 1 : 0,
+          row.mediaType ?? null,
+          row.mediaPath ?? null,
+          now
+        );
+        inserted += Number(result.changes);
+      }
+      for (const row of media) {
+        mediaStatement.run(
+          row.messageId,
+          row.chatId,
+          row.mediaType,
+          row.fileName,
+          row.filePath,
+          row.fileSize ?? null,
+          row.mimeType ?? null,
+          now
+        );
+      }
+      this.database.exec("COMMIT");
+      return { messages: inserted, media: media.length };
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
+    const { where, values } = buildWhere(query);
+    const limit = normalizeLimit(query.limit);
+    const offset = normalizeOffset(query.offset);
+    const countRow = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM messages m ${where}`
+    ).get(...values) as { count: number };
+    const rows = this.database.prepare(`
+      SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+        FROM messages m
+        ${where}
+       ORDER BY m.date DESC, m.id DESC
+       LIMIT ? OFFSET ?
+    `).all(...values, limit, offset) as readonly Record<string, unknown>[];
+    return {
+      items: this.attachMedia(rows),
+      total: Number(countRow.count),
+      limit,
+      offset
+    };
+  }
+
+  async getMessageByRowId(rowId: string): Promise<MessageRecord | undefined> {
+    const row = this.database.prepare(`
+      SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+        FROM messages m
+       WHERE m.id = ?
+       LIMIT 1
+    `).get(Number(normalizeRowId(rowId))) as Record<string, unknown> | undefined;
+    return row ? this.attachMedia([row])[0] : undefined;
+  }
+
+  async getMessageContext(
+    rowId: string,
+    beforeN: number,
+    afterN: number
+  ): Promise<ArchiveContextResult> {
+    const beforeLimit = normalizeContextLimit(beforeN);
+    const afterLimit = normalizeContextLimit(afterN);
+    const anchor = await this.getMessageByRowId(rowId);
+    if (!anchor) {
+      return { anchor: undefined, before: [], after: [], beforeN: beforeLimit, afterN: afterLimit };
+    }
+
+    const date = anchor.date;
+    const id = Number(anchor.rowId);
+    const beforeRows = beforeLimit
+      ? this.database.prepare(`
+          SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+            FROM messages m
+           WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
+           ORDER BY m.date DESC, m.id DESC
+           LIMIT ?
+        `).all(anchor.chatId, date, date, id, beforeLimit) as readonly Record<string, unknown>[]
+      : [];
+    const afterRows = afterLimit
+      ? this.database.prepare(`
+          SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+            FROM messages m
+           WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
+           ORDER BY m.date ASC, m.id ASC
+           LIMIT ?
+        `).all(anchor.chatId, date, date, id, afterLimit) as readonly Record<string, unknown>[]
+      : [];
+    return {
+      anchor,
+      before: this.attachMedia([...beforeRows].reverse()),
+      after: this.attachMedia(afterRows),
+      beforeN: beforeLimit,
+      afterN: afterLimit
+    };
+  }
+
+  async getMediaFileById(id: string): Promise<StoredMediaFile | undefined> {
+    const row = this.database.prepare(`
+      SELECT id, message_id, chat_id, media_type, file_name, file_path, file_size, mime_type
+        FROM media_files
+       WHERE id = ?
+       LIMIT 1
+    `).get(Number(normalizeRowId(id))) as Record<string, unknown> | undefined;
+    return row ? toStoredMediaFile(row) : undefined;
+  }
+
+  private attachMedia(rows: readonly Record<string, unknown>[]): MessageRecord[] {
+    if (!rows.length) return [];
+    const pairKeys = rows.map((row) => [String(row.chat_id), Number(row.message_id)] as const);
+    const groupKeys = rows
+      .filter((row) => row.grouped_id !== null && row.grouped_id !== undefined)
+      .map((row) => [String(row.chat_id), String(row.grouped_id)] as const);
+
+    const mediaMap = this.fetchMediaFiles(pairKeys);
+    const albumMap = groupKeys.length
+      ? this.fetchAlbumRows(groupKeys)
+      : new Map<string, AlbumRow[]>();
+
+    return rows.map((row) => toMessageRecord(row, mediaMap, albumMap));
+  }
+
+  private fetchMediaFiles(pairs: readonly (readonly [string, number])[]): Map<string, StoredMediaFile[]> {
+    const sql = `
+      SELECT id, message_id, chat_id, media_type, mime_type
+        FROM media_files
+       WHERE ${pairClause("message_id", pairs)}
+       ORDER BY id ASC
+    `;
+    const rows = this.database.prepare(sql).all(...pairValues(pairs)) as readonly Record<string, unknown>[];
+    const map = new Map<string, StoredMediaFile[]>();
+    for (const row of rows) {
+      const file = toStoredMediaFile(row);
+      pushGrouped(map, mediaKey(file.chatId, file.messageId), file);
+    }
+    return map;
+  }
+
+  private fetchAlbumRows(pairs: readonly (readonly [string, string])[]): Map<string, AlbumRow[]> {
+    const sql = `
+      SELECT m.id AS row_id, m.message_id, m.chat_id, m.grouped_id, m.date,
+             m.has_media, m.media_type, m.message_type,
+             ${MIME_SUBQUERY} AS mime_type
+        FROM messages m
+       WHERE m.has_media = 1 AND ${pairClause("grouped_id", pairs)}
+       ORDER BY m.date ASC, m.id ASC
+    `;
+    const rows = this.database.prepare(sql).all(...pairValues(pairs)) as readonly Record<string, unknown>[];
+    const map = new Map<string, AlbumRow[]>();
+    for (const row of rows) {
+      pushGrouped(map, groupKey(String(row.chat_id), String(row.grouped_id)), toAlbumRow(row));
+    }
+    return map;
+  }
+}
+
+function pairClause(column: string, pairs: readonly (readonly [string, string | number])[]): string {
+  return pairs
+    .map(() => `(chat_id = ? AND ${column} = ?)`)
+    .join(" OR ");
+}
+
+function pairValues(pairs: readonly (readonly [string, string | number])[]): (string | number)[] {
+  return pairs.flatMap(([chatId, second]) => [chatId, second]);
+}
+
+function pushGrouped<T>(map: Map<string, T[]>, key: string, item: T): void {
+  let items = map.get(key);
+  if (!items) {
+    items = [];
+    map.set(key, items);
+  }
+  items.push(item);
+}
+
+function toStoredMediaFile(row: Record<string, unknown>): StoredMediaFile {
+  return {
+    id: String(row.id),
+    messageId: Number(row.message_id),
+    chatId: String(row.chat_id),
+    mediaType: String(row.media_type ?? "document"),
+    fileName: optionalString(row.file_name),
+    filePath: optionalString(row.file_path),
+    fileSize: optionalNumber(row.file_size),
+    mimeType: optionalString(row.mime_type)
+  };
+}
+
+function toAlbumRow(row: Record<string, unknown>): AlbumRow {
+  return {
+    rowId: String(row.row_id ?? row.id ?? ""),
+    messageId: Number(row.message_id),
+    chatId: String(row.chat_id),
+    groupedId: String(row.grouped_id),
+    date: toIsoDate(row.date),
+    hasMedia: Boolean(row.has_media),
+    mediaType: optionalString(row.media_type),
+    messageType: optionalString(row.message_type),
+    mimeType: optionalString(row.mime_type)
+  };
+}
+
+function toMessageRecord(
+  row: Record<string, unknown>,
+  mediaMap: Map<string, StoredMediaFile[]>,
+  albumMap: Map<string, AlbumRow[]>
+): MessageRecord {
+  const chatId = String(row.chat_id ?? "");
+  const messageId = Number(row.message_id);
+  const groupedId = optionalString(row.grouped_id);
+  const mediaFiles = mediaMap.get(mediaKey(chatId, messageId)) ?? [];
+  const albumRows = groupedId !== undefined ? albumMap.get(groupKey(chatId, groupedId)) ?? [] : [];
+  return {
+    rowId: String(row.row_id ?? row.id ?? ""),
+    messageId,
+    chatId,
+    groupedId,
+    chatTitle: optionalString(row.chat_title),
+    date: toIsoDate(row.date),
+    senderId: optionalString(row.sender_id),
+    senderUsername: optionalString(row.sender_username),
+    senderFirstName: optionalString(row.sender_first_name),
+    senderLastName: optionalString(row.sender_last_name),
+    hasMedia: Boolean(row.has_media),
+    mediaType: optionalString(row.media_type),
+    messageType: optionalString(row.message_type) ?? "text",
+    mimeType: optionalString(row.mime_type),
+    text: String(row.text ?? ""),
+    mediaFiles,
+    albumRows
+  };
+}
+
+function buildWhere(query: ArchiveQuery): { where: string; values: (string | number)[] } {
+  const conditions: string[] = [];
+  const values: (string | number)[] = [];
+  for (const term of splitTerms(query.keyword)) {
+    conditions.push("m.text LIKE ? COLLATE NOCASE");
+    values.push(`%${escapeLike(term)}%`);
+  }
+  for (const term of splitTerms(query.excludeKeyword)) {
+    conditions.push("m.text NOT LIKE ? COLLATE NOCASE");
+    values.push(`%${escapeLike(term)}%`);
+  }
+  if (query.chatId?.trim()) {
+    conditions.push("m.chat_id = ?");
+    values.push(query.chatId.trim());
+  }
+  if (query.chatTitle?.trim()) {
+    conditions.push("m.chat_title LIKE ? COLLATE NOCASE");
+    values.push(`%${escapeLike(query.chatTitle.trim())}%`);
+  }
+  appendTimeWhere(conditions, values, query);
+  return { where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
+}
+
+function appendTimeWhere(conditions: string[], values: (string | number)[], query: ArchiveQuery): void {
+  const mode = normalizeTimeMode(query.timeMode);
+  if (mode === "off" || (!query.dateFrom && !query.dateTo)) return;
+  if (mode === "include") {
+    if (query.dateFrom) {
+      conditions.push("m.date >= ?");
+      values.push(query.dateFrom);
+    }
+    if (query.dateTo) {
+      conditions.push("m.date <= ?");
+      values.push(query.dateTo);
+    }
+    return;
+  }
+  if (query.dateFrom && query.dateTo) {
+    conditions.push("NOT (m.date >= ? AND m.date <= ?)");
+    values.push(query.dateFrom, query.dateTo);
+  } else if (query.dateFrom) {
+    conditions.push("m.date < ?");
+    values.push(query.dateFrom);
+  } else if (query.dateTo) {
+    conditions.push("m.date > ?");
+    values.push(query.dateTo);
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+function optionalString(value: unknown): string | undefined {
+  return value === undefined || value === null || value === "" ? undefined : String(value);
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return value === undefined || value === null || value === "" ? undefined : Number(value);
+}

@@ -1,0 +1,44 @@
+commands:
+  - id: send-test
+    title: 发送测试消息
+    run:
+      capability: messages.send
+      session: primary
+      config:
+        peer: "@example"
+        text: "纸鸢测试消息"
+
+triggers:
+  - id: important-message
+    capability: watch.group
+    session: primary
+    config:
+      chats: ["@example"]
+      keywords: ["提醒"]
+    actions:
+      - capability: notifications.bark
+        config:
+          endpoint: "https://bark.example/{key}"
+          key: replace-with-your-bark-key
+          title: 新消息
+          body: "{{event.text}}"
+
+schedules:
+  - id: archive-hourly
+    intervalSeconds: 3600
+    session: primary
+    run:
+      capability: archive.sync
+      config:
+        backend: sqlite
+        file: data/archive.sqlite
+        chats: ["@example"]
+        limit: 500
+
+services:
+  - id: local-console
+    capability: archive.console_web
+    config:
+      host: 127.0.0.1
+      port: 3377
+      file: data/archive.sqlite
