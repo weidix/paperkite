@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parse } from "yaml";
+import { updateItemInFile } from "./editor.js";
 import {
   FlowCatalog,
   type ActionSpec,
@@ -49,6 +50,36 @@ export function fromMapping(value: Record<string, unknown>, path?: string, stric
     }
   }
   return new FlowCatalog(definitions, path);
+}
+
+const PATCH_FIELDS: Readonly<Record<FlowKind, readonly string[]>> = {
+  trigger: ["enabled", "config", "session", "maxRuns", "logFile", "actions"],
+  command: ["title", "symbol", "run"],
+  schedule: ["enabled", "session", "cron", "intervalSeconds", "logFile", "run"],
+  service: ["enabled", "config", "session", "autoStart", "logFile"]
+};
+
+export async function updateFlowItem(
+  catalog: FlowCatalog,
+  identifier: string,
+  patch: Record<string, unknown>,
+  kind?: FlowKind
+): Promise<FlowCatalog | undefined> {
+  const item = catalog.find(identifier, kind);
+  if (!item || !item.explicitId || !catalog.path) return undefined;
+  const allowed = PATCH_FIELDS[item.kind];
+  for (const key of Object.keys(patch)) {
+    if (!allowed.includes(key)) throw new Error(`flow ${item.id} does not accept field ${key}`);
+  }
+  const section = sectionFor(item.kind);
+  const root = parse(await readFile(catalog.path, "utf8"), { merge: true }) as Record<string, unknown>;
+  const entries = list(root[section], section, true);
+  const index = entries.findIndex((entry) => String(entry.id ?? "").trim() === item.id);
+  if (index < 0) throw new Error(`missing ${section} item: ${item.id}`);
+  entries[index] = { ...entries[index], ...patch };
+  const next = fromMapping({ ...root, [section]: entries }, catalog.path);
+  await updateItemInFile(catalog.path, section, item.id, patch);
+  return next;
 }
 
 function parseTriggers(value: unknown, strict: boolean): TriggerDefinition[] {

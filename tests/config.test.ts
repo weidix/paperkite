@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fromMapping, loadCatalog } from "../src/config/loader.js";
+import { fromMapping, loadCatalog, updateFlowItem } from "../src/config/loader.js";
 
 test("normalizes flow sections and exposes only referenced capabilities", () => {
   const catalog = fromMapping({
@@ -63,7 +63,11 @@ test("updates an explicitly identified flow without dropping YAML comments", asy
     ].join("\n")
   );
   const catalog = fromMapping({ triggers: [{ id: "watcher", capability: "watch.group", enabled: true, config: {}, actions: [] }] }, file);
-  assert.equal(await catalog.setEnabled("trigger:watcher", false), true);
+  await assert.rejects(updateFlowItem(catalog, "trigger:watcher", { bogus: 1 }), /does not accept field bogus/);
+  const next = await updateFlowItem(catalog, "trigger:watcher", { enabled: false });
+  assert.ok(next);
+  const watcher = next?.find("trigger:watcher");
+  assert.equal(watcher?.kind === "trigger" && watcher.enabled, false);
   const updated = await readFile(file, "utf8");
   assert.match(updated, /enabled: false # user note/);
 });

@@ -324,11 +324,17 @@ export interface ServiceStoppedEvent {
   readonly at: string;
 }
 
-export interface FlowEnabledEvent {
-  readonly type: "flow.enabled";
+export interface FlowUpdatedEvent {
+  readonly type: "flow.updated";
   readonly id: string;
   readonly kind: FlowKind;
-  readonly enabled: boolean;
+  readonly at: string;
+}
+
+export interface FlowReloadedEvent {
+  readonly type: "flow.reloaded";
+  readonly id: string;
+  readonly kind: FlowKind;
   readonly at: string;
 }
 
@@ -367,7 +373,8 @@ export type RuntimeEvent =
   | ActionFinishedEvent
   | ServiceStartedEvent
   | ServiceStoppedEvent
-  | FlowEnabledEvent
+  | FlowUpdatedEvent
+  | FlowReloadedEvent
   | FlowFinishedEvent
   | ScheduleFiredEvent
   | ConfigReloadingEvent
@@ -377,15 +384,29 @@ export type RuntimeEventListener = (event: RuntimeEvent) => void;
 
 export type Unsubscribe = () => void;
 
+export interface FlowPatch {
+  readonly enabled?: boolean;
+  readonly config?: unknown;
+  readonly session?: string;
+  readonly cron?: string;
+  readonly intervalSeconds?: number;
+  readonly title?: string;
+  readonly symbol?: string;
+  readonly autoStart?: boolean;
+  readonly maxRuns?: number;
+  readonly logFile?: boolean;
+  readonly actions?: readonly ActionSpecInput[];
+  readonly run?: ActionSpecInput | string;
+}
+
 export interface RuntimeControl {
   readonly snapshot: RuntimeSnapshot;
-  runCommand(identifier: string, payload?: unknown): Promise<void>;
   executeAction(spec: ActionSpecInput): Promise<void>;
   runFlow(identifier: string): Promise<void>;
+  updateFlow(identifier: string, patch: FlowPatch): Promise<boolean>;
+  reloadFlow(identifier: string): Promise<boolean>;
   startService(identifier: string): Promise<void>;
   stopService(identifier: string): Promise<void>;
-  restartService(identifier: string): Promise<void>;
-  setFlowEnabled(identifier: string, enabled: boolean): Promise<boolean>;
   reload(): Promise<void>;
   listPlugins(): readonly PluginInfo[];
   subscribe(listener: RuntimeEventListener): Unsubscribe;

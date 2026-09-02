@@ -1,5 +1,3 @@
-import { setEnabledInFile } from "./editor.js";
-
 export const FLOW_SECTIONS = ["triggers", "commands", "schedules", "services"] as const;
 export type FlowKind = "trigger" | "command" | "schedule" | "service";
 
@@ -100,13 +98,6 @@ export class FlowCatalog {
     if (matches.length > 1) throw new Error(`flow id is ambiguous: ${identifier}`);
     return matches[0];
   }
-
-  async setEnabled(identifier: string, enabled: boolean, kind?: FlowKind): Promise<boolean> {
-    const item = this.find(identifier, kind);
-    if (!item || item.kind === "command" || !item.explicitId || !this.path) return false;
-    await setEnabledInFile(this.path, kindToSection(item.kind), item.sourceIndex, item.id, enabled);
-    return true;
-  }
 }
 
 export function normalizeKind(kind: string): FlowKind {
@@ -119,10 +110,6 @@ export function normalizeKind(kind: string): FlowKind {
 
 function sectionToKind(section: FlowSection): FlowKind {
   return normalizeKind(section);
-}
-
-function kindToSection(kind: FlowKind): FlowSection {
-  return `${kind}s` as FlowSection;
 }
 
 export function normalizeBool(value: unknown, fallback: boolean): boolean {

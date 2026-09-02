@@ -2,7 +2,7 @@ import { chmod, mkdir, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-import type { ActionSpecInput, RuntimeControl } from "@paperkite/sdk";
+import type { ActionSpecInput, FlowPatch, RuntimeControl } from "@paperkite/sdk";
 import type { Runtime } from "../engine/runtime.js";
 
 export type { RuntimeControl };
@@ -10,9 +10,8 @@ export type { RuntimeControl };
 interface ControlRequest {
   readonly action?: string;
   readonly id?: string;
-  readonly enabled?: boolean;
-  readonly payload?: unknown;
   readonly spec?: ActionSpecInput;
+  readonly patch?: FlowPatch;
 }
 
 export interface ControlServer {
@@ -104,10 +103,6 @@ async function dispatch(runtime: RuntimeControl, request: ControlRequest): Promi
     return true;
   }
   if (!request.id) throw new Error("control request needs id");
-  if (action === "command.run") {
-    await runtime.runCommand(request.id, request.payload);
-    return true;
-  }
   if (action === "flow.run") {
     await runtime.runFlow(request.id);
     return true;
@@ -120,15 +115,15 @@ async function dispatch(runtime: RuntimeControl, request: ControlRequest): Promi
     await runtime.stopService(request.id);
     return true;
   }
-  if (action === "service.restart") {
-    await runtime.restartService(request.id);
+  if (action === "flow.update") {
+    if (!request.patch) throw new Error("flow.update needs id and patch");
+    return runtime.updateFlow(request.id, request.patch);
+  }
+  if (action === "flow.reload") {
+    await runtime.reloadFlow(request.id);
     return true;
   }
-  if (action === "flow.enabled") {
-    if (request.enabled === undefined) throw new Error("flow.enabled needs enabled");
-    return runtime.setFlowEnabled(request.id, request.enabled);
-  }
-  throw new Error("unknown control action: " + String(action));
+  throw new Error("unknown control action: " + action);
 }
 
 function listen(server: Server, path: string): Promise<void> {

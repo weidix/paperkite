@@ -51,16 +51,15 @@ program
 
 program
   .command("once")
-  .description("run one configured command")
-  .argument("<flow>", "command id or command:<id>")
-  .option("--payload <json>", "JSON payload merged into the command", "{}")
+  .description("run one configured flow")
+  .argument("<flow>", "command or schedule id")
   .option("--profile <name>", "profile name", "default")
   .option("--settings <file>", "settings file", "data/settings.yml")
   .option("--flows <file>", "flows file", "data/flows.yml")
-  .action(async (flow: string, options: { payload: string; profile: string; settings: string; flows: string }) => {
+  .action(async (flow: string, options: { profile: string; settings: string; flows: string }) => {
     const app = await createApp({ profile: options.profile, settingsFile: options.settings, flowsFile: options.flows });
     try {
-      await app.runtime.runCommand(flow, JSON.parse(options.payload) as unknown);
+      await app.runtime.runFlow(flow);
     } finally {
       await app.runtime.stop();
     }
@@ -124,7 +123,7 @@ service
     }
   });
 
-for (const operation of ["start", "stop", "restart"] as const) {
+for (const operation of ["start", "stop"] as const) {
   service
     .command(`${operation} <id>`)
     .description(`${operation} a service in the running process`)
@@ -132,6 +131,13 @@ for (const operation of ["start", "stop", "restart"] as const) {
       await requestControl({ action: `service.${operation}`, id });
     });
 }
+
+service
+  .command("restart <id>")
+  .description("reload a service so its current definition applies")
+  .action(async (id: string) => {
+    await requestControl({ action: "flow.reload", id });
+  });
 
 program
   .command("plugins")

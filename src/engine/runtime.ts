@@ -3,6 +3,7 @@ import type {
   ActionSpecInput,
   ActionSpecView,
   FlowKind,
+  FlowPatch,
   FlowRef,
   FlowSnapshot,
   PluginInfo,
@@ -24,6 +25,7 @@ import type {
   ServiceDefinition,
   TriggerDefinition
 } from "../config/model.js";
+import { updateFlowItem } from "../config/loader.js";
 import { AppLogger } from "./logger.js";
 import { loadHook } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
@@ -133,26 +135,6 @@ export class Runtime {
     this.emit({ type: "config.reloaded", ok: true });
   }
 
-  async runCommand(identifier: string, payload: unknown = {}): Promise<void> {
-    const command = this.catalog.find(identifier, "command");
-    if (!command || command.kind !== "command") throw new Error("unknown command: " + identifier);
-    if (!this.started) {
-      const sessions = collectActionSessions(command.action);
-      if (sessions.size) await this.options.sessions.ensure(sessions);
-    }
-    const contextPayload = mergePayload(command.action.config, payload);
-    await this.completeFlow("command", command.id, command.action.capability, () =>
-      this.executeAction(
-        {
-          ...command.action,
-          config: contextPayload,
-          label: `command:${command.id}`
-        },
-        { kind: "command", id: command.id }
-      )
-    );
-  }
-
   async executeAction(spec: ActionSpecInput, flow?: FlowRef): Promise<void> {
     const capability = String(spec.capability ?? "").trim();
     if (!capability) throw new Error("executeAction needs capability");
@@ -176,9 +158,13 @@ export class Runtime {
     if (definition.kind === "schedule" && !definition.enabled) {
       throw new Error("schedule is disabled: " + definition.id);
     }
-    await this.completeFlow(definition.kind, definition.id, definition.action.capability, () =>
+    const action: ActionSpec = {
+      ...definition.action,
+      session: definition.action.session ?? (definition.kind === "schedule" ? definition.session : undefined)
+    };
+    await this.completeFlow(definition.kind, definition.id, action.capability, () =>
       this.executeAction(
-        { ...definition.action, label: `${definition.kind}:${definition.id}` },
+        { ...action, label: `${definition.kind}:${definition.id}` },
         { kind: definition.kind, id: definition.id }
       )
     );
@@ -223,18 +209,33 @@ export class Runtime {
     await run;
   }
 
-  async restartService(identifier: string): Promise<void> {
-    await this.stopService(identifier);
-    await this.startService(identifier);
+  async updateFlow(identifier: string, patch: FlowPatch): Promise<boolean> {
+    const next = await updateFlowItem(this.catalog, identifier, patch as Record<string, unknown>);
+    if (!next) return false;
+    this.catalog = next;
+    const item = next.find(identifier);
+    if (item) this.emit({ type: "flow.updated", id: item.id, kind: item.kind });
+    return true;
   }
 
-  async setFlowEnabled(identifier: string, enabled: boolean): Promise<boolean> {
-    const changed = await this.catalog.setEnabled(identifier, enabled);
-    if (changed) {
-      const item = this.catalog.find(identifier);
-      if (item) this.emit({ type: "flow.enabled", id: item.id, kind: item.kind, enabled });
+  async reloadFlow(identifier: string): Promise<boolean> {
+    const item = this.catalog.find(identifier);
+    if (!item) return false;
+    if (item.kind === "schedule") {
+      if (this.started && item.enabled) this.startSchedule(item);
+    } else if (item.kind === "trigger") {
+      const key = `trigger:${item.id}`;
+      this.controllers.get(key)?.abort();
+      await this.runs.get(key);
+      if (this.started && item.enabled) this.startTrigger(item);
+    } else if (item.kind === "service") {
+      const key = `service:${item.id}`;
+      this.controllers.get(key)?.abort();
+      await this.runs.get(key);
+      if (this.started && item.enabled && item.autoStart) this.launchService(item);
     }
-    return changed;
+    this.emit({ type: "flow.reloaded", id: item.id, kind: item.kind });
+    return true;
   }
 
   async stop(): Promise<void> {
@@ -575,11 +576,6 @@ function collectConfigSessions(value: unknown, names: Set<string>): void {
     for (const item of sessions) if (typeof item === "string" && item.trim()) names.add(item.trim());
   }
   if (typeof value.session === "string" && value.session.trim()) names.add(value.session.trim());
-}
-
-function mergePayload(current: unknown, extra: unknown): unknown {
-  if (isRecord(current) && isRecord(extra)) return { ...current, ...extra };
-  return extra === undefined ? current : extra;
 }
 
 function messageOf(error: unknown): string {
