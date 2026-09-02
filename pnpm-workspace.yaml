@@ -2,7 +2,21 @@ packages:
   - packages/*
 
 catalog:
-  typescript: ^5.9.2
+  typescript: ^7.0.2
   tsx: ^4.20.5
 
 autoInstallPeers: false
+
+onlyBuiltDependencies:
+  - esbuild
+  - bufferutil
+  - utf-8-validate
+  - es5-ext
+
+strictDepBuilds: false
+
+allowBuilds:
+  bufferutil: set this to true or false
+  es5-ext: set this to true or false
+  esbuild: set this to true or false
+  utf-8-validate: set this to true or false

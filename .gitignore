@@ -19,3 +19,5 @@ data/hooks/
 *.session
 *.session-shm
 *.session-wal
+
+packages/console-web/public/

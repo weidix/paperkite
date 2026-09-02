@@ -42,3 +42,9 @@ services:
       host: 127.0.0.1
       port: 3377
       file: data/archive.sqlite
+
+  - id: runtime-console
+    capability: runtime.console_web
+    config:
+      host: 127.0.0.1
+      port: 3378

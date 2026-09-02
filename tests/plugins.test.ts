@@ -9,7 +9,8 @@ const pluginDirectories = [
   "conversation-watch",
   "account-watch",
   "message-archive",
-  "process-command"
+  "process-command",
+  "console-web"
 ];
 
 test("each actual plugin owns one manifest and shared packages stay ordinary", async () => {

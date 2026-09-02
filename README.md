@@ -27,6 +27,7 @@ pnpm start run
 | `@paperkite/plugin-account-watch` | `watch.session` |
 | `@paperkite/plugin-message-archive` | `archive.sync`、`archive.console_web` |
 | `@paperkite/plugin-process-command` | `system.command` |
+| `@paperkite/plugin-console-web` | `runtime.console_web` |
 
 `@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储与控制台都属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
 
@@ -71,6 +72,19 @@ config:
 
 Web 控制台默认只监听 `127.0.0.1`；需要局域网访问时显式设置 `host`。媒体预览复用归档服务声明的 `session`，从 Telegram 实时取图；归档落盘的媒体文件经 `/api/media-files/{id}` 提供。命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
 
+运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 React + Tailwind + shadcn/ui 组成：
+
+```yaml
+services:
+  - id: runtime-console
+    capability: runtime.console_web
+    config:
+      host: 127.0.0.1
+      port: 3378
+```
+
+提供总览（运行状态、执行中的动作、实时活动）、流程（查看与编辑 flows.yml、运行/重载/启停）、事件流（SSE 实时、类型筛选）、动作（临时按能力执行）、日志（跟随日志文件）与插件清单六个视图。构建产物输出到 `packages/console-web/public`，默认端口 3378。
+
 ## 控制平面
 
 核心提供前端无关的运行控制契约（`RuntimeControl`），托盘、Web 控制台、CLI 等任何可视化前端都通过同一套接口取数与操作，具体渲染由前端自行实现。
@@ -91,4 +105,4 @@ pnpm test
 pnpm build
 ```
 
-项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/public/app.js` 是构建产物，不作为源码维护。
+项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/public/app.js` 与 `packages/console-web/public/` 是构建产物，不作为源码维护。
