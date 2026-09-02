@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -179,6 +179,11 @@ test("runtime console tails log files that the snapshot indexes", async () => {
 
     const missing = await server.inject({ method: "GET", url: "/api/logs/other?lines=2" });
     assert.equal(missing.statusCode, 404);
+
+    await unlink(logFile);
+    const gone = await server.inject({ method: "GET", url: "/api/logs/console?lines=2" });
+    assert.equal(gone.statusCode, 200);
+    assert.deepEqual(gone.json(), { scope: "console", path: logFile, lines: [] });
   } finally {
     await server.close();
   }

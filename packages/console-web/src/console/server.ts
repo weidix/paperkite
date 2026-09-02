@@ -33,7 +33,10 @@ function registerRoutes(server: FastifyInstance, control: RuntimeControl, logger
     try {
       const entry = control.snapshot.logs.find((item) => item.scope === decodeURIComponent(request.params.scope));
       if (!entry) throw new HttpError(404, "unknown log scope");
-      const lines = await tailFile(entry.path, Number(request.query.lines ?? 200));
+      const lines = await tailFile(entry.path, Number(request.query.lines ?? 200)).catch((error: unknown) => {
+        if (isNodeError(error) && error.code === "ENOENT") return [];
+        throw error;
+      });
       return { scope: entry.scope, path: entry.path, lines };
     } catch (error) {
       return sendError(reply, error, logger);
@@ -110,6 +113,10 @@ function registerRoutes(server: FastifyInstance, control: RuntimeControl, logger
 
 function flowId(request: FastifyRequest<{ Params: { id: string } }>): string {
   return decodeURIComponent(request.params.id);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function sendError(reply: FastifyReply, error: unknown, logger: RuntimeLogger): FastifyReply {
