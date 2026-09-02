@@ -84,22 +84,26 @@ class PollConversationTrigger extends Trigger<WatchConfig> {
         for (const chat of chats) {
           if (this.signal.aborted) break;
           try {
-            await this.sessions.run(session, async (rawClient) => {
-              const client = rawClient as EventClient;
-              const messages = await client.getMessages(chat, {
-                limit,
-                minId: cursors.get(cursorKey(session, chat)) ?? 0,
-                reverse: true
-              });
-              for (const raw of messages) {
-                const event = toTriggerEvent(raw);
-                if (event.id && event.id > (cursors.get(cursorKey(session, chat)) ?? 0)) {
-                  cursors.set(cursorKey(session, chat), event.id);
+            await runUntilAborted(
+              this.sessions.run(session, async (rawClient) => {
+                const client = rawClient as EventClient;
+                const messages = await client.getMessages(chat, {
+                  limit,
+                  minId: cursors.get(cursorKey(session, chat)) ?? 0,
+                  reverse: true
+                });
+                for (const raw of messages) {
+                  const event = toTriggerEvent(raw);
+                  if (event.id && event.id > (cursors.get(cursorKey(session, chat)) ?? 0)) {
+                    cursors.set(cursorKey(session, chat), event.id);
+                  }
+                  if (matches(event, this.payload, matcher)) await this.emit(event);
                 }
-                if (matches(event, this.payload, matcher)) await this.emit(event);
-              }
-            });
+              }),
+              this.signal
+            );
           } catch (error) {
+            if (this.signal.aborted) break;
             this.context.logger.warn("conversation polling failed", { session, chat, error });
           }
         }
@@ -258,6 +262,25 @@ async function waitForSeconds(seconds: number, signal: AbortSignal): Promise<voi
 async function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+}
+
+async function runUntilAborted<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new Error("aborted");
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = (): void => finish(() => reject(new Error("aborted")));
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error))
+    );
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

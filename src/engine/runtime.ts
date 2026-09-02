@@ -265,6 +265,7 @@ export class Runtime {
 
   private async stopFlows(): Promise<void> {
     this.scheduler.stopAll();
+    const running = [...this.runs.entries()];
     for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear();
     const tasks = [...this.tasks];
@@ -272,8 +273,10 @@ export class Runtime {
       const graceMs = this.stopGraceMs();
       const pending = await settleWithin(tasks, graceMs);
       if (pending > 0) {
+        const leftovers = await stillRunning(running);
+        const names = leftovers.length ? leftovers.join(", ") : `${pending} unknown`;
         this.options.logger.warn(
-          `${pending} flow task(s) did not stop within ${graceMs}ms and keep running in the background`
+          `${pending} flow task(s) did not stop within ${graceMs}ms and keep running: ${names}`
         );
       }
     }
@@ -629,6 +632,21 @@ async function settleWithin(tasks: readonly Promise<unknown>[], milliseconds: nu
     if (timer) clearTimeout(timer);
   }
   return pending;
+}
+
+async function stillRunning(entries: ReadonlyArray<[string, Promise<unknown>]>): Promise<string[]> {
+  const keys: string[] = [];
+  for (const [key, task] of entries) {
+    const settled = await Promise.race([
+      task.then(
+        () => true,
+        () => true
+      ),
+      new Promise<boolean>((resolve) => queueMicrotask(() => resolve(false)))
+    ]);
+    if (!settled) keys.push(key);
+  }
+  return keys;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

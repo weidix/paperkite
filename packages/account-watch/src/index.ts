@@ -30,11 +30,16 @@ class AccountHealthTrigger extends Trigger<HealthConfig> {
 
     while (!this.signal.aborted) {
       for (const session of names) {
+        if (this.signal.aborted) break;
         let healthy = true;
         let detail: unknown;
         try {
-          detail = await this.sessions.run(session, (rawClient) => checkClient(rawClient as HealthClient, verifyAccount));
+          detail = await runUntilAborted(
+            this.sessions.run(session, (rawClient) => checkClient(rawClient as HealthClient, verifyAccount)),
+            this.signal
+          );
         } catch (error) {
+          if (this.signal.aborted) break;
           healthy = false;
           detail = error instanceof Error ? error.message : String(error);
         }
@@ -111,5 +116,24 @@ async function wait(seconds: number, signal: AbortSignal): Promise<void> {
     };
     if (signal.aborted) abort();
     else signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function runUntilAborted<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new Error("aborted");
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = (): void => finish(() => reject(new Error("aborted")));
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error))
+    );
   });
 }
