@@ -72,7 +72,7 @@ export default function Overview({ onNavigate }: { onNavigate: (view: "events") 
     setReloading(true);
     try {
       await api.reloadRuntime();
-      toast.success("配置已重载");
+      toast.success("重载已受理，稍后生效");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "重载失败");
     } finally {

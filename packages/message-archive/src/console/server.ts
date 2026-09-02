@@ -21,9 +21,25 @@ export interface ConsoleServerOptions {
 
 export function createConsoleServer(store: ArchiveStore, options: ConsoleServerOptions): FastifyInstance {
   const server = fastify({ logger: false });
+  server.addHook("onClose", (_instance, done) => {
+    releaseIdleConnections(server);
+    done();
+  });
   const media = new LiveMediaService(store, options.sessionName, options.sessions);
   registerRoutes(server, store, media, options.logger);
   return server;
+}
+
+function releaseIdleConnections(server: FastifyInstance): void {
+  let attempts = 0;
+  const tick = (): void => {
+    server.server.closeIdleConnections();
+    attempts += 1;
+    if (attempts >= 5) return;
+    const timer = setTimeout(tick, 100);
+    timer.unref();
+  };
+  tick();
 }
 
 function registerRoutes(

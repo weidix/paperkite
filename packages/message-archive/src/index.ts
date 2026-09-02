@@ -2,7 +2,8 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
-import { Action, Service, definePlugin, type PluginContext } from "@paperkite/sdk";
+import type { FastifyInstance } from "fastify";
+import { Action, Service, definePlugin, type PluginContext, type RuntimeLogger } from "@paperkite/sdk";
 import { utils } from "telegram";
 import { MessageArchiver, type ArchiveClient } from "./archiver.js";
 import { buildTargets, coerceBool, coerceInt, type ArchiveConfig } from "./config.js";
@@ -104,7 +105,7 @@ class ConsoleWebService extends Service<ConsoleConfig> {
       });
       const host = payload.host ?? "127.0.0.1";
       const port = normalizePort(payload.port);
-      await server.listen({ host, port });
+      await listenRetrying(server, host, port, this.context.logger);
       this.context.logger.info("web console listening", { host, port });
       await waitForAbort(this.signal);
     } finally {
@@ -136,6 +137,31 @@ function normalizePort(value: number | undefined): number {
     throw new Error("archive.console_web port must be an integer between 1 and 65535");
   }
   return port;
+}
+
+async function listenRetrying(
+  server: FastifyInstance,
+  host: string,
+  port: number,
+  logger: RuntimeLogger
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await server.listen({ host, port });
+      return;
+    } catch (error) {
+      if (attempt < 6 && isEaddrinuse(error)) {
+        logger.warn("archive console port is still held by a stopping instance, retrying", { host, port });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+function isEaddrinuse(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "EADDRINUSE";
 }
 
 async function waitForAbort(signal: AbortSignal): Promise<void> {

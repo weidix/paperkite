@@ -39,9 +39,11 @@ export interface RuntimeOptions {
   readonly logger: AppLogger;
   readonly installed: readonly PluginInfo[];
   readonly reloadCatalog?: () => Promise<FlowCatalog>;
+  readonly stopGraceMs?: number;
 }
 
 export class Runtime {
+  private static readonly DEFAULT_STOP_GRACE_MS = 10_000;
   private readonly scheduler = new RuntimeScheduler();
   private readonly controllers = new Map<string, AbortController>();
   private readonly runs = new Map<string, Promise<void>>();
@@ -54,6 +56,7 @@ export class Runtime {
   private started = false;
   private startedAt = 0;
   private stopping: Promise<void> | undefined;
+  private reloading: Promise<void> | undefined;
 
   constructor(private readonly options: RuntimeOptions) {
     this.catalog = options.catalog;
@@ -104,16 +107,24 @@ export class Runtime {
     } catch (error) {
       this.started = false;
       this.lifecycle.abort();
-      this.scheduler.stopAll();
-      for (const controller of this.controllers.values()) controller.abort();
-      this.controllers.clear();
-      await Promise.allSettled([...this.tasks]);
+      await this.stopFlows();
       await this.options.sessions.closeAll();
       throw error;
     }
   }
 
   async reload(): Promise<void> {
+    if (this.reloading) return this.reloading;
+    const reloading = this.performReload();
+    this.reloading = reloading;
+    try {
+      await reloading;
+    } finally {
+      if (this.reloading === reloading) this.reloading = undefined;
+    }
+  }
+
+  private async performReload(): Promise<void> {
     await this.settleStopping();
     if (!this.options.reloadCatalog) throw new Error("config reload is not configured");
     this.emit({ type: "config.reloading" });
@@ -203,10 +214,7 @@ export class Runtime {
   async stopService(identifier: string): Promise<void> {
     const definition = this.catalog.find(identifier, "service");
     if (!definition || definition.kind !== "service") throw new Error("unknown service: " + identifier);
-    const key = `service:${definition.id}`;
-    const run = this.runs.get(key);
-    this.controllers.get(key)?.abort();
-    await run;
+    await this.stopFlow(`service:${definition.id}`);
   }
 
   async updateFlow(identifier: string, patch: FlowPatch): Promise<boolean> {
@@ -224,14 +232,10 @@ export class Runtime {
     if (item.kind === "schedule") {
       if (this.started && item.enabled) this.startSchedule(item);
     } else if (item.kind === "trigger") {
-      const key = `trigger:${item.id}`;
-      this.controllers.get(key)?.abort();
-      await this.runs.get(key);
+      await this.stopFlow(`trigger:${item.id}`);
       if (this.started && item.enabled) this.startTrigger(item);
     } else if (item.kind === "service") {
-      const key = `service:${item.id}`;
-      this.controllers.get(key)?.abort();
-      await this.runs.get(key);
+      await this.stopFlow(`service:${item.id}`);
       if (this.started && item.enabled && item.autoStart) this.launchService(item);
     }
     this.emit({ type: "flow.reloaded", id: item.id, kind: item.kind });
@@ -263,8 +267,29 @@ export class Runtime {
     this.scheduler.stopAll();
     for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear();
-    await Promise.allSettled([...this.tasks]);
+    const tasks = [...this.tasks];
+    if (tasks.length) {
+      const graceMs = this.stopGraceMs();
+      const pending = await settleWithin(tasks, graceMs);
+      if (pending > 0) {
+        this.options.logger.warn(
+          `${pending} flow task(s) did not stop within ${graceMs}ms and keep running in the background`
+        );
+      }
+    }
     this.runs.clear();
+  }
+
+  private async stopFlow(key: string): Promise<void> {
+    const controller = this.controllers.get(key);
+    const run = this.runs.get(key);
+    if (!controller && !run) return;
+    controller?.abort();
+    if (run) await settleWithin([run], this.stopGraceMs());
+  }
+
+  private stopGraceMs(): number {
+    return this.options.stopGraceMs ?? Runtime.DEFAULT_STOP_GRACE_MS;
   }
 
   private startFlows(): void {
@@ -289,8 +314,8 @@ export class Runtime {
     const task = this.runTrigger(definition, controller).catch((error) => {
       if (!controller.signal.aborted) this.options.logger.error("trigger stopped: " + definition.id, error);
     }).finally(() => {
-      this.controllers.delete(key);
-      this.runs.delete(key);
+      if (this.controllers.get(key) === controller) this.controllers.delete(key);
+      if (this.runs.get(key) === task) this.runs.delete(key);
     });
     this.runs.set(key, task);
     this.track(task);
@@ -306,8 +331,8 @@ export class Runtime {
       failure = error;
       if (!controller.signal.aborted) this.options.logger.error("service stopped: " + definition.id, error);
     }).finally(() => {
-      this.controllers.delete(key);
-      this.runs.delete(key);
+      if (this.controllers.get(key) === controller) this.controllers.delete(key);
+      if (this.runs.get(key) === task) this.runs.delete(key);
       const startedAt = this.serviceStartedAt.get(key);
       this.serviceStartedAt.delete(key);
       this.emit({
@@ -580,6 +605,30 @@ function collectConfigSessions(value: unknown, names: Set<string>): void {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function settleWithin(tasks: readonly Promise<unknown>[], milliseconds: number): Promise<number> {
+  let pending = tasks.length;
+  const observed = tasks.map((task) =>
+    task.then(
+      () => {
+        pending -= 1;
+      },
+      () => {
+        pending -= 1;
+      }
+    )
+  );
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, milliseconds);
+  });
+  try {
+    await Promise.race([Promise.allSettled(observed), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  return pending;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

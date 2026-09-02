@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fastify from "fastify";
+import type { Socket } from "node:net";
 import type { ActionSpecInput, FlowPatch, RuntimeControl, RuntimeLogger } from "@paperkite/sdk";
 import { HttpError, isHttpError } from "./errors.js";
 import { tailFile } from "./logs.js";
@@ -13,16 +14,28 @@ export function createRuntimeConsoleServer(
   options: RuntimeConsoleServerOptions
 ): FastifyInstance {
   const server = fastify({ logger: false });
+  const liveSockets = new Set<Socket>();
+  server.addHook("onClose", (_instance, done) => {
+    for (const socket of liveSockets) socket.destroy();
+    liveSockets.clear();
+    releaseIdleConnections(server);
+    done();
+  });
   server.setErrorHandler((error, _request, reply) => {
     const status = error instanceof Error ? (error as { statusCode?: number }).statusCode ?? 500 : 500;
     if (status >= 500) options.logger.error("runtime console request failed", error);
     if (!reply.sent) return reply.code(status).send({ error: error instanceof Error ? error.message : String(error) });
   });
-  registerRoutes(server, control, options.logger);
+  registerRoutes(server, control, options.logger, liveSockets);
   return server;
 }
 
-function registerRoutes(server: FastifyInstance, control: RuntimeControl, logger: RuntimeLogger): void {
+function registerRoutes(
+  server: FastifyInstance,
+  control: RuntimeControl,
+  logger: RuntimeLogger,
+  liveSockets: Set<Socket>
+): void {
   server.get("/api/snapshot", async () => control.snapshot);
 
   server.get("/api/plugins", async () => control.listPlugins());
@@ -43,7 +56,7 @@ function registerRoutes(server: FastifyInstance, control: RuntimeControl, logger
     }
   });
 
-  server.get("/api/events", async (request, reply) => streamEvents(request, reply, control));
+  server.get("/api/events", async (request, reply) => streamEvents(request, reply, control, liveSockets));
 
   server.post<{ Body: { spec?: ActionSpecInput } }>("/api/action/run", async (request, reply) => {
     try {
@@ -102,11 +115,11 @@ function registerRoutes(server: FastifyInstance, control: RuntimeControl, logger
   });
 
   server.post("/api/runtime/reload", async (request, reply) => {
+    reply.send({ ok: true });
     try {
       await control.reload();
-      return { ok: true };
     } catch (error) {
-      return sendError(reply, error, logger);
+      logger.error("runtime reload failed", error);
     }
   });
 }
@@ -133,9 +146,16 @@ const EVENT_HEADERS = {
   "x-accel-buffering": "no"
 } as const;
 
-async function streamEvents(request: FastifyRequest, reply: FastifyReply, control: RuntimeControl): Promise<void> {
+async function streamEvents(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  control: RuntimeControl,
+  liveSockets: Set<Socket>
+): Promise<void> {
   reply.hijack();
   const raw = reply.raw;
+  const socket = raw.socket;
+  if (socket) liveSockets.add(socket);
   raw.writeHead(200, EVENT_HEADERS);
   raw.write("retry: 3000\n\n");
   const unsubscribe = control.subscribe((event) => {
@@ -145,5 +165,18 @@ async function streamEvents(request: FastifyRequest, reply: FastifyReply, contro
   request.raw.once("close", () => {
     clearInterval(heartbeat);
     unsubscribe();
+    if (socket) liveSockets.delete(socket);
   });
+}
+
+function releaseIdleConnections(server: FastifyInstance): void {
+  let attempts = 0;
+  const tick = (): void => {
+    server.server.closeIdleConnections();
+    attempts += 1;
+    if (attempts >= 5) return;
+    const timer = setTimeout(tick, 100);
+    timer.unref();
+  };
+  tick();
 }
