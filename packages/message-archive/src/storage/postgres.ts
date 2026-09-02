@@ -204,7 +204,7 @@ export class PostgresArchiveStore implements ArchiveStore {
           row.senderUsername ?? null,
           row.senderFirstName ?? null,
           row.senderLastName ?? null,
-          row.date,
+          toIsoDate(row.date),
           row.text,
           row.messageType ?? "text",
           row.replyToMsgId ?? null,

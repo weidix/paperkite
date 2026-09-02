@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createArchiveStore, SqliteArchiveStore, type MessageRow } from "../packages/message-archive/src/storage/index.js";
+import { toIsoDate } from "../packages/message-archive/src/storage/model.js";
 
 const CHAT_ID = "100";
 
@@ -143,4 +144,14 @@ test("message context returns the neighborhood around an anchor", async () => {
 test("unknown archive backend raises", () => {
   assert.throws(() => createArchiveStore({ backend: "oracle" }), /unknown archive backend/);
   assert.throws(() => createArchiveStore({ backend: "postgres" }), /needs url/);
+});
+
+test("toIsoDate accepts ISO strings, dates, and epoch timestamps", () => {
+  const iso = "2026-09-02T06:38:00.000Z";
+  assert.equal(toIsoDate(iso), iso);
+  assert.equal(toIsoDate(new Date("2026-09-02T06:38:00.000Z")), iso);
+  assert.equal(toIsoDate(1_788_331_080), "2026-09-02T06:38:00.000Z");
+  assert.equal(toIsoDate("1788331080"), "2026-09-02T06:38:00.000Z");
+  assert.equal(toIsoDate(1_788_331_080_000), iso);
+  assert.throws(() => toIsoDate("not a date"), /invalid date value/);
 });

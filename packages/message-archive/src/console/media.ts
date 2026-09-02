@@ -110,8 +110,19 @@ export class LiveMediaService {
     if (!this.sessions || !this.sessionName) {
       throw new HttpError(503, "message media service is unavailable");
     }
-    return this.sessions.run(this.sessionName, (client: unknown) => operation(client as LiveTelegramClient));
+    try {
+      return await this.sessions.run(this.sessionName, (client: unknown) => operation(client as LiveTelegramClient));
+    } catch (error) {
+      if (isMissingEntity(error)) {
+        throw new HttpError(404, "Telegram session cannot resolve this conversation yet");
+      }
+      throw error;
+    }
   }
+}
+
+function isMissingEntity(error: unknown): boolean {
+  return error instanceof Error && /Could not find the input entity/i.test(error.message);
 }
 
 function previewPayload(chatId: string, message: LiveTelegramMessage): MediaItem | undefined {

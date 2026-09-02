@@ -203,8 +203,13 @@ export function groupKey(chatId: string, groupedId: string): string {
 
 export function toIsoDate(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
-  const time = Date.parse(String(value));
-  if (Number.isNaN(time)) throw new Error(`invalid date value: ${String(value)}`);
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) {
+    const timestamp = Number(text);
+    return new Date(timestamp < 1e12 ? timestamp * 1_000 : timestamp).toISOString();
+  }
+  const time = Date.parse(text);
+  if (Number.isNaN(time)) throw new Error(`invalid date value: ${text}`);
   return new Date(time).toISOString();
 }
 
