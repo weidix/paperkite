@@ -93,6 +93,7 @@ async function handleConnection(socket: Socket, runtime: RuntimeControl): Promis
 async function dispatch(runtime: RuntimeControl, request: ControlRequest): Promise<unknown> {
   const action = request.action;
   if (action === "snapshot") return runtime.snapshot;
+  if (action === "plugins") return runtime.listPlugins();
   if (action === "runtime.reload") {
     await runtime.reload();
     return true;

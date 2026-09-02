@@ -38,6 +38,7 @@ async function makeRuntime(
     registry,
     sessions: fakeSessions,
     logger,
+    installed: [],
     reloadCatalog: settings.reloadCatalog
   });
   const events: RuntimeEvent[] = [];
@@ -63,6 +64,12 @@ test("runFlow executes a schedule action once and reload swaps the catalog", asy
   await assert.rejects(runtime.runFlow("unknown"), /unknown flow/);
   await runtime.runFlow("daily");
   assert.deepEqual(EchoAction.runs, [{ id: "schedule:daily", payload: { mark: 2 } }]);
+  assert.equal(
+    events.some(
+      (event) => event.type === "flow.finished" && event.kind === "schedule" && event.id === "daily" && event.ok
+    ),
+    true
+  );
   await runtime.reload();
   const snapshot = runtime.snapshot as RuntimeSnapshot;
   assert.deepEqual(snapshot.flows, []);

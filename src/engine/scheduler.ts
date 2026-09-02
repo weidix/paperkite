@@ -6,7 +6,7 @@ export type ScheduledTask = () => Promise<void>;
 export class RuntimeScheduler {
   private readonly stops = new Map<string, () => void>();
 
-  add(definition: ScheduleDefinition, task: ScheduledTask, signal: AbortSignal): void {
+  add(definition: ScheduleDefinition, task: ScheduledTask, signal: AbortSignal, onFire?: (item: ScheduleDefinition) => void): void {
     this.remove(definition.id);
     let timer: NodeJS.Timeout | undefined;
     let stopped = false;
@@ -31,6 +31,7 @@ export class RuntimeScheduler {
       if (stopped || signal.aborted) return;
       timer = setTimeout(async () => {
         if (stopped || signal.aborted) return;
+        onFire?.(definition);
         try {
           await task();
         } catch {

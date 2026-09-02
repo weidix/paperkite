@@ -37,6 +37,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
       registry: extensions.registry,
       sessions,
       logger,
+      installed: extensions.installed,
       reloadCatalog: () => loadCatalog(flowsFile)
     })
   };

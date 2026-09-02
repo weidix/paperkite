@@ -33,6 +33,11 @@ export interface SessionAccess {
   run<T>(name: string, operation: (client: unknown) => T | Promise<T>): Promise<T>;
 }
 
+export interface ActionOutcome {
+  readonly skipped: boolean;
+  readonly effectivePayload?: unknown;
+}
+
 export interface ActionContext<P = unknown> {
   readonly id: string;
   payload: P;
@@ -43,6 +48,7 @@ export interface ActionContext<P = unknown> {
   emission: TriggerEmission | undefined;
   readonly hook?: ActionHook;
   spawn(task: Promise<unknown>): void;
+  outcome?: ActionOutcome;
 }
 
 export interface ActionHookResult {
@@ -98,6 +104,7 @@ export abstract class Action<P = unknown> {
         });
         const decision = normalizeHookResult(result, this.context.payload);
         this.context.payload = decision.payload as P;
+        this.context.outcome = { skipped: decision.skip, effectivePayload: cloneValue(decision.payload) };
         if (decision.skip) return;
       }
       await this.run();
@@ -207,22 +214,49 @@ export interface ServiceContext<P = unknown> {
 
 export type FlowKind = "trigger" | "command" | "schedule" | "service";
 
+export interface FlowRef {
+  readonly kind: FlowKind;
+  readonly id: string;
+}
+
+export interface ActionSpecView {
+  readonly capability: string;
+  readonly session?: string;
+  readonly config?: unknown;
+  readonly hook?: string;
+}
+
 export interface FlowSnapshot {
   readonly kind: FlowKind;
   readonly id: string;
   readonly capability: string;
   readonly title?: string;
+  readonly symbol?: string;
   readonly enabled: boolean;
   readonly active: boolean;
   readonly session?: string;
   readonly autoStart?: boolean;
-  readonly schedule?: string;
+  readonly cron?: string;
+  readonly intervalSeconds?: number;
+  readonly maxRuns?: number;
+  readonly config?: unknown;
+  readonly actions?: readonly ActionSpecView[];
+  readonly hook?: string;
   readonly logFile: boolean;
+  readonly startedAt?: string;
 }
 
 export interface LogScopeInfo {
   readonly scope: string;
   readonly path: string;
+}
+
+export interface ActiveActionView {
+  readonly id: string;
+  readonly capability: string;
+  readonly session?: string;
+  readonly flow?: FlowRef;
+  readonly startedAt: string;
 }
 
 export interface RuntimeSnapshot {
@@ -233,6 +267,7 @@ export interface RuntimeSnapshot {
   readonly services: readonly string[];
   readonly schedules: readonly string[];
   readonly activeServices: readonly string[];
+  readonly activeActions: readonly ActiveActionView[];
   readonly flows: readonly FlowSnapshot[];
   readonly logs: readonly LogScopeInfo[];
 }
@@ -250,6 +285,10 @@ export interface ActionStartedEvent {
   readonly id: string;
   readonly capability: string;
   readonly session?: string;
+  readonly flow?: FlowRef;
+  readonly hook?: string;
+  readonly payload?: unknown;
+  readonly at: string;
 }
 
 export interface ActionFinishedEvent {
@@ -257,18 +296,32 @@ export interface ActionFinishedEvent {
   readonly id: string;
   readonly capability: string;
   readonly session?: string;
+  readonly flow?: FlowRef;
+  readonly ok: boolean;
+  readonly skipped: boolean;
+  readonly durationMs: number;
   readonly error?: string;
+  readonly effectivePayload?: unknown;
+  readonly at: string;
 }
 
 export interface ServiceStartedEvent {
   readonly type: "service.started";
   readonly id: string;
+  readonly capability: string;
+  readonly session?: string;
+  readonly at: string;
 }
 
 export interface ServiceStoppedEvent {
   readonly type: "service.stopped";
   readonly id: string;
+  readonly capability: string;
+  readonly session?: string;
+  readonly reason: "stop" | "error" | "finished";
   readonly error?: string;
+  readonly durationMs: number;
+  readonly at: string;
 }
 
 export interface FlowEnabledEvent {
@@ -276,23 +329,37 @@ export interface FlowEnabledEvent {
   readonly id: string;
   readonly kind: FlowKind;
   readonly enabled: boolean;
+  readonly at: string;
+}
+
+export interface FlowFinishedEvent {
+  readonly type: "flow.finished";
+  readonly kind: FlowKind;
+  readonly id: string;
+  readonly capability: string;
+  readonly ok: boolean;
+  readonly durationMs: number;
+  readonly at: string;
+}
+
+export interface ScheduleFiredEvent {
+  readonly type: "schedule.fired";
+  readonly id: string;
+  readonly cron?: string;
+  readonly intervalSeconds?: number;
+  readonly at: string;
 }
 
 export interface ConfigReloadingEvent {
   readonly type: "config.reloading";
+  readonly at: string;
 }
 
 export interface ConfigReloadedEvent {
   readonly type: "config.reloaded";
   readonly ok: boolean;
   readonly error?: string;
-}
-
-export interface LogLineEvent {
-  readonly type: "log";
-  readonly scope: string;
-  readonly level: string;
-  readonly message: string;
+  readonly at: string;
 }
 
 export type RuntimeEvent =
@@ -301,9 +368,10 @@ export type RuntimeEvent =
   | ServiceStartedEvent
   | ServiceStoppedEvent
   | FlowEnabledEvent
+  | FlowFinishedEvent
+  | ScheduleFiredEvent
   | ConfigReloadingEvent
-  | ConfigReloadedEvent
-  | LogLineEvent;
+  | ConfigReloadedEvent;
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
 
@@ -319,6 +387,7 @@ export interface RuntimeControl {
   restartService(identifier: string): Promise<void>;
   setFlowEnabled(identifier: string, enabled: boolean): Promise<boolean>;
   reload(): Promise<void>;
+  listPlugins(): readonly PluginInfo[];
   subscribe(listener: RuntimeEventListener): Unsubscribe;
 }
 
@@ -342,6 +411,10 @@ export interface PluginManifest {
   readonly name: string;
   readonly version?: string;
   readonly capabilities: readonly PluginCapability[];
+}
+
+export interface PluginInfo extends PluginManifest {
+  readonly loaded: boolean;
 }
 
 export interface PluginModule {

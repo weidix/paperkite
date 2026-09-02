@@ -13,6 +13,7 @@ const EMPTY_SNAPSHOT = {
   services: ["console"],
   schedules: [],
   activeServices: [],
+  activeActions: [],
   flows: [],
   logs: []
 };
@@ -31,6 +32,17 @@ test("local control socket dispatches runtime, flow, and action operations", asy
     async restartService(id) { calls.push("restart:" + id); },
     async setFlowEnabled(id, enabled) { calls.push(`enabled:${id}:${enabled}`); return true; },
     async reload() { calls.push("reload"); },
+    listPlugins() {
+      calls.push("plugins");
+      return [
+        {
+          name: "@paperkite/plugin-bark",
+          version: "1.0.0",
+          capabilities: [{ kind: "action", name: "notifications.bark" }],
+          loaded: true
+        }
+      ];
+    },
     subscribe() { return () => undefined; }
   };
   const server = await startControlServer(runtime, path);
@@ -40,12 +52,21 @@ test("local control socket dispatches runtime, flow, and action operations", asy
   assert.equal(await requestControl({ action: "runtime.reload" }, path), true);
   assert.equal(await requestControl({ action: "flow.run", id: "archive-daily" }, path), true);
   assert.equal(await requestControl({ action: "action.run", spec: { capability: "notifications.bark" } }, path), true);
+  assert.deepEqual(await requestControl({ action: "plugins" }, path), [
+    {
+      name: "@paperkite/plugin-bark",
+      version: "1.0.0",
+      capabilities: [{ kind: "action", name: "notifications.bark" }],
+      loaded: true
+    }
+  ]);
   assert.deepEqual(calls, [
     "restart:console",
     "enabled:watch:false",
     "reload",
     "flow:archive-daily",
-    "action:notifications.bark"
+    "action:notifications.bark",
+    "plugins"
   ]);
   await server.close();
 });

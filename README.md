@@ -75,13 +75,13 @@ Web 控制台默认只监听 `127.0.0.1`；需要局域网访问时显式设置 
 
 核心提供前端无关的运行控制契约（`RuntimeControl`），托盘、Web 控制台、CLI 等任何可视化前端都通过同一套接口取数与操作，具体渲染由前端自行实现。
 
-- **快照**：`snapshot` 返回运行时状态（`running`、`pid`、`uptimeSeconds`）、按类别的流 id 列表、`flows` 明细（每条流的 `kind`/`capability`/`enabled`/`active`/`session`/`autoStart`/`schedule`）以及 `logs` 日志作用域清单。
-- **操作**：`executeAction({ capability, config?, session?, hook?, label? })` 是执行原语，可临时执行任意 action；`runFlow(id)` 按 id 引用 flows 中已配置的 command/schedule action 执行一次；`runCommand`、`startService`/`stopService`/`restartService`、`setFlowEnabled`（持久化写回 flows.yml）不变。
+- **快照**：`snapshot` 返回当前状态（`running`、`pid`、`uptimeSeconds`）、按类别的流 id 列表、`activeServices`、`activeActions`（正在执行的动作：`id`/`capability`/`session`/`flow`/`startedAt`）、`flows` 处理后的完整配置视图（每条流的 `kind`/`id`/`capability`/`title`/`symbol`/`enabled`/`active`/`session`/`autoStart`/`cron`/`intervalSeconds`/`maxRuns`/`config`/`actions`/`hook`/`logFile`/`startedAt`）以及 `logs` 日志文件索引。
+- **操作**：`executeAction({ capability, config?, session?, hook?, label? })` 是执行原语，可临时执行任意 action；`runFlow(id)` 按 id 引用 flows 中已配置的 command/schedule action 执行一次；`runCommand`、`startService`/`stopService`/`restartService`、`setFlowEnabled`（持久化写回 flows.yml）、`listPlugins()`（已安装插件的 `name`/`version`/`capabilities`/`loaded` 全量清单）不变。
 - **热重载**：`reload()` 停止现有流、重读 flows.yml 并按新配置重新启动，进程与会话池不退出；仅支持 flows 配置，settings.yml 仍需重启生效。
-- **事件流**：`subscribe(listener)` 订阅细粒度事件（`action.started`/`action.finished`、`service.started`/`service.stopped`、`flow.enabled`、`config.reloading`/`config.reloaded`、插件日志行 `log`），退订返回函数；事件只在进程内分发，传输层由消费方自备。
-- **插件日志隔离**：每个插件注入以插件包名命名的子日志器，写入 `data/logs/<插件名>.log`，互不混用；快照的 `logs` 可直接浏览。
+- **事件流**：`subscribe(listener)` 订阅任务流事件（`action.started`/`action.finished`、`service.started`/`service.stopped`、`flow.enabled`、`flow.finished`、`schedule.fired`、`config.reloading`/`config.reloaded`），全部携带 `at` 时间戳；`action` 事件带 `flow`/`hook`/`ok`/`skipped`/`durationMs`/`effectivePayload`，`service` 事件带 `capability`/`session`/`reason`/`durationMs`，`flow.finished` 带 `kind`/`id`/`capability`/`ok`/`durationMs`；退订返回函数；事件只在进程内分发，传输层由消费方自备。日志不入事件，直接读取日志文件。
+- **插件日志隔离**：每个插件注入以插件包名命名的子日志器，写入 `data/logs/<插件名>.log`，互不混用；快照的 `logs` 是外部读取这些文件的索引。
 
-Unix 域套接字协议（`data/.paperkite/control.sock`）同步暴露上述契约：`snapshot`、`command.run`、`flow.run`、`action.run`、`service.start|stop|restart`、`flow.enabled`、`runtime.reload`。
+Unix 域套接字协议（`data/.paperkite/control.sock`）同步暴露上述契约：`snapshot`、`plugins`、`command.run`、`flow.run`、`action.run`、`service.start|stop|restart`、`flow.enabled`、`runtime.reload`。
 
 ## 开发
 

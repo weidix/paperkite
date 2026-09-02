@@ -23,6 +23,7 @@ test("action hooks can transform or skip a run and payload state is isolated", a
   };
   await new CaptureAction(context).execute();
   assert.deepEqual(seen, [{ value: "after" }]);
+  assert.deepEqual(context.outcome, { skipped: false, effectivePayload: { value: "after" } });
   assert.deepEqual(context.payload, { value: "before" });
 });
 

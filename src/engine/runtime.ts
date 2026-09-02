@@ -1,6 +1,11 @@
 import type {
   ActionContext,
   ActionSpecInput,
+  ActionSpecView,
+  FlowKind,
+  FlowRef,
+  FlowSnapshot,
+  PluginInfo,
   RuntimeEvent,
   RuntimeEventListener,
   RuntimeLogger,
@@ -14,6 +19,7 @@ import { basename, join } from "node:path";
 import type {
   ActionSpec,
   FlowCatalog,
+  FlowDefinition,
   ScheduleDefinition,
   ServiceDefinition,
   TriggerDefinition
@@ -29,6 +35,7 @@ export interface RuntimeOptions {
   readonly registry: CapabilityRegistry;
   readonly sessions: SessionPool;
   readonly logger: AppLogger;
+  readonly installed: readonly PluginInfo[];
   readonly reloadCatalog?: () => Promise<FlowCatalog>;
 }
 
@@ -38,6 +45,8 @@ export class Runtime {
   private readonly runs = new Map<string, Promise<void>>();
   private readonly tasks = new Set<Promise<void>>();
   private readonly listeners = new Set<RuntimeEventListener>();
+  private readonly serviceStartedAt = new Map<string, number>();
+  private readonly activeActionEntries = new Map<string, ActiveActionEntry>();
   private catalog: FlowCatalog;
   private lifecycle = new AbortController();
   private started = false;
@@ -46,9 +55,6 @@ export class Runtime {
 
   constructor(private readonly options: RuntimeOptions) {
     this.catalog = options.catalog;
-    options.logger.attachLogSink((entry) =>
-      this.emit({ type: "log", scope: entry.scope, level: entry.level, message: entry.message })
-    );
   }
 
   get snapshot(): RuntimeSnapshot {
@@ -62,26 +68,20 @@ export class Runtime {
       activeServices: [...this.controllers.keys()]
         .filter((key) => key.startsWith("service:"))
         .map((key) => key.slice("service:".length)),
-      flows: this.catalog.definitions().map((item) => ({
-        kind: item.kind,
-        id: item.id,
-        capability: "capability" in item ? item.capability : item.action.capability,
-        title: item.kind === "command" ? item.title : undefined,
-        enabled: item.kind === "command" ? true : item.enabled,
-        active:
-          item.kind === "service" || item.kind === "trigger"
-            ? this.controllers.has(`${item.kind}:${item.id}`)
-            : false,
-        session: "session" in item ? item.session : undefined,
-        autoStart: item.kind === "service" ? item.autoStart : undefined,
-        schedule:
-          item.kind === "schedule"
-            ? item.cron ?? (item.intervalSeconds !== undefined ? `${item.intervalSeconds}s` : undefined)
-            : undefined,
-        logFile: "logFile" in item ? item.logFile : false
+      activeActions: [...this.activeActionEntries.values()].map((entry) => ({
+        id: entry.id,
+        capability: entry.capability,
+        session: entry.session,
+        flow: entry.flow,
+        startedAt: new Date(entry.startedAt).toISOString()
       })),
+      flows: this.catalog.definitions().map((item) => this.flowSnapshot(item)),
       logs: this.logScopes()
     };
+  }
+
+  listPlugins(): readonly PluginInfo[] {
+    return this.options.installed;
   }
 
   subscribe(listener: RuntimeEventListener): Unsubscribe {
@@ -141,14 +141,19 @@ export class Runtime {
       if (sessions.size) await this.options.sessions.ensure(sessions);
     }
     const contextPayload = mergePayload(command.action.config, payload);
-    await this.executeAction({
-      ...command.action,
-      config: contextPayload,
-      label: `command:${command.id}`
-    });
+    await this.completeFlow("command", command.id, command.action.capability, () =>
+      this.executeAction(
+        {
+          ...command.action,
+          config: contextPayload,
+          label: `command:${command.id}`
+        },
+        { kind: "command", id: command.id }
+      )
+    );
   }
 
-  async executeAction(spec: ActionSpecInput): Promise<void> {
+  async executeAction(spec: ActionSpecInput, flow?: FlowRef): Promise<void> {
     const capability = String(spec.capability ?? "").trim();
     if (!capability) throw new Error("executeAction needs capability");
     const action: ActionSpec = {
@@ -159,7 +164,7 @@ export class Runtime {
     };
     const sessions = collectActionSessions(action);
     if (sessions.size) await this.options.sessions.ensure(sessions);
-    await this.runAction(action, spec.label ?? `action:${capability}`, undefined, spec.session, this.lifecycle.signal);
+    await this.runAction(action, spec.label ?? `action:${capability}`, undefined, spec.session, this.lifecycle.signal, flow);
   }
 
   async runFlow(identifier: string): Promise<void> {
@@ -171,7 +176,28 @@ export class Runtime {
     if (definition.kind === "schedule" && !definition.enabled) {
       throw new Error("schedule is disabled: " + definition.id);
     }
-    await this.executeAction({ ...definition.action, label: `${definition.kind}:${definition.id}` });
+    await this.completeFlow(definition.kind, definition.id, definition.action.capability, () =>
+      this.executeAction(
+        { ...definition.action, label: `${definition.kind}:${definition.id}` },
+        { kind: definition.kind, id: definition.id }
+      )
+    );
+  }
+
+  private async completeFlow(
+    kind: FlowKind,
+    id: string,
+    capability: string,
+    operation: () => Promise<void>
+  ): Promise<void> {
+    const startedAt = Date.now();
+    try {
+      await operation();
+    } catch (error) {
+      this.emit({ type: "flow.finished", kind, id, capability, ok: false, durationMs: Date.now() - startedAt });
+      throw error;
+    }
+    this.emit({ type: "flow.finished", kind, id, capability, ok: true, durationMs: Date.now() - startedAt });
   }
 
   async startService(identifier: string): Promise<void> {
@@ -273,6 +299,7 @@ export class Runtime {
     const key = `service:${definition.id}`;
     const controller = new AbortController();
     this.controllers.set(key, controller);
+    this.serviceStartedAt.set(key, Date.now());
     let failure: unknown;
     const task = this.runService(definition, controller).catch((error) => {
       failure = error;
@@ -280,32 +307,53 @@ export class Runtime {
     }).finally(() => {
       this.controllers.delete(key);
       this.runs.delete(key);
+      const startedAt = this.serviceStartedAt.get(key);
+      this.serviceStartedAt.delete(key);
       this.emit({
         type: "service.stopped",
         id: definition.id,
-        error: failure instanceof Error ? failure.message : undefined
+        capability: definition.capability,
+        session: definition.session,
+        reason: failure !== undefined ? "error" : controller.signal.aborted ? "stop" : "finished",
+        error: failure instanceof Error ? failure.message : undefined,
+        durationMs: startedAt === undefined ? 0 : Date.now() - startedAt
       });
     });
     this.runs.set(key, task);
     this.track(task);
-    this.emit({ type: "service.started", id: definition.id });
+    this.emit({
+      type: "service.started",
+      id: definition.id,
+      capability: definition.capability,
+      session: definition.session
+    });
   }
 
   private startSchedule(definition: ScheduleDefinition): void {
     this.scheduler.add(
       definition,
       () => {
-        const task = this.runAction(
-          definition.action,
-          `schedule:${definition.id}`,
-          undefined,
-          definition.session,
-          this.scheduleSignal
+        const task = this.completeFlow("schedule", definition.id, definition.action.capability, () =>
+          this.runAction(
+            definition.action,
+            `schedule:${definition.id}`,
+            undefined,
+            definition.session,
+            this.scheduleSignal,
+            { kind: "schedule", id: definition.id }
+          )
         ).catch((error) => this.options.logger.error("schedule failed: " + definition.id, error));
         this.track(task);
         return task;
       },
-      this.scheduleSignal
+      this.scheduleSignal,
+      (item) =>
+        this.emit({
+          type: "schedule.fired",
+          id: item.id,
+          cron: item.cron,
+          intervalSeconds: item.intervalSeconds
+        })
     );
   }
 
@@ -332,15 +380,18 @@ export class Runtime {
           source: { id: definition.id, capability: definition.capability },
           event
         };
-        for (const [index, action] of definition.actions.entries()) {
-          await this.runAction(
-            action,
-            `trigger:${definition.id}:${index + 1}`,
-            emission,
-            action.session ?? definition.session,
-            controller.signal
-          );
-        }
+        await this.completeFlow("trigger", definition.id, definition.capability, async () => {
+          for (const [index, action] of definition.actions.entries()) {
+            await this.runAction(
+              action,
+              `trigger:${definition.id}:${index + 1}`,
+              emission,
+              action.session ?? definition.session,
+              controller.signal,
+              { kind: "trigger", id: definition.id }
+            );
+          }
+        });
         if (definition.maxRuns && emitted >= definition.maxRuns) controller.abort();
       }
     };
@@ -368,7 +419,8 @@ export class Runtime {
     id: string,
     emission: TriggerEmission | undefined,
     parentSession: string | undefined,
-    signal: AbortSignal
+    signal: AbortSignal,
+    flow?: FlowRef
   ): Promise<void> {
     const capability = specification.capability;
     const Constructor = this.options.registry.getAction(capability);
@@ -382,13 +434,19 @@ export class Runtime {
       logger: this.capabilityLogger("action", capability),
       emission,
       hook,
+      outcome: undefined,
       spawn: (task) => this.track(task.then(() => undefined))
     };
+    const startedAt = Date.now();
+    this.activeActionEntries.set(id, { id, capability, session: context.session, flow, startedAt });
     this.emit({
       type: "action.started",
       id,
       capability,
-      session: context.session
+      session: context.session,
+      flow,
+      hook: specification.hook,
+      payload: exportable(specification.config)
     });
     let failure: unknown;
     try {
@@ -397,12 +455,18 @@ export class Runtime {
       failure = error;
       throw error;
     } finally {
+      this.activeActionEntries.delete(id);
       this.emit({
         type: "action.finished",
         id,
         capability,
         session: context.session,
-        error: failure instanceof Error ? failure.message : failure === undefined ? undefined : String(failure)
+        flow,
+        ok: failure === undefined,
+        skipped: context.outcome?.skipped === true,
+        durationMs: Date.now() - startedAt,
+        error: failure instanceof Error ? failure.message : failure === undefined ? undefined : String(failure),
+        effectivePayload: exportable(context.outcome?.effectivePayload)
       });
     }
   }
@@ -412,6 +476,49 @@ export class Runtime {
     return this.options.logger.child(scope);
   }
 
+  private flowSnapshot(definition: FlowDefinition): FlowSnapshot {
+    const base = {
+      kind: definition.kind,
+      id: definition.id,
+      capability: "capability" in definition ? definition.capability : definition.action.capability,
+      enabled: definition.kind === "command" ? true : definition.enabled,
+      active:
+        definition.kind === "service" || definition.kind === "trigger"
+          ? this.controllers.has(`${definition.kind}:${definition.id}`)
+          : false,
+      session: "session" in definition ? definition.session : undefined,
+      logFile: "logFile" in definition ? definition.logFile : false
+    };
+    if (definition.kind === "trigger") {
+      return {
+        ...base,
+        maxRuns: definition.maxRuns,
+        config: copyOf(definition.config),
+        actions: definition.actions.map((action) => actionView(action))
+      };
+    }
+    if (definition.kind === "service") {
+      return {
+        ...base,
+        autoStart: definition.autoStart,
+        config: copyOf(definition.config),
+        startedAt:
+          this.serviceStartedAt.get(`service:${definition.id}`) === undefined
+            ? undefined
+            : new Date(this.serviceStartedAt.get(`service:${definition.id}`) as number).toISOString()
+      };
+    }
+    return {
+      ...base,
+      title: definition.kind === "command" ? definition.title : undefined,
+      symbol: definition.kind === "command" ? definition.symbol : undefined,
+      cron: definition.kind === "schedule" ? definition.cron : undefined,
+      intervalSeconds: definition.kind === "schedule" ? definition.intervalSeconds : undefined,
+      hook: definition.action.hook,
+      config: copyOf(definition.action.config)
+    };
+  }
+
   private logScopes(): { scope: string; path: string }[] {
     const directory = this.options.logger.logDirectory();
     if (!directory) return [];
@@ -419,10 +526,11 @@ export class Runtime {
     return scopes.map((scope) => ({ scope, path: join(directory, basename(scope) + ".log") }));
   }
 
-  private emit(event: RuntimeEvent): void {
+  private emit<E extends RuntimeEvent>(event: EventWithoutAt<E>): void {
+    const withAt = { ...event, at: new Date().toISOString() } as E;
     for (const listener of [...this.listeners]) {
       try {
-        listener(event);
+        listener(withAt);
       } catch (error) {
         this.options.logger.error("runtime event listener failed", error);
       }
@@ -480,6 +588,39 @@ function messageOf(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface ActiveActionEntry {
+  readonly id: string;
+  readonly capability: string;
+  readonly session?: string;
+  readonly flow?: FlowRef;
+  readonly startedAt: number;
+}
+
+type EventWithoutAt<E extends RuntimeEvent> = E extends RuntimeEvent ? Omit<E, "at"> : never;
+
+function actionView(action: ActionSpec): ActionSpecView {
+  return { capability: action.capability, session: action.session, config: copyOf(action.config), hook: action.hook };
+}
+
+function exportable(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  try {
+    const text = JSON.stringify(value);
+    if (!text || text.length > 4096) return undefined;
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function copyOf<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
 }
 
 export type { RuntimeSnapshot };

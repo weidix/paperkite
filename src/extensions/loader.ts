@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { PluginCapability, PluginManifest, PluginModule, RuntimeLogger } from "@paperkite/sdk";
+import type { PluginCapability, PluginInfo, PluginManifest, PluginModule, RuntimeLogger } from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
 import { profileDirectory, readProfile } from "./profile.js";
 
@@ -14,12 +14,14 @@ interface PackagePluginMeta {
 }
 
 interface PackageManifest {
+  readonly version?: string;
   readonly paperkite?: PackagePluginMeta;
 }
 
 export interface LoadedExtensions {
   readonly registry: CapabilityRegistry;
   readonly packages: readonly string[];
+  readonly installed: readonly PluginInfo[];
 }
 
 export async function loadExtensions(
@@ -68,11 +70,20 @@ export async function loadExtensions(
     await module.register(registry.context(scopedLogger, candidate.name));
     assertManifestMatches(candidate, module.manifest);
   }
-  return { registry, packages: [...selected.keys()] };
+  const installed: PluginInfo[] = [...candidates]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((candidate) => ({
+      name: candidate.name,
+      version: candidate.version,
+      capabilities: candidate.capabilities,
+      loaded: selected.has(candidate.name)
+    }));
+  return { registry, packages: [...selected.keys()], installed };
 }
 
 interface PluginCandidate {
   readonly name: string;
+  readonly version?: string;
   readonly packageDirectory: string;
   readonly entry: string;
   readonly capabilities: readonly PluginCapability[];
@@ -90,6 +101,7 @@ async function inspectPlugin(name: string, profile: string): Promise<PluginCandi
   if (!Array.isArray(capabilities)) throw new Error("invalid capability metadata in " + name);
   return {
     name,
+    version: typeof manifest.version === "string" ? manifest.version : undefined,
     packageDirectory: dirname(packageFile),
     entry,
     capabilities

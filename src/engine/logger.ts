@@ -5,12 +5,9 @@ import type { RuntimeLogger } from "@paperkite/sdk";
 const levels = ["debug", "info", "warn", "error"] as const;
 type Level = (typeof levels)[number];
 
-export type LogEventSink = (entry: { scope: string; level: string; message: string }) => void;
-
 export class AppLogger implements RuntimeLogger {
   private readonly threshold: number;
   private readonly children = new Map<string, AppLogger>();
-  private sink: LogEventSink | undefined;
 
   constructor(
     private readonly level: string = "info",
@@ -24,14 +21,8 @@ export class AppLogger implements RuntimeLogger {
     const existing = this.children.get(scope);
     if (existing) return existing;
     const child = new AppLogger(this.level, this.directory, scope);
-    child.sink = this.sink;
     this.children.set(scope, child);
     return child;
-  }
-
-  attachLogSink(sink: LogEventSink): void {
-    this.sink = sink;
-    for (const child of this.children.values()) child.sink = sink;
   }
 
   registeredScopes(): readonly string[] {
@@ -78,7 +69,6 @@ export class AppLogger implements RuntimeLogger {
         )
         .catch(() => undefined);
     }
-    this.sink?.({ scope: this.scope || "paperkite", level, message: message + suffix });
   }
 }
 

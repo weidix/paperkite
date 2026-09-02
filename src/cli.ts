@@ -134,6 +134,18 @@ for (const operation of ["start", "stop", "restart"] as const) {
 }
 
 program
+  .command("plugins")
+  .description("list plugins loaded by the running process")
+  .action(async () => {
+    try {
+      const plugins = await requestControl({ action: "plugins" });
+      process.stdout.write(JSON.stringify(plugins, null, 2) + "\n");
+    } catch {
+      process.stdout.write(JSON.stringify({ running: false }, null, 2) + "\n");
+    }
+  });
+
+program
   .command("run")
   .description("start configured triggers, schedules, and services")
   .option("--profile <name>", "profile name", "default")
