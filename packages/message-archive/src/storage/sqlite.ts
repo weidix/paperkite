@@ -172,6 +172,14 @@ export class SqliteArchiveStore implements ArchiveStore {
     return row ? { messageId: Number(row.message_id), date: row.date } : undefined;
   }
 
+  async getChatUsername(chatId: string): Promise<string | undefined> {
+    const row = this.database
+      .prepare(`SELECT username FROM chats WHERE chat_id = ?`)
+      .get(chatId) as { username: string | null } | undefined;
+    const username = row?.username?.trim();
+    return username || undefined;
+  }
+
   async messageIdsExist(chatId: string, messageIds: readonly number[]): Promise<ReadonlySet<number>> {
     const ids = [...new Set(messageIds.map(Number))];
     if (!ids.length) return new Set();

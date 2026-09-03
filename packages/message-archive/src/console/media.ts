@@ -14,6 +14,8 @@ export interface LiveTelegramMessage {
 export interface LiveTelegramClient {
   getMessages(entity: unknown, options: { ids: readonly number[] }): Promise<readonly LiveTelegramMessage[]>;
   downloadMedia(message: LiveTelegramMessage, options: Record<string, unknown>): Promise<Buffer | string | undefined>;
+  getEntity?(name: string): Promise<unknown>;
+  getDialogs?(options: { limit?: number }): Promise<unknown>;
 }
 
 interface DownloadedPreview {
@@ -27,6 +29,9 @@ export class LiveMediaService {
     private readonly sessionName: string | undefined,
     private readonly sessions: SessionAccess | undefined
   ) {}
+
+  private dialogsWarmed = false;
+  private readonly warmedChats = new Set<string>();
 
   get available(): boolean {
     return this.sessionName !== undefined && this.sessions !== undefined;
@@ -50,7 +55,7 @@ export class LiveMediaService {
 
     const chatId = row.chatId;
     const messageId = row.messageId;
-    return this.run(async (client) => {
+    return this.withWarmRetry(chatId, async (client) => {
       const anchor = (await client.getMessages(chatId, { ids: [messageId] })).find(Boolean);
       if (!anchor?.media) throw new HttpError(404, "message album not found");
 
@@ -94,7 +99,7 @@ export class LiveMediaService {
   }
 
   private async download(chatId: string, messageId: number): Promise<DownloadedPreview> {
-    return this.run(async (client) => {
+    return this.withWarmRetry(chatId, async (client) => {
       const message = (await client.getMessages(chatId, { ids: [messageId] })).find(Boolean);
       if (!message?.media) throw new HttpError(404, "message media not found");
 
@@ -104,6 +109,34 @@ export class LiveMediaService {
       if (!data) throw new HttpError(404, "message media not found");
       return { data: toBuffer(data), contentType: mimeFor(preview) };
     });
+  }
+
+  /** 实体解析失败时先预热实体会话缓存并重试一次，覆盖重启后实体缓存为空的场景。 */
+  private async withWarmRetry<T>(chatId: string, operation: (client: LiveTelegramClient) => Promise<T>): Promise<T> {
+    try {
+      return await this.run(operation);
+    } catch (error) {
+      if (!isEntityResolutionError(error) || this.warmedChats.has(chatId)) throw error;
+      this.warmedChats.add(chatId);
+      await this.run(async (client) => {
+        if (!this.dialogsWarmed) {
+          this.dialogsWarmed = true;
+          try {
+            await client.getDialogs?.({ limit: 200 });
+          } catch {
+            // dialog warming is best-effort
+          }
+        }
+        const username = await this.store.getChatUsername(chatId).catch(() => undefined);
+        if (!username) return;
+        try {
+          await client.getEntity?.(username);
+        } catch {
+          // username resolution is best-effort
+        }
+      });
+      return this.run(operation);
+    }
   }
 
   private async run<T>(operation: (client: LiveTelegramClient) => Promise<T>): Promise<T> {
@@ -123,6 +156,11 @@ export class LiveMediaService {
 
 function isMissingEntity(error: unknown): boolean {
   return error instanceof Error && /Could not find the input entity/i.test(error.message);
+}
+
+function isEntityResolutionError(error: unknown): boolean {
+  if (error instanceof HttpError && /session cannot resolve/i.test(error.message)) return true;
+  return isMissingEntity(error);
 }
 
 function previewPayload(chatId: string, message: LiveTelegramMessage): MediaItem | undefined {

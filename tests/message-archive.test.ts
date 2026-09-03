@@ -86,6 +86,7 @@ class CountingStore implements ArchiveStore {
     return this.inner.completeSyncSession(sessionId, messagesCount, mediaCount);
   }
   getLastMessageInfo(chatId: string) { return this.inner.getLastMessageInfo(chatId); }
+  getChatUsername(chatId: string) { return this.inner.getChatUsername(chatId); }
   messageIdsExist(chatId: string, messageIds: readonly number[]) { return this.inner.messageIdsExist(chatId, messageIds); }
   async saveBatch(messages: Parameters<ArchiveStore["saveBatch"]>[0], media: Parameters<ArchiveStore["saveBatch"]>[1]) {
     const result = await this.inner.saveBatch(messages, media);

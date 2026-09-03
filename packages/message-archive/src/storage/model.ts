@@ -140,6 +140,7 @@ export interface ArchiveStore {
   startSyncSession(chatId: string, startDate: string, endDate: string): Promise<number>;
   completeSyncSession(sessionId: number, messagesCount: number, mediaCount: number): Promise<void>;
   getLastMessageInfo(chatId: string): Promise<LastMessageInfo | undefined>;
+  getChatUsername(chatId: string): Promise<string | undefined>;
   messageIdsExist(chatId: string, messageIds: readonly number[]): Promise<ReadonlySet<number>>;
   saveBatch(messages: readonly MessageRow[], media: readonly MediaRow[]): Promise<BatchResult>;
   searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult>;

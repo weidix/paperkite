@@ -174,6 +174,15 @@ export class PostgresArchiveStore implements ArchiveStore {
     return row ? { messageId: Number(row.message_id), date: toIsoDate(row.date) } : undefined;
   }
 
+  async getChatUsername(chatId: string): Promise<string | undefined> {
+    const result = await this.pool.query(
+      `SELECT username FROM ${this.table("chats")} WHERE chat_id = $1`,
+      [chatId]
+    );
+    const username = (result.rows[0]?.username as string | null | undefined)?.trim();
+    return username || undefined;
+  }
+
   async messageIdsExist(chatId: string, messageIds: readonly number[]): Promise<ReadonlySet<number>> {
     const ids = [...new Set(messageIds.map(Number))];
     if (!ids.length) return new Set();

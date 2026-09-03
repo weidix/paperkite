@@ -112,7 +112,7 @@ export class MessageArchiver {
     const chatInfo = await this.findChat(chatIdentifier);
     if (!chatInfo) return { messages: 0, media: 0, skipped: 0 };
 
-    await this.deps.store.saveChat(chatInfo);
+    await this.deps.store.saveChat(withHandleFallback(chatInfo, chatIdentifier));
 
     const daysBack = options.daysBack ?? 30;
     const maxMessages = options.maxMessages ?? 1_000;
@@ -437,6 +437,14 @@ function documentExtension(document: unknown): string | undefined {
 
 function entityUsername(entity: unknown): string | undefined {
   return optionalText(recordOf(entity)?.username);
+}
+
+/** 实体未带公开用户名时，用配置中的句柄兜底，便于控制台按用户名解析实体。 */
+function withHandleFallback(chat: ChatInfo, identifier: string | number): ChatInfo {
+  if (chat.username || typeof identifier !== "string") return chat;
+  const handle = String(identifier).trim().replace(/^@/, "");
+  if (!/^[a-zA-Z][a-zA-Z0-9_]{2,31}$/.test(handle)) return chat;
+  return { ...chat, username: handle };
 }
 
 function entityFirstName(entity: unknown): string | undefined {
