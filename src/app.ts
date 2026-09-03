@@ -23,7 +23,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
   const flowsFile = options.flowsFile ?? "data/flows.yml";
   const catalog = await loadCatalog(flowsFile);
   const logger = new AppLogger(settings.logging.level, settings.logging.directory);
-  configureTelegramClientFactory(settings);
+  configureTelegramClientFactory(settings, logger);
   const extensions = await loadExtensions(catalog.atomRefs(), {
     profile: options.profile,
     logger

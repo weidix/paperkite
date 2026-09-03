@@ -4,6 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { Logger as GramLogger, LogLevel } from "telegram/extensions/Logger.js";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
 import type { AppSettings } from "../config/settings.js";
 
@@ -125,7 +126,8 @@ export function createGramClient(sessionName: string, content: string): SessionC
   const session = new StringSession(content);
   return new TelegramClient(session, currentSettings.telegram.apiId, currentSettings.telegram.apiHash, {
     connectionRetries: 5,
-    autoReconnect: true
+    autoReconnect: true,
+    ...(currentLogger ? { baseLogger: createGramLogger(currentLogger, currentSettings.logging.level) } : {})
   }) as unknown as SessionClient;
 }
 
@@ -134,8 +136,44 @@ let currentSettings: AppSettings = {
   logging: { level: "info", directory: resolve("data/logs") }
 };
 
-export function configureTelegramClientFactory(settings: AppSettings): void {
+let currentLogger: RuntimeLogger | undefined;
+
+export function configureTelegramClientFactory(settings: AppSettings, logger?: RuntimeLogger): void {
   currentSettings = settings;
+  currentLogger = logger;
+}
+
+export function createGramLogger(logger: RuntimeLogger, level: string): GramLogger {
+  const gram = new GramLogger(gramLogLevel(level));
+  gram.log = (logLevel, message) => {
+    switch (logLevel) {
+      case LogLevel.ERROR:
+        logger.error(message);
+        break;
+      case LogLevel.WARN:
+        logger.warn(message);
+        break;
+      case LogLevel.DEBUG:
+        logger.debug(message);
+        break;
+      default:
+        logger.info(message);
+    }
+  };
+  return gram;
+}
+
+function gramLogLevel(level: string): LogLevel {
+  switch (level.toLowerCase()) {
+    case "debug":
+      return LogLevel.DEBUG;
+    case "warn":
+      return LogLevel.WARN;
+    case "error":
+      return LogLevel.ERROR;
+    default:
+      return LogLevel.INFO;
+  }
 }
 
 async function readSessionFile(directory: string, name: string): Promise<string> {
