@@ -17,17 +17,6 @@ export function formatDateTime(iso: string): string {
   );
 }
 
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms)) return "-";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}.${String(ms % 1000).padStart(3, "0").slice(0, 1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
-}
-
 export function formatUptime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0s";
   const total = Math.floor(seconds);
@@ -54,4 +43,8 @@ export function parseJson(text: string): unknown {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   return JSON.parse(trimmed);
+}
+
+export function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

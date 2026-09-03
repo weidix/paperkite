@@ -79,18 +79,18 @@ export interface ActionSpecInput {
 }
 
 export interface FlowPatch {
-  enabled?: boolean;
-  config?: unknown;
-  session?: string;
-  cron?: string;
-  intervalSeconds?: number;
-  title?: string;
-  symbol?: string;
-  autoStart?: boolean;
-  maxRuns?: number;
-  logFile?: boolean;
-  actions?: readonly ActionSpecInput[];
-  run?: ActionSpecInput | string;
+  readonly enabled?: boolean;
+  readonly config?: unknown;
+  readonly session?: string;
+  readonly cron?: string;
+  readonly intervalSeconds?: number;
+  readonly title?: string;
+  readonly symbol?: string;
+  readonly autoStart?: boolean;
+  readonly maxRuns?: number;
+  readonly logFile?: boolean;
+  readonly actions?: readonly ActionSpecInput[];
+  readonly run?: ActionSpecInput | string;
 }
 
 export interface ActionStartedEvent {

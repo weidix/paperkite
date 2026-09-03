@@ -1,4 +1,4 @@
-import type { ActionSpecInput, FlowPatch, LogScopeInfo, PluginInfo, RuntimeSnapshot } from "@/lib/runtime";
+import type { ActionSpecInput, FlowPatch, PluginInfo, RuntimeSnapshot } from "$lib/runtime";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -12,7 +12,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const payload = (await response.json()) as { error?: string };
       if (payload.error) message = payload.error;
     } catch {
-      // non-JSON body is shown as-is
+      // 非 JSON 响应原样展示
     }
     throw new Error(message);
   }
@@ -26,10 +26,6 @@ export const api = {
 
   plugins(): Promise<PluginInfo[]> {
     return request("/api/plugins");
-  },
-
-  logScopes(): Promise<{ scopes: readonly LogScopeInfo[] }> {
-    return request("/api/logs");
   },
 
   logLines(scope: string, lines: number): Promise<{ scope: string; lines: readonly string[] }> {

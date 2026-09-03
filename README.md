@@ -72,7 +72,7 @@ config:
 
 Web 控制台默认只监听 `127.0.0.1`；需要局域网访问时显式设置 `host`。媒体预览复用归档服务声明的 `session`，从 Telegram 实时取图；归档落盘的媒体文件经 `/api/media-files/{id}` 提供。命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
 
-运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 React + Tailwind + shadcn/ui 组成：
+运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 SvelteKit + Bits UI 组成：
 
 ```yaml
 services:
@@ -83,7 +83,7 @@ services:
       port: 3378
 ```
 
-提供总览（运行状态、执行中的动作、实时活动）、流程（查看与编辑 flows.yml、运行/重载/启停）、事件流（SSE 实时、类型筛选）、动作（临时按能力执行）、日志（跟随日志文件）与插件清单六个视图。构建产物输出到 `packages/console-web/public`，默认端口 3378。
+提供总览（运行状态、执行中的动作、实时活动）、流程（查看与编辑 flows.yml、运行/重载/启停）、事件流（SSE 实时、类型筛选）、动作（临时按能力执行）、日志（跟随日志文件）与插件清单六个视图。构建产物输出到 `packages/console-web/public`，默认端口 3378。SPA 静态构建按路由拆包，事件流与轮询只在页面可见时刷新，日志与上下文列表采用虚拟化渲染。
 
 ## 控制平面
 
@@ -105,4 +105,4 @@ pnpm test
 pnpm build
 ```
 
-项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/web/` 与 `packages/console-web/web/` 为 React + shadcn/ui 源码，经 Vite 构建到各自的 `public/` 目录，构建产物不作为源码维护。
+项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/web/` 与 `packages/console-web/web/` 为 SvelteKit + Bits UI 源码（黑白灰主题），经 SvelteKit 静态适配器构建到各自的 `public/` 目录，构建产物不作为源码维护。

@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@/lib/runtime";
+import type { RuntimeEvent } from "$lib/runtime";
 
 export interface EventPresentation {
   readonly tone: "ok" | "bad" | "warn" | "info";

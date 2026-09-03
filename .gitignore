@@ -21,3 +21,5 @@ data/hooks/
 *.session-wal
 
 packages/console-web/public/
+.svelte-kit/
+.pnpm-store/

@@ -1,4 +1,4 @@
-import type { ContextPayload, MediaItem, SearchParams, SearchPayload } from "@/lib/types";
+import type { ContextPayload, MediaItem, SearchParams, SearchPayload } from "$lib/types";
 
 const albumCache = new Map<string, Promise<MediaItem[]>>();
 
@@ -23,7 +23,7 @@ async function errorMessage(response: Response): Promise<string> {
     const payload = JSON.parse(text) as { error?: string };
     if (payload.error) return payload.error;
   } catch {
-    // non-JSON body is shown as-is
+    // 非 JSON 响应原样展示
   }
   return text || `HTTP ${response.status}`;
 }
