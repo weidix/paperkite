@@ -35,7 +35,7 @@ function MessageCell({
         <Badge variant="outline" className="font-mono text-[11px]">
           {formatMessageDate(row.date)}
         </Badge>
-        <Badge variant="secondary" className="max-w-48 truncate">
+        <Badge variant="secondary" className="max-w-full whitespace-normal break-words" title={row.chat_title ?? undefined}>
           {row.chat_title || "未知群组"}
         </Badge>
         {row.sender_username ? (
