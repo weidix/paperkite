@@ -25,11 +25,11 @@ pnpm start run
 | `@paperkite/plugin-bark` | `notifications.bark` |
 | `@paperkite/plugin-conversation-watch` | `watch.group`、`watch.poll` |
 | `@paperkite/plugin-account-watch` | `watch.session` |
-| `@paperkite/plugin-message-archive` | `archive.sync`、`archive.console_web` |
+| `@paperkite/plugin-message-archive` | `archive.sync` |
 | `@paperkite/plugin-process-command` | `system.command` |
 | `@paperkite/plugin-console-web` | `runtime.console_web` |
 
-`@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储与控制台都属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
+`@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
 
 ## 插件安装
 
@@ -70,7 +70,7 @@ config:
   url: postgresql://user:password@host/database
 ```
 
-Web 控制台默认只监听 `127.0.0.1`；需要局域网访问时显式设置 `host`。媒体预览复用归档服务声明的 `session`，从 Telegram 实时取图；归档落盘的媒体文件经 `/api/media-files/{id}` 提供。命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
+命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
 
 运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 SvelteKit + Bits UI 组成：
 
@@ -105,4 +105,4 @@ pnpm test
 pnpm build
 ```
 
-项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/web/` 与 `packages/console-web/web/` 为 SvelteKit + Bits UI 源码（黑白灰主题），经 SvelteKit 静态适配器构建到各自的 `public/` 目录，构建产物不作为源码维护。
+项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/console-web/web/` 为 SvelteKit + Bits UI 源码（黑白灰主题），经 SvelteKit 静态适配器构建到 `packages/console-web/public/`，构建产物不作为源码维护。

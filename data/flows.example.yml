@@ -36,13 +36,6 @@ schedules:
         limit: 500
 
 services:
-  - id: local-console
-    capability: archive.console_web
-    config:
-      host: 127.0.0.1
-      port: 3377
-      file: data/archive.sqlite
-
   - id: runtime-console
     capability: runtime.console_web
     config:

@@ -28,7 +28,7 @@ test("expands YAML merge keys before normalizing flow configuration", async () =
       "  url: postgresql://localhost/archive",
       "services:",
       "  - id: console",
-      "    capability: archive.console_web",
+      "    capability: runtime.console_web",
       "    config:",
       "      <<: *storage",
       "      port: 18080",
