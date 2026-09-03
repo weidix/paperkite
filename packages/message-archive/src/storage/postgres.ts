@@ -19,6 +19,7 @@ import {
   normalizeOffset,
   normalizeRowId,
   normalizeTimeMode,
+  paramPlaceholders,
   splitTerms,
   toIsoDate
 } from "./model.js";
@@ -191,7 +192,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     try {
       await client.query("BEGIN");
       const messagePlaceholders = messages
-        .map((_, index) => `(${range(index * 18 + 1, 18).join(", ")})`)
+        .map((_, index) => `(${paramPlaceholders(index * 18 + 1, 18)})`)
         .join(", ");
       const messageValues: unknown[] = [];
       for (const row of messages) {
@@ -230,7 +231,7 @@ export class PostgresArchiveStore implements ArchiveStore {
       let mediaInserted = 0;
       if (media.length) {
         const mediaPlaceholders = media
-          .map((_, index) => `(${range(index * 7 + 1, 7).join(", ")})`)
+          .map((_, index) => `(${paramPlaceholders(index * 7 + 1, 7)})`)
           .join(", ");
         const mediaValues: unknown[] = [];
         for (const row of media) {
@@ -569,10 +570,6 @@ function pushGrouped<T>(map: Map<string, T[]>, key: string, item: T): void {
     map.set(key, items);
   }
   items.push(item);
-}
-
-function range(start: number, count: number): number[] {
-  return Array.from({ length: count }, (_, index) => start + index);
 }
 
 function quoteIdentifier(value: string): string {

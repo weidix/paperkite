@@ -201,6 +201,10 @@ export function groupKey(chatId: string, groupedId: string): string {
   return `${chatId}:${groupedId}`;
 }
 
+export function paramPlaceholders(start: number, count: number): string {
+  return Array.from({ length: count }, (_, index) => `$${start + index}`).join(", ");
+}
+
 export function toIsoDate(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   const text = String(value).trim();

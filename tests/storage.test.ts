@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createArchiveStore, SqliteArchiveStore, type MessageRow } from "../packages/message-archive/src/storage/index.js";
-import { toIsoDate } from "../packages/message-archive/src/storage/model.js";
+import { paramPlaceholders, toIsoDate } from "../packages/message-archive/src/storage/model.js";
 
 const CHAT_ID = "100";
 
@@ -144,6 +144,18 @@ test("message context returns the neighborhood around an anchor", async () => {
 test("unknown archive backend raises", () => {
   assert.throws(() => createArchiveStore({ backend: "oracle" }), /unknown archive backend/);
   assert.throws(() => createArchiveStore({ backend: "postgres" }), /needs url/);
+});
+
+test("paramPlaceholders emits positional $n bindings so batch inserts never bind literals", () => {
+  assert.equal(
+    paramPlaceholders(1, 18),
+    "$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18"
+  );
+  assert.equal(
+    paramPlaceholders(19, 18),
+    "$19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36"
+  );
+  assert.equal(paramPlaceholders(1, 7), "$1, $2, $3, $4, $5, $6, $7");
 });
 
 test("toIsoDate accepts ISO strings, dates, and epoch timestamps", () => {
