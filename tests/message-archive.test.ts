@@ -24,7 +24,9 @@ class FakeMessage implements TelegramMessage {
   constructor(
     readonly id: number,
     readonly media: FakeMedia | undefined = undefined,
-    readonly groupedId: number | undefined = undefined
+    readonly groupedId: number | undefined = undefined,
+    readonly message?: string,
+    readonly entities?: readonly unknown[]
   ) {}
 
   get date(): number {
@@ -263,6 +265,23 @@ test("archive rejects when both date and message limits are unlimited", async ()
       h.archiver.saveChatMessages("@test_chat", { daysBack: 0, maxMessages: 0 }),
       /cannot both be unlimited/
     );
+  } finally {
+    await h.store.close();
+  }
+});
+
+test("archive embeds text-url entity targets into stored text", async () => {
+  const h = await harness({
+    messages: [
+      new FakeMessage(1, undefined, undefined, "点这里 查看详情", [
+        { className: "MessageEntityTextUrl", offset: 1, length: 2, url: "https://t.me/invite" }
+      ])
+    ]
+  });
+  try {
+    await h.archiver.saveChatMessages("@test_chat");
+    const rows = (await h.store.searchStructured({})).items;
+    assert.equal(rows[0]!.text, "点这里 (https://t.me/invite) 查看详情");
   } finally {
     await h.store.close();
   }
