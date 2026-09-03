@@ -18,7 +18,7 @@ import { MediaGallery } from "@/components/media-gallery";
 import { api } from "@/lib/api";
 import { formatMessageDate, formatSender, messageTypeLabel } from "@/lib/format";
 import { HighlightedText } from "@/lib/highlight";
-import type { ContextPayload, LightboxItem, SearchRow } from "@/lib/types";
+import type { ContextPayload, LightboxItem, MediaItem, SearchRow } from "@/lib/types";
 
 const CONTEXT_INITIAL_WINDOW = 120;
 const ROW_GAP = 16;
@@ -27,16 +27,38 @@ const SCROLL_BUFFER = 600;
 const VIEWPORT_PAD_Y = 32;
 const ANCHOR_SLICE_EXTENT = 30;
 
-interface ContextRow {
+interface ContextEntry {
   readonly id: string;
-  readonly kind: "before" | "anchor" | "after";
-  readonly row: SearchRow;
+  rows: SearchRow[];
+  anchor: boolean;
+}
+
+function representativeRow(rows: readonly SearchRow[]): SearchRow {
+  return (rows.find((row) => row.text) ?? rows[0])!;
+}
+
+function mergeAlbumMedia(rows: readonly SearchRow[]): readonly MediaItem[] {
+  const seen = new Set<string>();
+  const items: MediaItem[] = [];
+  for (const row of rows) {
+    for (const media of row.media_items) {
+      if (seen.has(media.media_url)) continue;
+      seen.add(media.media_url);
+      items.push(media);
+    }
+  }
+  return items;
 }
 
 function estimateItemHeight(row: SearchRow): number {
   const textLines = row.text ? Math.max(1, Math.ceil(row.text.length / 40)) : 1;
   const mediaHeight = row.has_preview ? 84 : 0;
   return 26 + textLines * 21 + mediaHeight + 20;
+}
+
+function estimateEntryHeight(entry: ContextEntry): number {
+  const base = estimateItemHeight(representativeRow(entry.rows));
+  return entry.rows.length > 1 ? base + 24 : base;
 }
 
 function mergeMeasured(prev: Readonly<Record<string, number>>, measured: Readonly<Record<string, number>>): Record<string, number> {
@@ -88,11 +110,13 @@ function ContextMessage({
   row,
   keyword,
   anchor,
+  albumCount,
   onOpenMedia
 }: {
   readonly row: SearchRow;
   readonly keyword: string;
   readonly anchor: boolean;
+  readonly albumCount?: number;
   readonly onOpenMedia: (item: LightboxItem) => void;
 }) {
   return (
@@ -102,7 +126,7 @@ function ContextMessage({
           <span className="font-medium text-foreground">{formatSender(row)}</span>
           <span className="font-mono">{formatMessageDate(row.date)}</span>
           <Badge variant="secondary" className="text-[11px]">
-            {messageTypeLabel(row.message_type)}
+            {albumCount !== undefined ? `相册 ${albumCount}` : messageTypeLabel(row.message_type)}
           </Badge>
           {anchor ? (
             <Badge variant="default" className="text-[11px]">
@@ -140,29 +164,39 @@ function ContextThread({
   const [windowIndices, setWindowIndices] = useState<readonly [number, number]>([0, 0]);
   const centeringRef = useRef(false);
 
-  const rows = useMemo<readonly ContextRow[]>(
-    () => [
-      ...payload.before.map((row) => ({ id: row.id, kind: "before" as const, row })),
-      ...(payload.anchor ? [{ id: payload.anchor.id, kind: "anchor" as const, row: payload.anchor }] : []),
-      ...payload.after.map((row) => ({ id: row.id, kind: "after" as const, row }))
-    ],
-    [payload]
-  );
+  const entries = useMemo<readonly ContextEntry[]>(() => {
+    const list: readonly (readonly [SearchRow, boolean])[] = [
+      ...payload.before.map((row) => [row, false] as const),
+      ...(payload.anchor ? [[payload.anchor, true] as const] : []),
+      ...payload.after.map((row) => [row, false] as const)
+    ];
+    const result: ContextEntry[] = [];
+    for (const [row, anchor] of list) {
+      const last = result[result.length - 1];
+      if (last && row.grouped_id && last.rows[0]!.grouped_id === row.grouped_id) {
+        last.rows.push(row);
+        if (anchor) last.anchor = true;
+      } else {
+        result.push({ id: row.grouped_id ?? row.id, rows: [row], anchor });
+      }
+    }
+    return result;
+  }, [payload]);
 
-  const anchorIndex = useMemo(() => rows.findIndex((row) => row.kind === "anchor"), [rows]);
-  const anchor = anchorIndex >= 0 ? (rows[anchorIndex] ?? null) : null;
+  const anchorIndex = useMemo(() => entries.findIndex((entry) => entry.anchor), [entries]);
+  const anchor = anchorIndex >= 0 ? (entries[anchorIndex] ?? null) : null;
 
   const offsets = useMemo(() => {
-    const result = new Array<number>(rows.length + 1);
+    const result = new Array<number>(entries.length + 1);
     let acc = 0;
-    for (let i = 0; i < rows.length; i += 1) {
+    for (let i = 0; i < entries.length; i += 1) {
       result[i] = acc;
-      const height = heights[rows[i]!.id] ?? estimateItemHeight(rows[i]!.row);
-      acc += height + (i < rows.length - 1 ? ROW_GAP : ROW_BOTTOM_PAD);
+      const height = heights[entries[i]!.id] ?? estimateEntryHeight(entries[i]!);
+      acc += height + (i < entries.length - 1 ? ROW_GAP : ROW_BOTTOM_PAD);
     }
-    result[rows.length] = acc;
+    result[entries.length] = acc;
     return result;
-  }, [rows, heights]);
+  }, [entries, heights]);
 
   useLayoutEffect(() => {
     centeringRef.current = true;
@@ -198,10 +232,10 @@ function ContextThread({
     const contentHeight = Math.max(0, viewport.clientHeight - VIEWPORT_PAD_Y);
     const anchorElement = anchorElementRef.current;
     if (!anchorElement) {
-      const target = centerTarget(anchorIndex, offsets, heights[anchor.id] ?? estimateItemHeight(anchor.row), contentHeight);
+      const target = centerTarget(anchorIndex, offsets, heights[anchor.id] ?? estimateEntryHeight(anchor), contentHeight);
       viewport.scrollTop = target;
       const start = Math.max(0, anchorIndex - ANCHOR_SLICE_EXTENT);
-      const end = Math.min(rows.length, anchorIndex + ANCHOR_SLICE_EXTENT + 1);
+      const end = Math.min(entries.length, anchorIndex + ANCHOR_SLICE_EXTENT + 1);
       setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
     } else {
       centeringRef.current = false;
@@ -209,7 +243,7 @@ function ContextThread({
       const [start, end] = windowFromScroll(viewport.scrollTop, offsets, contentHeight);
       setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
     }
-  }, [heights, offsets, rows.length, anchor, anchorIndex, windowIndices]);
+  }, [heights, offsets, entries.length, anchor, anchorIndex, windowIndices]);
 
   const handleScroll = (event: UIEvent<HTMLDivElement>): void => {
     if (centeringRef.current) return;
@@ -231,14 +265,14 @@ function ContextThread({
     }
     centeringRef.current = true;
     const start = Math.max(0, anchorIndex - ANCHOR_SLICE_EXTENT);
-    const end = Math.min(rows.length, anchorIndex + ANCHOR_SLICE_EXTENT + 1);
+    const end = Math.min(entries.length, anchorIndex + ANCHOR_SLICE_EXTENT + 1);
     setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
   };
 
   const [start, end] = windowIndices;
-  const slice = rows.slice(start, end);
+  const slice = entries.slice(start, end);
   const spacerTop = offsets[start] ?? 0;
-  const spacerBottom = (offsets[rows.length] ?? 0) - (offsets[end] ?? 0);
+  const spacerBottom = (offsets[entries.length] ?? 0) - (offsets[end] ?? 0);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -249,20 +283,31 @@ function ContextThread({
       >
         <div style={{ height: spacerTop }} aria-hidden="true" />
         <div className="flex flex-col gap-4 pb-2">
-          {slice.map((row) =>
-            row.kind === "anchor" ? (
-              <Fragment key={row.id}>
+          {slice.map((entry) => {
+            const rows = entry.rows;
+            const row = rows.length > 1 ? { ...representativeRow(rows), media_items: mergeAlbumMedia(rows) } : (rows[0]!);
+            const message = (
+              <ContextMessage
+                row={row}
+                keyword={keyword}
+                anchor={entry.anchor}
+                albumCount={rows.length > 1 ? rows.length : undefined}
+                onOpenMedia={onOpenMedia}
+              />
+            );
+            return entry.anchor ? (
+              <Fragment key={entry.id}>
                 <Marker variant="separator">当前消息</Marker>
-                <div ref={anchorElementRef} data-context-row={row.id}>
-                  <ContextMessage row={row.row} keyword={keyword} anchor onOpenMedia={onOpenMedia} />
+                <div ref={anchorElementRef} data-context-row={entry.id}>
+                  {message}
                 </div>
               </Fragment>
             ) : (
-              <div key={row.id} data-context-row={row.id}>
-                <ContextMessage row={row.row} keyword={keyword} anchor={false} onOpenMedia={onOpenMedia} />
+              <div key={entry.id} data-context-row={entry.id}>
+                {message}
               </div>
-            )
-          )}
+            );
+          })}
         </div>
         <div style={{ height: spacerBottom }} aria-hidden="true" />
       </div>
