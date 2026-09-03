@@ -4,7 +4,7 @@ dist/
 .env.*
 !.env.example
 coverage/
-packages/message-archive/public/app.js
+packages/message-archive/public/
 data/settings.yml
 data/flows.yml
 data/accounts/

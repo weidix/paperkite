@@ -105,4 +105,4 @@ pnpm test
 pnpm build
 ```
 
-项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/public/app.js` 与 `packages/console-web/public/` 是构建产物，不作为源码维护。
+项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/message-archive/web/` 与 `packages/console-web/web/` 为 React + shadcn/ui 源码，经 Vite 构建到各自的 `public/` 目录，构建产物不作为源码维护。
