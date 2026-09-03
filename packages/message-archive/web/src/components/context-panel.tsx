@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { CrosshairIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,68 @@ import { HighlightedText } from "@/lib/highlight";
 import type { ContextPayload, LightboxItem, SearchRow } from "@/lib/types";
 
 const CONTEXT_INITIAL_WINDOW = 120;
+const ROW_GAP = 16;
+const ROW_BOTTOM_PAD = 8;
+const SCROLL_BUFFER = 600;
+const VIEWPORT_PAD_Y = 32;
+const ANCHOR_SLICE_EXTENT = 30;
+
+interface ContextRow {
+  readonly id: string;
+  readonly kind: "before" | "anchor" | "after";
+  readonly row: SearchRow;
+}
+
+function estimateItemHeight(row: SearchRow): number {
+  const textLines = row.text ? Math.max(1, Math.ceil(row.text.length / 40)) : 1;
+  const mediaHeight = row.has_preview ? 84 : 0;
+  return 26 + textLines * 21 + mediaHeight + 20;
+}
+
+function mergeMeasured(prev: Readonly<Record<string, number>>, measured: Readonly<Record<string, number>>): Record<string, number> {
+  let changed = false;
+  const next = { ...prev };
+  for (const [id, height] of Object.entries(measured)) {
+    if (height > 0 && Math.abs(height - (next[id] ?? -1)) > 0.5) {
+      next[id] = height;
+      changed = true;
+    }
+  }
+  return changed ? next : prev;
+}
+
+function windowFromScroll(scrollTop: number, offsets: readonly number[], contentHeight: number): readonly [number, number] {
+  const itemCount = offsets.length - 1;
+  if (itemCount <= 0) return [0, 0];
+  const top = Math.max(0, scrollTop - SCROLL_BUFFER);
+  const bottom = scrollTop + contentHeight + SCROLL_BUFFER;
+  let start = 0;
+  while (start < itemCount && (offsets[start + 1] ?? 0) <= top) start += 1;
+  let end = itemCount;
+  while (end > 0 && (offsets[end - 1] ?? 0) >= bottom) end -= 1;
+  if (end <= start) {
+    const mid = Math.max(0, Math.min(start, itemCount - 1));
+    start = Math.max(0, mid - 1);
+    end = Math.min(itemCount, mid + 2);
+  }
+  return [start, end];
+}
+
+function centerTarget(anchorIndex: number, offsets: readonly number[], anchorHeight: number, contentHeight: number): number {
+  return Math.max(0, (offsets[anchorIndex] ?? 0) + anchorHeight / 2 - contentHeight / 2);
+}
+
+function centerAnchorDom(viewport: HTMLDivElement | null, anchor: HTMLDivElement | null, smooth: boolean): void {
+  if (!viewport || !anchor) return;
+  const viewportRect = viewport.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const target = Math.max(0, viewport.scrollTop + anchorRect.top + anchorRect.height / 2 - (viewportRect.top + viewportRect.height / 2));
+  if (smooth) {
+    viewport.scrollTo({ top: target, behavior: "smooth" });
+  } else {
+    viewport.scrollTop = target;
+  }
+}
 
 function ContextMessage({
   row,
@@ -73,35 +135,136 @@ function ContextThread({
   readonly onOpenMedia: (item: LightboxItem) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
-  const anchorRef = useRef<HTMLDivElement>(null);
+  const anchorElementRef = useRef<HTMLDivElement>(null);
+  const [heights, setHeights] = useState<Readonly<Record<string, number>>>({});
+  const [windowIndices, setWindowIndices] = useState<readonly [number, number]>([0, 0]);
+  const centeringRef = useRef(false);
 
-  useEffect(() => {
-    centerAnchor(viewportRef.current, anchorRef.current, false);
+  const rows = useMemo<readonly ContextRow[]>(
+    () => [
+      ...payload.before.map((row) => ({ id: row.id, kind: "before" as const, row })),
+      ...(payload.anchor ? [{ id: payload.anchor.id, kind: "anchor" as const, row: payload.anchor }] : []),
+      ...payload.after.map((row) => ({ id: row.id, kind: "after" as const, row }))
+    ],
+    [payload]
+  );
+
+  const anchorIndex = useMemo(() => rows.findIndex((row) => row.kind === "anchor"), [rows]);
+  const anchor = anchorIndex >= 0 ? (rows[anchorIndex] ?? null) : null;
+
+  const offsets = useMemo(() => {
+    const result = new Array<number>(rows.length + 1);
+    let acc = 0;
+    for (let i = 0; i < rows.length; i += 1) {
+      result[i] = acc;
+      const height = heights[rows[i]!.id] ?? estimateItemHeight(rows[i]!.row);
+      acc += height + (i < rows.length - 1 ? ROW_GAP : ROW_BOTTOM_PAD);
+    }
+    result[rows.length] = acc;
+    return result;
+  }, [rows, heights]);
+
+  useLayoutEffect(() => {
+    centeringRef.current = true;
+    setWindowIndices([0, 0]);
   }, [payload]);
 
-  const scrollToAnchor = (): void => {
-    centerAnchor(viewportRef.current, anchorRef.current, true);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const elements = Array.from(viewport.querySelectorAll<HTMLElement>("[data-context-row]"));
+    const measured: Record<string, number> = {};
+    for (const element of elements) {
+      const id = element.dataset.contextRow;
+      if (id) measured[id] = element.getBoundingClientRect().height;
+    }
+    setHeights((prev) => mergeMeasured(prev, measured));
+    const observer = new ResizeObserver((entries) => {
+      const live: Record<string, number> = {};
+      for (const entry of entries) {
+        const id = (entry.target as HTMLElement).dataset.contextRow;
+        if (id) live[id] = entry.target.getBoundingClientRect().height;
+      }
+      setHeights((prev) => mergeMeasured(prev, live));
+    });
+    for (const element of elements) observer.observe(element);
+    return () => observer.disconnect();
+  }, [windowIndices]);
+
+  useLayoutEffect(() => {
+    if (!centeringRef.current) return;
+    const viewport = viewportRef.current;
+    if (!viewport || anchorIndex < 0 || !anchor) return;
+    const contentHeight = Math.max(0, viewport.clientHeight - VIEWPORT_PAD_Y);
+    const anchorElement = anchorElementRef.current;
+    if (!anchorElement) {
+      const target = centerTarget(anchorIndex, offsets, heights[anchor.id] ?? estimateItemHeight(anchor.row), contentHeight);
+      viewport.scrollTop = target;
+      const start = Math.max(0, anchorIndex - ANCHOR_SLICE_EXTENT);
+      const end = Math.min(rows.length, anchorIndex + ANCHOR_SLICE_EXTENT + 1);
+      setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
+    } else {
+      centeringRef.current = false;
+      centerAnchorDom(viewport, anchorElement, false);
+      const [start, end] = windowFromScroll(viewport.scrollTop, offsets, contentHeight);
+      setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
+    }
+  }, [heights, offsets, rows.length, anchor, anchorIndex, windowIndices]);
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>): void => {
+    if (centeringRef.current) return;
+    const viewport = event.currentTarget;
+    const contentHeight = Math.max(0, viewport.clientHeight - VIEWPORT_PAD_Y);
+    const [start, end] = windowFromScroll(viewport.scrollTop, offsets, contentHeight);
+    setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
   };
+
+  const scrollToAnchor = (): void => {
+    if (anchorElementRef.current) {
+      centerAnchorDom(viewportRef.current, anchorElementRef.current, true);
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      const contentHeight = Math.max(0, viewport.clientHeight - VIEWPORT_PAD_Y);
+      const [start, end] = windowFromScroll(viewport.scrollTop, offsets, contentHeight);
+      setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
+      return;
+    }
+    centeringRef.current = true;
+    const start = Math.max(0, anchorIndex - ANCHOR_SLICE_EXTENT);
+    const end = Math.min(rows.length, anchorIndex + ANCHOR_SLICE_EXTENT + 1);
+    setWindowIndices((current) => (current[0] === start && current[1] === end ? current : ([start, end] as const)));
+  };
+
+  const [start, end] = windowIndices;
+  const slice = rows.slice(start, end);
+  const spacerTop = offsets[start] ?? 0;
+  const spacerBottom = (offsets[rows.length] ?? 0) - (offsets[end] ?? 0);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto p-4 md:p-5">
+      <div
+        ref={viewportRef}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-5"
+      >
+        <div style={{ height: spacerTop }} aria-hidden="true" />
         <div className="flex flex-col gap-4 pb-2">
-          {payload.before.map((row) => (
-            <ContextMessage key={row.id} row={row} keyword={keyword} anchor={false} onOpenMedia={onOpenMedia} />
-          ))}
-          {payload.anchor ? (
-            <>
-              <Marker variant="separator">当前消息</Marker>
-              <div ref={anchorRef}>
-                <ContextMessage row={payload.anchor} keyword={keyword} anchor onOpenMedia={onOpenMedia} />
+          {slice.map((row) =>
+            row.kind === "anchor" ? (
+              <Fragment key={row.id}>
+                <Marker variant="separator">当前消息</Marker>
+                <div ref={anchorElementRef} data-context-row={row.id}>
+                  <ContextMessage row={row.row} keyword={keyword} anchor onOpenMedia={onOpenMedia} />
+                </div>
+              </Fragment>
+            ) : (
+              <div key={row.id} data-context-row={row.id}>
+                <ContextMessage row={row.row} keyword={keyword} anchor={false} onOpenMedia={onOpenMedia} />
               </div>
-            </>
-          ) : null}
-          {payload.after.map((row) => (
-            <ContextMessage key={row.id} row={row} keyword={keyword} anchor={false} onOpenMedia={onOpenMedia} />
-          ))}
+            )
+          )}
         </div>
+        <div style={{ height: spacerBottom }} aria-hidden="true" />
       </div>
       <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
         <Button size="sm" variant="secondary" className="pointer-events-auto" onClick={scrollToAnchor}>
@@ -111,19 +274,6 @@ function ContextThread({
       </div>
     </div>
   );
-}
-
-function centerAnchor(viewport: HTMLDivElement | null, anchor: HTMLDivElement | null, smooth: boolean): void {
-  if (!viewport || !anchor) return;
-  const viewportRect = viewport.getBoundingClientRect();
-  const anchorRect = anchor.getBoundingClientRect();
-  const top = viewport.scrollTop + anchorRect.top + anchorRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
-  const target = Math.max(top, 0);
-  if (smooth) {
-    viewport.scrollTo({ top: target, behavior: "smooth" });
-  } else {
-    viewport.scrollTop = target;
-  }
 }
 
 function ContextBody({
