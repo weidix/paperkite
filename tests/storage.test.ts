@@ -101,6 +101,7 @@ test("structured search applies keyword terms, time modes and pagination", async
 
     const all = await store.searchStructured({});
     assert.equal(all.total, 3);
+    assert.equal(all.totalMessages, 3);
 
     const matched = await store.searchStructured({
       keyword: "clash 香港",
@@ -108,13 +109,52 @@ test("structured search applies keyword terms, time modes and pagination", async
       dateTo: "2026-08-30T23:59:59.000Z"
     });
     assert.equal(matched.total, 1);
-    assert.equal(matched.items[0]?.text, "clash 香港 节点");
+    assert.equal(matched.items[0]?.kind, "message");
+    assert.equal(matched.items[0]?.kind === "message" ? matched.items[0].record.text : null, "clash 香港 节点");
 
     const excluded = await store.searchStructured({ keyword: "clash", excludeKeyword: "广告", timeMode: "include" });
     assert.equal(excluded.total, 1);
 
     const reversed = await store.searchStructured({ keyword: "香港", timeMode: "exclude", dateFrom: "2026-08-30T00:00:00.000Z", dateTo: "2026-08-31T23:59:59.000Z" });
     assert.equal(reversed.total, 0);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("structured search folds albums into a single entry", async () => {
+  const { store, cleanup } = await newStore();
+  try {
+    await store.saveBatch([
+      messageRow(1, { date: "2026-08-30T10:00:00.000Z", text: "alpha" }),
+      messageRow(2, { date: "2026-08-30T10:01:00.000Z", groupedId: "g1", text: "", hasMedia: true, mediaType: "photo" }),
+      messageRow(3, { date: "2026-08-30T10:02:00.000Z", groupedId: "g1", text: "优惠券 密语", hasMedia: true, mediaType: "photo" }),
+      messageRow(4, { date: "2026-08-30T10:03:00.000Z", groupedId: "g1", text: "", hasMedia: true, mediaType: "photo" }),
+      messageRow(5, { date: "2026-08-30T10:04:00.000Z", text: "omega" })
+    ], []);
+
+    // 相册折叠为单个条目，total 按条目计，totalMessages 按消息计
+    const all = await store.searchStructured({});
+    assert.equal(all.total, 3);
+    assert.equal(all.totalMessages, 5);
+    assert.deepEqual(all.items.map((entry) => entry.kind), ["message", "album", "message"]);
+    const album = all.items[1];
+    assert.equal(album?.kind, "album");
+    if (album?.kind !== "album") throw new Error("expected album entry");
+    assert.equal(album.rows.length, 3);
+    assert.equal(album.rows[0]?.messageId, 2);
+    assert.equal(album.captionText, "优惠券 密语");
+
+    // 命中组内非首条消息时，整组仍以相册条目出现
+    const byMember = await store.searchStructured({ keyword: "密语" });
+    assert.equal(byMember.total, 1);
+    assert.equal(byMember.totalMessages, 1);
+    assert.equal(byMember.items[0]?.kind, "album");
+
+    // 相册按组内第一条定位，分页以条目推进
+    const page = await store.searchStructured({ limit: 1, offset: 1 });
+    assert.equal(page.items.length, 1);
+    assert.equal(page.items[0]?.kind, "album");
   } finally {
     await cleanup();
   }
@@ -131,7 +171,7 @@ test("message context returns the neighborhood around an anchor", async () => {
       messageRow(5, { text: "fifth" })
     ], []);
     const search = await store.searchStructured({ keyword: "second" });
-    const rowId = search.items[0]?.rowId;
+    const rowId = search.items[0]?.kind === "message" ? search.items[0].record.rowId : undefined;
     assert.ok(rowId);
 
     const context = await store.getMessageContext(rowId, 1, 1);

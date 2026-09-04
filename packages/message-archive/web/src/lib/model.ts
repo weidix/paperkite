@@ -49,8 +49,11 @@ export interface MessageRecord {
 }
 
 export interface ArchiveSearchResult {
-  readonly items: readonly MessageRecord[];
+  /** 条目视图：相册成员折叠成单个相册条目，分页按条目推进。 */
+  readonly items: readonly ContextEntry[];
   readonly total: number;
+  /** 过滤条件命中的消息总数（相册按成员条数计，首页统计用）。 */
+  readonly totalMessages: number;
   readonly limit: number;
   readonly offset: number;
 }

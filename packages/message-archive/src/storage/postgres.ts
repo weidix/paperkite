@@ -277,23 +277,32 @@ export class PostgresArchiveStore implements ArchiveStore {
   }
 
   async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
-    const { where, values } = buildWhere(query);
+    const { where: rowWhere, values: rowValues } = buildWhere(query);
+    const { where: memberWhere, values: memberValues } = buildWhere(query, "g");
+    const entry = buildSearchWhere(this.table("messages"), rowWhere, rowValues, memberWhere, memberValues);
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
-    const count = await this.pool.query(
-      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")} m ${where}`,
-      values
+    const entryCount = await this.pool.query(
+      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")} m ${entry.where}`,
+      entry.values
+    );
+    const messageCount = await this.pool.query(
+      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")} m ${rowWhere}`,
+      rowValues
     );
     const rows = await this.pool.query(
       `${messageSelect(this.table("messages"), this.table("media_files"))}
-       ${where}
+       ${entry.where}
        ORDER BY m.date DESC, m.id DESC
-       LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
-      [...values, limit, offset]
+       LIMIT $${entry.values.length + 1} OFFSET $${entry.values.length + 2}`,
+      [...entry.values, limit, offset]
     );
+    const attached = await this.attachMedia(rows.rows);
+    const groupMap = await this.fetchGroupsAttached(uniqueGroupKeys(rows.rows));
     return {
-      items: await this.attachMedia(rows.rows),
-      total: Number(count.rows[0]?.count ?? 0),
+      items: buildContextEntries(attached, groupMap),
+      total: Number(entryCount.rows[0]?.count ?? 0),
+      totalMessages: Number(messageCount.rows[0]?.count ?? 0),
       limit,
       offset
     };
@@ -591,18 +600,43 @@ function albumSelect(messages: string, mediaFiles: string): string {
     ) media_meta ON TRUE`;
 }
 
-function buildWhere(query: ArchiveQuery): { where: string; values: string[] } {
+/** 检索基线：普通消息取自身；相册取组内第一条作代表，组内任一条命中即整体命中。 */
+function buildSearchWhere(
+  messages: string,
+  rowWhere: string,
+  rowValues: string[],
+  memberWhere: string,
+  memberValues: string[]
+): { where: string; values: string[] } {
+  const row = rowWhere?.replace(/^WHERE\s+/, "");
+  const member = memberWhere
+    ? ` OR EXISTS (
+        SELECT 1 FROM ${messages} g
+         WHERE g.chat_id = m.chat_id AND g.grouped_id = m.grouped_id
+           AND ${memberWhere
+             .replace(/^WHERE\s+/, "")
+             .replace(/\$(\d+)/g, (_match, index: string) => `$${rowValues.length + Number(index)}`)}
+      )`
+    : "";
+  const matches = row ? ` AND (${row}${member})` : "";
+  return {
+    where: `WHERE ${groupFirstCondition(messages)}${matches}`,
+    values: [...rowValues, ...memberValues]
+  };
+}
+
+function buildWhere(query: ArchiveQuery, alias = "m"): { where: string; values: string[] } {
   const conditions: string[] = [];
   const values: string[] = [];
   const add = (condition: string, value: string): void => {
     values.push(value);
     conditions.push(condition.replace("$N", `$${values.length}`));
   };
-  for (const term of splitTerms(query.keyword)) add("m.text ILIKE $N", `%${term}%`);
-  for (const term of splitTerms(query.excludeKeyword)) add("m.text NOT ILIKE $N", `%${term}%`);
-  if (query.chatId?.trim()) add("m.chat_id = $N", query.chatId.trim());
-  if (query.chatTitle?.trim()) add("m.chat_title ILIKE $N", `%${query.chatTitle.trim()}%`);
-  appendTimeWhere(conditions, values, query, add);
+  for (const term of splitTerms(query.keyword)) add(`${alias}.text ILIKE $N`, `%${term}%`);
+  for (const term of splitTerms(query.excludeKeyword)) add(`${alias}.text NOT ILIKE $N`, `%${term}%`);
+  if (query.chatId?.trim()) add(`${alias}.chat_id = $N`, query.chatId.trim());
+  if (query.chatTitle?.trim()) add(`${alias}.chat_title ILIKE $N`, `%${query.chatTitle.trim()}%`);
+  appendTimeWhere(conditions, values, query, add, alias);
   return { where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
 }
 
@@ -610,25 +644,27 @@ function appendTimeWhere(
   conditions: string[],
   values: string[],
   query: ArchiveQuery,
-  add: (condition: string, value: string) => void
+  add: (condition: string, value: string) => void,
+  alias = "m"
 ): void {
   const mode = normalizeTimeMode(query.timeMode);
   if (mode === "off" || (!query.dateFrom && !query.dateTo)) return;
+  const column = `${alias}.date`;
   if (mode === "include") {
-    if (query.dateFrom) add("m.date >= $N::timestamptz", query.dateFrom);
-    if (query.dateTo) add("m.date <= $N::timestamptz", query.dateTo);
+    if (query.dateFrom) add(`${column} >= $N::timestamptz`, query.dateFrom);
+    if (query.dateTo) add(`${column} <= $N::timestamptz`, query.dateTo);
     return;
   }
   if (query.dateFrom && query.dateTo) {
     const fromIndex = values.length + 1;
     values.push(query.dateFrom, query.dateTo);
     conditions.push(
-      `NOT (m.date >= $${fromIndex}::timestamptz AND m.date <= $${fromIndex + 1}::timestamptz)`
+      `NOT (${column} >= $${fromIndex}::timestamptz AND ${column} <= $${fromIndex + 1}::timestamptz)`
     );
   } else if (query.dateFrom) {
-    add("m.date < $N::timestamptz", query.dateFrom);
+    add(`${column} < $N::timestamptz`, query.dateFrom);
   } else if (query.dateTo) {
-    add("m.date > $N::timestamptz", query.dateTo);
+    add(`${column} > $N::timestamptz`, query.dateTo);
   }
 }
 

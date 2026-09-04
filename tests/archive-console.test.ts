@@ -136,8 +136,10 @@ test("archive console search returns items, total and filters", async () => {
     assert.equal(all.statusCode, 200);
     const body = all.json();
     assert.equal(body.total, 5);
+    assert.equal(body.totalMessages, 5);
     assert.equal(body.items.length, 5);
-    assert.equal(body.items[0]!.text, "维护");
+    assert.equal(body.items[0]!.kind, "message");
+    assert.equal(body.items[0]!.kind === "message" ? body.items[0]!.record.text : null, "维护");
 
     const keyword = await h.server.inject({ method: "GET", url: "/api/search?q=%E7%BB%B4%E6%8A%A4" });
     assert.equal(keyword.statusCode, 200);

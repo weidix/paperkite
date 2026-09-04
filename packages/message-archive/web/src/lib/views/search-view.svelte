@@ -4,11 +4,12 @@
   import { searchMessages, type SearchQuery } from "$lib/api";
   import { dayLabel, fmtCount, fmtTs, truncate } from "$lib/format";
   import { chats, isEmptySearch, loadChats, navigate, pendingSearchFocus, searchCache, searchScroll, viewStore } from "$lib/state.svelte";
+  import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
   import DatePicker from "$lib/components/date-picker.svelte";
   import MessageRow from "$lib/components/message-row.svelte";
   import Select from "$lib/components/select.svelte";
-  import type { ArchiveSearchResult, MessageRecord, TimeMode } from "$lib/model";
+  import type { ArchiveSearchResult, ContextEntry, TimeMode } from "$lib/model";
 
   const PAGE = 50;
   let generation = 0;
@@ -75,7 +76,7 @@
     const key = queryKey();
     if (!home && results === null && searchCache.results !== null && searchCache.key === key) {
       results = searchCache.results;
-      totalAll = searchCache.results.total;
+      totalAll = searchCache.results.totalMessages;
       return;
     }
     loading = true;
@@ -83,7 +84,7 @@
     searchMessages({ ...currentQuery(), limit: home ? 1 : PAGE })
       .then((res) => {
         if (token !== generation) return;
-        totalAll = res.total;
+        totalAll = res.totalMessages;
         results = home ? null : res;
         if (!home) {
           searchCache.key = key;
@@ -171,10 +172,10 @@
     return date.toISOString();
   }
 
-  function groupByDay(items: readonly MessageRecord[]): { label: string; items: MessageRecord[] }[] {
-    const groups: { label: string; items: MessageRecord[] }[] = [];
+  function groupByDay(items: readonly ContextEntry[]): { label: string; items: ContextEntry[] }[] {
+    const groups: { label: string; items: ContextEntry[] }[] = [];
     for (const item of items) {
-      const label = dayLabel(item.date);
+      const label = dayLabel(entryDate(item));
       const last = groups[groups.length - 1];
       if (last && last.label === label) {
         last.items.push(item);
@@ -183,6 +184,14 @@
       }
     }
     return groups;
+  }
+
+  function entryDate(entry: ContextEntry): string {
+    return entry.kind === "album" ? (entry.rows[0]?.date ?? "") : entry.record.date;
+  }
+
+  function entryKey(entry: ContextEntry): string {
+    return entry.kind === "album" ? entry.rowId : entry.record.rowId;
   }
 
   function messageOf(error: unknown): string {
@@ -392,8 +401,12 @@
         <span class="font-mono text-[10px] tracking-widest text-muted-foreground">{day.label}</span>
         <span class="h-px flex-1 bg-border/70" aria-hidden="true"></span>
       </div>
-      {#each day.items as item (item.rowId)}
-        <MessageRow record={item} highlights={terms} />
+      {#each day.items as item (entryKey(item))}
+        {#if item.kind === "album"}
+          <AlbumRow entry={item} />
+        {:else}
+          <MessageRow record={item.record} highlights={terms} />
+        {/if}
       {/each}
     {/each}
     <div class="mt-3 flex justify-center">

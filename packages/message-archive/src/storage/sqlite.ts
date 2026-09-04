@@ -268,22 +268,30 @@ export class SqliteArchiveStore implements ArchiveStore {
   }
 
   async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
-    const { where, values } = buildWhere(query);
+    const { where: rowWhere, values: rowValues } = buildWhere(query);
+    const { where: memberWhere, values: memberValues } = buildWhere(query, "g");
+    const entry = buildSearchWhere(rowWhere, rowValues, memberWhere, memberValues);
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
-    const countRow = this.database.prepare(
-      `SELECT COUNT(*) AS count FROM messages m ${where}`
-    ).get(...values) as { count: number };
+    const entryCount = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM messages m ${entry.where}`
+    ).get(...entry.values) as { count: number };
+    const messageCount = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM messages m ${rowWhere}`
+    ).get(...rowValues) as { count: number };
     const rows = this.database.prepare(`
       SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
         FROM messages m
-        ${where}
+        ${entry.where}
        ORDER BY m.date DESC, m.id DESC
        LIMIT ? OFFSET ?
-    `).all(...values, limit, offset) as readonly Record<string, unknown>[];
+    `).all(...entry.values, limit, offset) as readonly Record<string, unknown>[];
+    const attached = this.attachMedia(rows);
+    const groupMap = await this.fetchGroupsAttached(uniqueGroupKeys(rows));
     return {
-      items: this.attachMedia(rows),
-      total: Number(countRow.count),
+      items: buildContextEntries(attached, groupMap),
+      total: Number(entryCount.count),
+      totalMessages: Number(messageCount.count),
       limit,
       offset
     };
@@ -579,51 +587,79 @@ function toMessageRecord(
   };
 }
 
-function buildWhere(query: ArchiveQuery): { where: string; values: (string | number)[] } {
+/** 检索基线：普通消息取自身；相册取组内第一条作代表，组内任一条命中即整体命中。 */
+function buildSearchWhere(
+  rowWhere: string,
+  rowValues: (string | number)[],
+  memberWhere: string,
+  memberValues: (string | number)[]
+): { where: string; values: (string | number)[] } {
+  const row = rowWhere?.replace(/^WHERE\s+/, "");
+  const member = memberWhere
+    ? ` OR EXISTS (
+        SELECT 1 FROM messages g
+         WHERE g.chat_id = m.chat_id AND g.grouped_id = m.grouped_id
+           AND ${memberWhere.replace(/^WHERE\s+/, "")}
+      )`
+    : "";
+  const matches = row ? ` AND (${row}${member})` : "";
+  return {
+    where: `WHERE ${GROUP_FIRST_CONDITION}${matches}`,
+    values: [...rowValues, ...memberValues]
+  };
+}
+
+function buildWhere(query: ArchiveQuery, alias = "m"): { where: string; values: (string | number)[] } {
   const conditions: string[] = [];
   const values: (string | number)[] = [];
   for (const term of splitTerms(query.keyword)) {
-    conditions.push("m.text LIKE ? COLLATE NOCASE");
+    conditions.push(`${alias}.text LIKE ? COLLATE NOCASE`);
     values.push(`%${escapeLike(term)}%`);
   }
   for (const term of splitTerms(query.excludeKeyword)) {
-    conditions.push("m.text NOT LIKE ? COLLATE NOCASE");
+    conditions.push(`${alias}.text NOT LIKE ? COLLATE NOCASE`);
     values.push(`%${escapeLike(term)}%`);
   }
   if (query.chatId?.trim()) {
-    conditions.push("m.chat_id = ?");
+    conditions.push(`${alias}.chat_id = ?`);
     values.push(query.chatId.trim());
   }
   if (query.chatTitle?.trim()) {
-    conditions.push("m.chat_title LIKE ? COLLATE NOCASE");
+    conditions.push(`${alias}.chat_title LIKE ? COLLATE NOCASE`);
     values.push(`%${escapeLike(query.chatTitle.trim())}%`);
   }
-  appendTimeWhere(conditions, values, query);
+  appendTimeWhere(conditions, values, query, alias);
   return { where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
 }
 
-function appendTimeWhere(conditions: string[], values: (string | number)[], query: ArchiveQuery): void {
+function appendTimeWhere(
+  conditions: string[],
+  values: (string | number)[],
+  query: ArchiveQuery,
+  alias = "m"
+): void {
   const mode = normalizeTimeMode(query.timeMode);
   if (mode === "off" || (!query.dateFrom && !query.dateTo)) return;
+  const column = `${alias}.date`;
   if (mode === "include") {
     if (query.dateFrom) {
-      conditions.push("m.date >= ?");
+      conditions.push(`${column} >= ?`);
       values.push(query.dateFrom);
     }
     if (query.dateTo) {
-      conditions.push("m.date <= ?");
+      conditions.push(`${column} <= ?`);
       values.push(query.dateTo);
     }
     return;
   }
   if (query.dateFrom && query.dateTo) {
-    conditions.push("NOT (m.date >= ? AND m.date <= ?)");
+    conditions.push(`NOT (${column} >= ? AND ${column} <= ?)`);
     values.push(query.dateFrom, query.dateTo);
   } else if (query.dateFrom) {
-    conditions.push("m.date < ?");
+    conditions.push(`${column} < ?`);
     values.push(query.dateFrom);
   } else if (query.dateTo) {
-    conditions.push("m.date > ?");
+    conditions.push(`${column} > ?`);
     values.push(query.dateTo);
   }
 }

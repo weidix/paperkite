@@ -231,16 +231,23 @@ test("archive downloads media only for newly saved messages", async () => {
 
 test("archive grouped id is preserved on stored rows", async () => {
   const h = await harness({
-    messages: [new FakeMessage(1, undefined, 777), new FakeMessage(2, undefined, 777), new FakeMessage(3)]
+    messages: [
+      new FakeMessage(1, { className: "MessageMediaPhoto" }, 777),
+      new FakeMessage(2, { className: "MessageMediaPhoto" }, 777),
+      new FakeMessage(3)
+    ]
   });
   try {
     await h.archiver.saveChatMessages("@test_chat");
     const rows = await h.store.searchStructured({});
-    assert.equal(rows.total, 3);
-    assert.deepEqual(
-      rows.items.filter((row) => row.groupedId === "777").map((row) => row.messageId).sort(),
-      [1, 2]
-    );
+    // 同组消息折叠为相册条目，total 按条目计
+    assert.equal(rows.total, 2);
+    const album = rows.items.find((entry) => entry.kind === "album");
+    assert.equal(album?.kind, "album");
+    if (album?.kind !== "album") throw new Error("expected album entry");
+    assert.deepEqual(album.rows.map((row) => row.messageId).sort(), [1, 2]);
+    assert.ok(album.rows.every((row) => row.groupedId === "777"));
+    assert.equal(rows.items.filter((entry) => entry.kind === "message").length, 1);
   } finally {
     await h.store.close();
   }
@@ -282,7 +289,8 @@ test("archive embeds text-url entity targets into stored text", async () => {
   try {
     await h.archiver.saveChatMessages("@test_chat");
     const rows = (await h.store.searchStructured({})).items;
-    assert.equal(rows[0]!.text, "点这里 (https://t.me/invite) 查看详情");
+    assert.equal(rows[0]!.kind, "message");
+    assert.equal(rows[0]!.kind === "message" ? rows[0]!.record.text : null, "点这里 (https://t.me/invite) 查看详情");
   } finally {
     await h.store.close();
   }
