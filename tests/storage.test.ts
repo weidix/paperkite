@@ -126,7 +126,9 @@ test("message context returns the neighborhood around an anchor", async () => {
     await store.saveBatch([
       messageRow(1, { text: "first" }),
       messageRow(2, { text: "second" }),
-      messageRow(3, { text: "third" })
+      messageRow(3, { text: "third" }),
+      messageRow(4, { text: "fourth" }),
+      messageRow(5, { text: "fifth" })
     ], []);
     const search = await store.searchStructured({ keyword: "second" });
     const rowId = search.items[0]?.rowId;
@@ -136,6 +138,37 @@ test("message context returns the neighborhood around an anchor", async () => {
     assert.equal(context.anchor?.text, "second");
     assert.deepEqual(context.before.map((row) => row.text), ["first"]);
     assert.deepEqual(context.after.map((row) => row.text), ["third"]);
+    assert.equal(context.beforeN, 1);
+    assert.equal(context.afterN, 3);
+
+    const paged = await store.getMessageContext(rowId, 1, 1, 1, 2);
+    assert.deepEqual(paged.before.map((row) => row.text), []);
+    assert.deepEqual(paged.after.map((row) => row.text), ["fifth"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("chat ledger joins chats metadata with per-chat aggregates", async () => {
+  const { store, cleanup } = await newStore();
+  try {
+    await store.saveChat({ chatId: CHAT_ID, title: "Test Chat", username: "test_chat", type: "group" });
+    await store.saveChat({ chatId: "200", title: "Empty Chat", type: "channel" });
+    await store.saveBatch([
+      messageRow(1, { text: "first" }),
+      messageRow(2, { text: "second" }),
+      messageRow(3, { text: "third" })
+    ], []);
+
+    const ledger = await store.listChatLedger(10);
+    assert.equal(ledger.length, 2);
+    const chat = ledger.find((row) => row.chatId === CHAT_ID);
+    assert.equal(chat?.title, "Test Chat");
+    assert.equal(chat?.username, "test_chat");
+    assert.equal(chat?.type, "group");
+    assert.equal(chat?.count, 3);
+    assert.equal(chat?.lastText, "third");
+    assert.match(chat?.lastDate ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   } finally {
     await cleanup();
   }

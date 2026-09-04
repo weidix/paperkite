@@ -8,6 +8,7 @@ import {
   type ArchiveSearchResult,
   type ArchiveStore,
   type BatchResult,
+  type ChatLedgerRow,
   type ChatRecord,
   type LastMessageInfo,
   type MediaRow,
@@ -275,6 +276,46 @@ export class SqliteArchiveStore implements ArchiveStore {
     };
   }
 
+  async listChatLedger(limit: number): Promise<ChatLedgerRow[]> {
+    const cap = Math.min(500, Math.max(1, Number.isInteger(limit) ? limit : 300));
+    const rows = this.database.prepare(`
+      SELECT
+        c.chat_id AS chat_id,
+        COALESCE(c.title, latest.chat_title) AS title,
+        c.username,
+        c.type,
+        c.description,
+        c.members_count,
+        agg.count,
+        latest.date AS last_date,
+        substr(latest.text, 1, 120) AS last_text
+      FROM chats c
+      LEFT JOIN (
+        SELECT chat_id, COUNT(*) AS count
+          FROM messages
+         GROUP BY chat_id
+      ) agg ON agg.chat_id = c.chat_id
+      LEFT JOIN (
+        SELECT chat_id, chat_title, date, text,
+               ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY date DESC, id DESC) AS rn
+          FROM messages
+      ) latest ON latest.chat_id = c.chat_id AND latest.rn = 1
+      ORDER BY last_date DESC NULLS LAST, c.chat_id
+      LIMIT ?
+    `).all(cap) as readonly Record<string, unknown>[];
+    return rows.map((row) => ({
+      chatId: String(row.chat_id),
+      title: String(row.title ?? row.chat_id),
+      username: optionalString(row.username),
+      type: optionalString(row.type),
+      description: optionalString(row.description),
+      membersCount: optionalNumber(row.members_count),
+      count: Number(row.count ?? 0),
+      lastDate: optionalString(row.last_date),
+      lastText: optionalString(row.last_text)
+    }));
+  }
+
   async getMessageByRowId(rowId: string): Promise<MessageRecord | undefined> {
     const row = this.database.prepare(`
       SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
@@ -288,13 +329,17 @@ export class SqliteArchiveStore implements ArchiveStore {
   async getMessageContext(
     rowId: string,
     beforeN: number,
-    afterN: number
+    afterN: number,
+    beforeOffset = 0,
+    afterOffset = 0
   ): Promise<ArchiveContextResult> {
     const beforeLimit = normalizeContextLimit(beforeN);
     const afterLimit = normalizeContextLimit(afterN);
+    const beforeOff = normalizeOffset(beforeOffset);
+    const afterOff = normalizeOffset(afterOffset);
     const anchor = await this.getMessageByRowId(rowId);
     if (!anchor) {
-      return { anchor: undefined, before: [], after: [], beforeN: beforeLimit, afterN: afterLimit };
+      return { anchor: undefined, before: [], after: [], beforeN: 0, afterN: 0 };
     }
 
     const date = anchor.date;
@@ -305,8 +350,8 @@ export class SqliteArchiveStore implements ArchiveStore {
             FROM messages m
            WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
            ORDER BY m.date DESC, m.id DESC
-           LIMIT ?
-        `).all(anchor.chatId, date, date, id, beforeLimit) as readonly Record<string, unknown>[]
+           LIMIT ? OFFSET ?
+        `).all(anchor.chatId, date, date, id, beforeLimit, beforeOff) as readonly Record<string, unknown>[]
       : [];
     const afterRows = afterLimit
       ? this.database.prepare(`
@@ -314,15 +359,23 @@ export class SqliteArchiveStore implements ArchiveStore {
             FROM messages m
            WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
            ORDER BY m.date ASC, m.id ASC
-           LIMIT ?
-        `).all(anchor.chatId, date, date, id, afterLimit) as readonly Record<string, unknown>[]
+           LIMIT ? OFFSET ?
+        `).all(anchor.chatId, date, date, id, afterLimit, afterOff) as readonly Record<string, unknown>[]
       : [];
+    const beforeCount = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM messages m
+       WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
+    `).get(anchor.chatId, date, date, id) as { count: number };
+    const afterCount = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM messages m
+       WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
+    `).get(anchor.chatId, date, date, id) as { count: number };
     return {
       anchor,
       before: this.attachMedia([...beforeRows].reverse()),
       after: this.attachMedia(afterRows),
-      beforeN: beforeLimit,
-      afterN: afterLimit
+      beforeN: Number(beforeCount.count),
+      afterN: Number(afterCount.count)
     };
   }
 

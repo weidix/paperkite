@@ -6,6 +6,7 @@ import {
   type ArchiveSearchResult,
   type ArchiveStore,
   type BatchResult,
+  type ChatLedgerRow,
   type ChatRecord,
   type LastMessageInfo,
   type MediaRow,
@@ -295,6 +296,49 @@ export class PostgresArchiveStore implements ArchiveStore {
     };
   }
 
+  async listChatLedger(limit: number): Promise<ChatLedgerRow[]> {
+    const cap = Math.min(500, Math.max(1, Number.isInteger(limit) ? limit : 300));
+    const result = await this.pool.query(
+      `SELECT
+         c.chat_id::text AS chat_id,
+         COALESCE(c.title, latest.chat_title) AS title,
+         c.username,
+         c.type,
+         c.description,
+         c.members_count,
+         agg.count,
+         latest.date AS last_date,
+         LEFT(latest.text, 120) AS last_text
+       FROM ${this.table("chats")} c
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS count
+           FROM ${this.table("messages")} m
+          WHERE m.chat_id = c.chat_id
+       ) agg ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT chat_title, date, text
+           FROM ${this.table("messages")} m
+          WHERE m.chat_id = c.chat_id
+          ORDER BY m.date DESC, m.id DESC
+          LIMIT 1
+       ) latest ON TRUE
+       ORDER BY latest.date DESC NULLS LAST, c.chat_id
+       LIMIT $1`,
+      [cap]
+    );
+    return result.rows.map((row) => ({
+      chatId: String(row.chat_id),
+      title: String(row.title ?? row.chat_id),
+      username: optionalString(row.username),
+      type: optionalString(row.type),
+      description: optionalString(row.description),
+      membersCount: optionalNumber(row.members_count),
+      count: Number(row.count ?? 0),
+      lastDate: row.last_date === null || row.last_date === undefined ? undefined : toIsoDate(row.last_date),
+      lastText: optionalString(row.last_text)
+    }));
+  }
+
   async getMessageByRowId(rowId: string): Promise<MessageRecord | undefined> {
     const result = await this.pool.query(
       `${messageSelect(this.table("messages"), this.table("media_files"))}
@@ -308,13 +352,17 @@ export class PostgresArchiveStore implements ArchiveStore {
   async getMessageContext(
     rowId: string,
     beforeN: number,
-    afterN: number
+    afterN: number,
+    beforeOffset = 0,
+    afterOffset = 0
   ): Promise<ArchiveContextResult> {
     const beforeLimit = normalizeContextLimit(beforeN);
     const afterLimit = normalizeContextLimit(afterN);
+    const beforeOff = normalizeOffset(beforeOffset);
+    const afterOff = normalizeOffset(afterOffset);
     const anchor = await this.getMessageByRowId(rowId);
     if (!anchor) {
-      return { anchor: undefined, before: [], after: [], beforeN: beforeLimit, afterN: afterLimit };
+      return { anchor: undefined, before: [], after: [], beforeN: 0, afterN: 0 };
     }
 
     const beforeResult = beforeLimit
@@ -323,8 +371,8 @@ export class PostgresArchiveStore implements ArchiveStore {
            WHERE m.chat_id = $1
              AND (m.date < $2::timestamptz OR (m.date = $2::timestamptz AND m.id < $3::bigint))
            ORDER BY m.date DESC, m.id DESC
-           LIMIT $4`,
-          [anchor.chatId, anchor.date, anchor.rowId, beforeLimit]
+           LIMIT $4 OFFSET $5`,
+          [anchor.chatId, anchor.date, anchor.rowId, beforeLimit, beforeOff]
         )
       : { rows: [] as QueryResultRow[] };
     const afterResult = afterLimit
@@ -333,16 +381,28 @@ export class PostgresArchiveStore implements ArchiveStore {
            WHERE m.chat_id = $1
              AND (m.date > $2::timestamptz OR (m.date = $2::timestamptz AND m.id > $3::bigint))
            ORDER BY m.date ASC, m.id ASC
-           LIMIT $4`,
-          [anchor.chatId, anchor.date, anchor.rowId, afterLimit]
+           LIMIT $4 OFFSET $5`,
+          [anchor.chatId, anchor.date, anchor.rowId, afterLimit, afterOff]
         )
       : { rows: [] as QueryResultRow[] };
+    const beforeCount = await this.pool.query(
+      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")}
+        WHERE chat_id = $1
+          AND (date < $2::timestamptz OR (date = $2::timestamptz AND id < $3::bigint))`,
+      [anchor.chatId, anchor.date, anchor.rowId]
+    );
+    const afterCount = await this.pool.query(
+      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")}
+        WHERE chat_id = $1
+          AND (date > $2::timestamptz OR (date = $2::timestamptz AND id > $3::bigint))`,
+      [anchor.chatId, anchor.date, anchor.rowId]
+    );
     return {
       anchor,
       before: await this.attachMedia([...beforeResult.rows].reverse()),
       after: await this.attachMedia(afterResult.rows),
-      beforeN: beforeLimit,
-      afterN: afterLimit
+      beforeN: Number(beforeCount.rows[0]?.count ?? 0),
+      afterN: Number(afterCount.rows[0]?.count ?? 0)
     };
   }
 

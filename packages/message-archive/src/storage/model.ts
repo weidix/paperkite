@@ -118,12 +118,26 @@ export interface ArchiveSearchResult {
   readonly offset: number;
 }
 
+/** 锚点消息及其两侧上下文；beforeN/afterN 为该侧可用的总条数（不含锚点）。 */
 export interface ArchiveContextResult {
   readonly anchor: MessageRecord | undefined;
   readonly before: readonly MessageRecord[];
   readonly after: readonly MessageRecord[];
   readonly beforeN: number;
   readonly afterN: number;
+}
+
+/** 会话清单行：chats 元数据 + 消息表的按会话聚合。 */
+export interface ChatLedgerRow {
+  readonly chatId: string;
+  readonly title: string;
+  readonly username?: string;
+  readonly type?: string;
+  readonly description?: string;
+  readonly membersCount?: number;
+  readonly count: number;
+  readonly lastDate?: string;
+  readonly lastText?: string;
 }
 
 export interface ArchiveStoreOptions {
@@ -144,7 +158,14 @@ export interface ArchiveStore {
   messageIdsExist(chatId: string, messageIds: readonly number[]): Promise<ReadonlySet<number>>;
   saveBatch(messages: readonly MessageRow[], media: readonly MediaRow[]): Promise<BatchResult>;
   searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult>;
-  getMessageContext(rowId: string, beforeN: number, afterN: number): Promise<ArchiveContextResult>;
+  listChatLedger(limit: number): Promise<ChatLedgerRow[]>;
+  getMessageContext(
+    rowId: string,
+    beforeN: number,
+    afterN: number,
+    beforeOffset?: number,
+    afterOffset?: number
+  ): Promise<ArchiveContextResult>;
   getMessageByRowId(rowId: string): Promise<MessageRecord | undefined>;
   getMediaFileById(id: string): Promise<StoredMediaFile | undefined>;
 }

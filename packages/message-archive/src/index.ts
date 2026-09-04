@@ -2,6 +2,7 @@ import { Action, definePlugin, type PluginContext } from "@paperkite/sdk";
 import { utils } from "telegram";
 import { MessageArchiver, type ArchiveClient } from "./archiver.js";
 import { buildTargets, coerceBool, coerceInt, type ArchiveConfig } from "./config.js";
+import { ArchiveConsoleWebService } from "./console/service.js";
 import { createArchiveStore } from "./storage/index.js";
 
 type PeerLike = Parameters<typeof utils.getPeerId>[0];
@@ -68,12 +69,14 @@ export const manifest = {
   name: "@paperkite/plugin-message-archive",
   version: "0.1.0",
   capabilities: [
-    { kind: "action" as const, name: "archive.sync" }
+    { kind: "action" as const, name: "archive.sync" },
+    { kind: "service" as const, name: "archive.console_web" }
   ]
 };
 
 export async function register(context: PluginContext): Promise<void> {
   context.registerAction("archive.sync", ArchiveSyncAction);
+  context.registerService("archive.console_web", ArchiveConsoleWebService);
 }
 
 export default definePlugin({ manifest, register });

@@ -22,9 +22,9 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsc -p tsconfig.json && pnpm --filter @paperkite/plugin-console-web build:web",
+    "build": "tsc -p tsconfig.json && pnpm --filter @paperkite/plugin-console-web build:web && pnpm --filter @paperkite/plugin-message-archive build:web",
     "start": "node --import tsx/esm dist/src/cli.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @paperkite/plugin-console-web typecheck:web",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @paperkite/plugin-console-web typecheck:web && pnpm --filter @paperkite/plugin-message-archive typecheck:web",
     "test": "tsx --test tests/*.test.ts",
     "check": "pnpm typecheck && pnpm test"
   },

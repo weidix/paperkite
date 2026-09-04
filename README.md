@@ -25,7 +25,7 @@ pnpm start run
 | `@paperkite/plugin-bark` | `notifications.bark` |
 | `@paperkite/plugin-conversation-watch` | `watch.group`、`watch.poll` |
 | `@paperkite/plugin-account-watch` | `watch.session` |
-| `@paperkite/plugin-message-archive` | `archive.sync` |
+| `@paperkite/plugin-message-archive` | `archive.sync`、`archive.console_web` |
 | `@paperkite/plugin-process-command` | `system.command` |
 | `@paperkite/plugin-console-web` | `runtime.console_web` |
 
@@ -70,6 +70,23 @@ config:
   url: postgresql://user:password@host/database
 ```
 
+归档台（`archive.console_web`）是消息归档插件的 Web 终端，面向拥有者本人翻查归档资料：检索消息、按会话浏览、查看同群上下文、预览与下载媒体。页面由 SvelteKit 静态 SPA 构成，构建产物输出到 `packages/message-archive/public`，与 API 由同一服务进程托管：
+
+```yaml
+services:
+  - id: archive-console
+    capability: archive.console_web
+    session: primary        # 可选；配置后可从 Telegram 在线取回未落盘媒体
+    config:
+      host: 127.0.0.1
+      port: 3379
+      backend: sqlite       # 与 archive.sync 指向同一数据库
+      file: data/archive.db
+      mediaRoot: data/downloads  # 落盘媒体的解析根目录
+```
+
+存储配置（`backend`/`file`/`url`/`schema`）必须与要查的 `archive.sync` 指向同一数据库；`mediaRoot` 是媒体相对路径的解析基准，未配置时相对进程工作目录解析。终端基于存储的只读接口组合数据：`searchStructured` 检索（关键词、会话、日期区间、包含/排除时间模式、分页）、`getMessageContext` 取同群上下文、`getMessageByRowId` 取完整消息（含媒体与相册行）、`getMediaFileById` 定位落盘媒体。媒体预览两路取源：已落盘文件直接流式返回（支持 Range 与附件下载），未落盘的经服务注入的 `session` 实时从 Telegram 取回；未配置会话时在线取回返回 503。JSON API 错误统一为 `{ error: string }`，4xx 为参数与不存在、503 为依赖不可用。界面为黑白灰双主题，`/` 聚焦检索、`Esc` 关闭浮层，长列表分批加载，媒体点击才取图。
+
 命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
 
 运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 SvelteKit + Bits UI 组成：
@@ -105,4 +122,4 @@ pnpm test
 pnpm build
 ```
 
-项目源码和插件源码全部使用 TypeScript；浏览器端的 `packages/console-web/web/` 为 SvelteKit + Bits UI 源码（黑白灰主题），经 SvelteKit 静态适配器构建到 `packages/console-web/public/`，构建产物不作为源码维护。
+项目源码和插件源码全部使用 TypeScript；浏览器端 `packages/console-web/web/`（运行控制台）与 `packages/message-archive/web/`（归档台）为 SvelteKit + Bits UI 静态 SPA 源码（黑白灰主题），分别经 SvelteKit 静态适配器构建到各自的 `public/` 目录，构建产物不作为源码维护。
