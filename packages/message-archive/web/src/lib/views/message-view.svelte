@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronRight, Download, Image as ImageIcon, Maximize2, X } from "lucide-svelte";
-  import { tick, untrack } from "svelte";
-  import { fetchContext, fetchMediaMeta, fetchState, mediaDiskUrl, mediaLiveThumbUrl, mediaLiveUrl, type ArchiveState } from "$lib/api";
-  import { fmtCount, fmtTs, senderName } from "$lib/format";
+  import { ArrowLeft, ChevronRight, X } from "lucide-svelte";
+  import { tick } from "svelte";
+  import { fetchContext, fetchMediaMeta, fetchState, mediaDiskUrl, mediaDownloadUrl, mediaLiveThumbUrl, mediaLiveUrl, type ArchiveState } from "$lib/api";
+  import { fmtCount, fmtTs, highlightSegments, senderName } from "$lib/format";
   import { backToSearch, navigate, showLightbox, type LightboxItem } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
   import MessageRow from "$lib/components/message-row.svelte";
-  import MediaTile from "$lib/components/media-tile.svelte";
-  import type { ContextEntry, MessageRecord, StoredMediaFile } from "$lib/model";
+  import MediaStrip, { type StripTile } from "$lib/components/media-strip.svelte";
+  import type { AlbumContextEntry, AlbumRow as AlbumRowRecord, ContextEntry, MessageRecord, StoredMediaFile } from "$lib/model";
 
   const WINDOW = 20;
   const PAGE = 20;
@@ -29,19 +29,26 @@
   let loadingBefore = $state(false);
   let loadingAfter = $state(false);
   let scrollAnchor = $state<string | null>(null);
-  let albumIndex = $state(0);
+  let expanded = $state(false);
 
   const album = $derived(anchor?.kind === "album" ? anchor : null);
   const messageAnchor = $derived(anchor?.kind === "message" ? anchor.record : null);
   const anchorRecord = $derived(album?.rows[0] ?? messageAnchor ?? null);
-  const albumCurrent = $derived(album !== null ? (album.rows[albumIndex] ?? null) : null);
-  const liveRow = $derived(
-    album !== null
-      ? (albumCurrent !== null && albumCurrent.hasMedia && albumCurrent.mediaFiles.length === 0
-        ? albumCurrent
-        : null)
-      : (messageAnchor?.hasMedia && messageAnchor.mediaFiles.length === 0 ? messageAnchor : null)
+  const anchorText = $derived(album?.captionText ?? messageAnchor?.text ?? "");
+  const segments = $derived(highlightSegments(anchorText, terms));
+  const canExpand = $derived(anchorText.length > 120);
+
+  /** 相册整体预览序列：跨行展平的全部媒体项与每行的起始序号。 */
+  const albumMedia = $derived(buildAlbumMedia(album));
+  const messageItems = $derived(
+    messageAnchor !== null && messageAnchor.mediaFiles.length > 0
+      ? messageAnchor.mediaFiles.map(itemForFile)
+      : (messageAnchor?.hasMedia ? [itemForRow(messageAnchor)] : [])
   );
+  const stripTiles = $derived(buildStripTiles());
+
+  const remainingBefore = $derived(beforeTotal - before.length);
+  const remainingAfter = $derived(afterTotal - after.length);
 
   $effect(() => {
     if (anchor !== null && anchorRowId(anchor) === rowId) return;
@@ -62,34 +69,8 @@
   });
 
   $effect(() => {
-    if (anchor?.kind === "album") {
-      const focus = anchor.focusRowId;
-      const index = focus !== undefined ? anchor.rows.findIndex((row) => row.rowId === focus) : 0;
-      albumIndex = index >= 0 ? index : 0;
-    }
-    // 仅锚点变化时复位预览状态；liveSrc 的读写不得成为本 effect 依赖
-    untrack(() => {
-      liveShown = false;
-      liveFailed = false;
-      liveBusy = false;
-      liveErrorText = "";
-      liveMime = "";
-      if (liveSrc) {
-        URL.revokeObjectURL(liveSrc);
-        liveSrc = "";
-      }
-    });
+    if (anchor) expanded = false;
   });
-
-  let liveShown = $state(false);
-  let liveFailed = $state(false);
-  let liveBusy = $state(false);
-  let liveErrorText = $state("");
-  let liveSrc = $state("");
-  let liveMime = $state("");
-
-  const remainingBefore = $derived(beforeTotal - before.length);
-  const remainingAfter = $derived(afterTotal - after.length);
 
   async function loadContext(id: string): Promise<void> {
     const token = ++generation;
@@ -151,119 +132,111 @@
     }
   }
 
-  function switchAlbum(index: number): void {
-    albumIndex = index;
-    liveShown = false;
-    liveFailed = false;
-    liveBusy = false;
-    liveErrorText = "";
-    liveMime = "";
-    if (liveSrc) {
-      URL.revokeObjectURL(liveSrc);
-      liveSrc = "";
-    }
-  }
-
   function openInChat(): void {
     const chatId = album?.rows[0]?.chatId ?? messageAnchor?.chatId;
     if (!chatId) return;
     navigate({ kind: "search", q: "", chat: chatId, from: "", to: "", mode: "include" });
   }
 
-  async function loadLiveThumb(): Promise<void> {
-    if (!liveRow || liveBusy) return;
-    liveBusy = true;
-    liveFailed = false;
-    liveErrorText = "";
-    try {
-      const res = await fetch(mediaLiveThumbUrl(liveRow.rowId));
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        liveErrorText = body && typeof body === "object" && "error" in body
-          ? String(body.error)
-          : `取回失败 (${res.status})`;
-        liveFailed = true;
-        return;
-      }
-      liveSrc = URL.createObjectURL(await res.blob());
-      liveMime = res.headers.get("content-type") ?? "application/octet-stream";
-      liveShown = true;
-    } catch {
-      liveErrorText = "网络错误";
-      liveFailed = true;
-    } finally {
-      liveBusy = false;
+  /** 点击缩略图：定位到对应项并直接进入预览。 */
+  function selectStrip(index: number): void {
+    if (album !== null) {
+      showLightbox(albumMedia.items, albumMedia.starts[index] ?? 0);
+    } else {
+      showLightbox(messageItems, index);
     }
   }
 
-  function openLiveLightbox(): void {
-    if (!liveRow) return;
-    showLightbox([{
-      name: `media_${liveRow.rowId}`,
-      mime: liveRow.mimeType ?? "image/jpeg",
-      size: undefined,
-      spec: liveRow.mediaType ?? "",
-      load: () => loadLiveBlob(mediaLiveThumbUrl(liveRow.rowId))
-    }], 0);
-  }
-
-  function openAlbumLightbox(): void {
-    if (!album) return;
-    const items: LightboxItem[] = [];
-    const starts: number[] = [];
-    for (const row of album.rows) {
-      starts.push(items.length);
-      const files = row.mediaFiles.filter(isPreviewable);
-      if (files.length > 0) {
-        for (const file of files) {
-          items.push({
-            name: file.fileName ?? `media_${file.id}`,
-            mime: file.mimeType ?? "",
-            size: file.fileSize,
-            spec: file.mediaType,
-            load: () => loadPreview(file)
+  function buildStripTiles(): StripTile[] {
+    if (album !== null) {
+      const tiles: StripTile[] = [];
+      for (const row of album.rows) {
+        if (row.mediaFiles.length > 0) {
+          const first = row.mediaFiles[0];
+          if (!first) continue;
+          tiles.push({
+            key: `file-${first.id}`,
+            kind: kindOfFile(first),
+            file: first,
+            label: String(tiles.length + 1),
+            badge: row.mediaFiles.length > 1 ? `×${row.mediaFiles.length}` : undefined,
+            live: false
+          });
+        } else if (row.hasMedia) {
+          tiles.push({
+            key: `live-${row.rowId}`,
+            kind: kindOfRow(row),
+            file: null,
+            label: String(tiles.length + 1),
+            live: true,
+            disabled: archiveState?.session === null
           });
         }
+      }
+      return tiles;
+    }
+    if (messageAnchor !== null && messageAnchor.mediaFiles.length > 0) {
+      return messageAnchor.mediaFiles.map((file, i) => ({
+        key: `file-${file.id}`,
+        kind: kindOfFile(file),
+        file,
+        label: String(i + 1),
+        live: false
+      }));
+    }
+    if (messageAnchor?.hasMedia) {
+      return [{
+        key: `live-${messageAnchor.rowId}`,
+        kind: kindOfRow(messageAnchor),
+        file: null,
+        label: "1",
+        live: true,
+        disabled: archiveState?.session === null
+      }];
+    }
+    return [];
+  }
+
+  function buildAlbumMedia(album: AlbumContextEntry | null): { items: LightboxItem[]; starts: number[] } {
+    const items: LightboxItem[] = [];
+    const starts: number[] = [];
+    if (album === null) return { items, starts };
+    for (const row of album.rows) {
+      starts.push(items.length);
+      if (row.mediaFiles.length > 0) {
+        for (const file of row.mediaFiles) items.push(itemForFile(file));
       } else if (row.hasMedia) {
-        items.push({
-          name: `media_${row.messageId}`,
-          mime: row.mimeType ?? "image/jpeg",
-          size: undefined,
-          spec: row.mediaType ?? "",
-          load: () => loadLiveBlob(mediaLiveThumbUrl(row.rowId))
-        });
+        items.push(itemForRow(row));
       }
     }
-    if (items.length === 0) return;
-    showLightbox(items, starts[albumIndex] ?? 0);
+    return { items, starts };
   }
 
-  function openLightbox(file: StoredMediaFile): void {
-    if (!messageAnchor) return;
-    const previewable = messageAnchor.mediaFiles.filter(isPreviewable);
-    const index = previewable.indexOf(file);
-    if (index < 0) return;
-    const items: LightboxItem[] = previewable.map((item) => ({
-      name: item.fileName ?? `media_${item.id}`,
-      mime: item.mimeType ?? "",
-      size: item.fileSize,
-      spec: item.mediaType,
-      load: () => loadPreview(item)
-    }));
-    showLightbox(items, index);
+  function itemForFile(file: StoredMediaFile): LightboxItem {
+    return {
+      name: file.fileName ?? `media_${file.id}`,
+      mime: file.mimeType ?? "",
+      size: file.fileSize,
+      spec: file.mediaType,
+      load: () => loadPreview(file)
+    };
   }
 
-  function isPreviewable(file: StoredMediaFile): boolean {
-    const mime = file.mimeType ?? "";
-    return mime.startsWith("image/") || mime.startsWith("video/")
-      || file.mediaType === "photo" || file.mediaType === "sticker" || file.mediaType === "animation";
+  function itemForRow(row: AlbumRowRecord | MessageRecord): LightboxItem {
+    return {
+      name: `media_${row.messageId}`,
+      mime: row.mimeType ?? "",
+      size: undefined,
+      spec: row.mediaType ?? "",
+      load: () => loadLiveBlob(mediaLiveThumbUrl(row.rowId))
+    };
   }
 
-  async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source: "落盘" | "在线"; mime?: string }> {
+  async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source: "落盘" | "在线"; mime?: string; downloadUrl?: string }> {
     try {
       const meta = await fetchMediaMeta(file.id);
       if (meta.onDisk) {
-        return { url: mediaDiskUrl(file.id), source: "落盘", mime: file.mimeType ?? "" };
+        return { url: mediaDiskUrl(file.id), source: "落盘", mime: file.mimeType ?? "", downloadUrl: mediaDownloadUrl(file.id, "file") };
       }
     } catch {
       // 元数据不可得时按在线取回处理
@@ -272,12 +245,36 @@
   }
 
   /** 在线取回并转 object URL；mime 取响应头，供预览按实际内容分流。 */
-  async function loadLiveBlob(path: string): Promise<{ url: string; source: "落盘" | "在线"; mime: string }> {
+  async function loadLiveBlob(path: string): Promise<{ url: string; source: "落盘" | "在线"; mime: string; downloadUrl: string }> {
     const res = await fetch(path);
     if (!res.ok) throw new Error(`取回失败 (${res.status})`);
     const blob = await res.blob();
     const mime = res.headers.get("content-type") ?? (blob.type || "application/octet-stream");
-    return { url: URL.createObjectURL(blob), source: "在线", mime };
+    return {
+      url: URL.createObjectURL(blob),
+      source: "在线",
+      mime,
+      downloadUrl: `${path}${path.includes("?") ? "&" : "?"}download=1`
+    };
+  }
+
+  function kindOfFile(file: StoredMediaFile): StripTile["kind"] {
+    const mime = file.mimeType ?? "";
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    if (file.mediaType === "photo" || file.mediaType === "sticker" || file.mediaType === "animation") return "image";
+    return "file";
+  }
+
+  function kindOfRow(row: { mediaType?: string; mimeType?: string }): StripTile["kind"] {
+    const mime = row.mimeType ?? "";
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    const type = row.mediaType ?? "";
+    if (type === "photo" || type === "sticker" || type === "animation" || type === "video") {
+      return type === "video" ? "video" : "image";
+    }
+    return "file";
   }
 
   function entryRowId(entry: ContextEntry): string {
@@ -294,11 +291,6 @@
 
   function messageOf(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-  }
-
-  function failLiveDecode(text: string): void {
-    liveFailed = true;
-    liveErrorText = liveErrorText || text;
   }
 </script>
 
@@ -321,7 +313,7 @@
           {#if messageAnchor}
             #{messageAnchor.messageId} · 行 {messageAnchor.rowId} · {fmtTs(messageAnchor.date)} · {messageAnchor.messageType}
           {:else if album}
-            相册 {album.rows.length} 张 · #{albumCurrent?.messageId ?? album.rows[0]?.messageId} · {fmtTs(albumCurrent?.date ?? album.rows[0]?.date ?? "")}
+            相册 {album.rows.length} 张 · #{album.rows[0]?.messageId} · {fmtTs(album.rows[0]?.date ?? "")}
           {:else}
             …
           {/if}
@@ -357,207 +349,51 @@
         </div>
       {/if}
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="px-6 py-5">
-          <div class="flex flex-wrap items-baseline gap-x-2 text-sm">
-            <span class="font-medium">{anchorRecord ? senderName(anchorRecord) : ""}</span>
+        <div class="px-4 py-3">
+          <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span class="truncate text-sm font-medium">{anchorRecord ? senderName(anchorRecord) : ""}</span>
             {#if anchorRecord?.senderUsername || anchorRecord?.senderId}
-              <span class="font-mono text-[11px] text-muted-foreground">
+              <span class="truncate font-mono text-[10px] text-muted-foreground">
                 {anchorRecord?.senderUsername ? `@${anchorRecord?.senderUsername}` : ""}
                 {anchorRecord?.senderUsername && anchorRecord?.senderId ? " · " : ""}
                 {anchorRecord?.senderId ?? ""}
               </span>
             {/if}
+            <span class="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
+              {#if album !== null}
+                相册 {album.rows.length} 张 · #{album.rows[0]?.messageId} · {fmtTs(album.rows[0]?.date)}
+              {:else if messageAnchor}
+                #{messageAnchor.messageId} · {fmtTs(messageAnchor.date)} · {messageAnchor.messageType}
+              {/if}
+            </span>
           </div>
-          <p class="mt-2 whitespace-pre-wrap break-words text-[15px] leading-relaxed">
-            {#if album ? album.captionText : messageAnchor?.text}
-              {album ? album.captionText : messageAnchor?.text}
+          <p class="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-snug {expanded ? '' : 'line-clamp-3'}">
+            {#if anchorText}
+              {#each segments as segment, i (i)}
+                {#if segment.hit}
+                  <mark class="rounded-[2px] bg-foreground/15 text-foreground">{segment.text}</mark>
+                {:else}
+                  <span>{segment.text}</span>
+                {/if}
+              {/each}
             {:else}
               <span class="text-muted-foreground">（无文本）</span>
             {/if}
           </p>
+          {#if canExpand}
+            <button
+              class="mt-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              onclick={() => (expanded = !expanded)}
+              aria-expanded={expanded}
+              aria-label={expanded ? "收起全文" : "展开全文"}
+            >
+              <span>{expanded ? "收起" : "展开全文"}</span>
+              <span class="text-muted-foreground/60">· {anchorText.length} 字</span>
+            </button>
+          {/if}
         </div>
-        {#if album}
-          <div class="border-t border-border/60 px-6 py-4">
-            <div class="mb-3 flex flex-wrap items-center gap-1">
-              <span class="mr-1 font-mono text-[11px] text-muted-foreground">相册 {album.rows.length} 张</span>
-              {#each album.rows as row, i (row.rowId)}
-                <button
-                  class="rounded-md border px-1.5 py-0.5 font-mono text-[10px] transition-colors hover:bg-accent"
-                  class:bg-accent={i === albumIndex}
-                  onclick={() => switchAlbum(i)}
-                >
-                  {i + 1}/{album.rows.length}
-                </button>
-              {/each}
-            </div>
-            {#if albumCurrent !== null && albumCurrent.mediaFiles.length > 0}
-              <MediaTile file={albumCurrent.mediaFiles[0]!} session={archiveState?.session ?? null} onpreview={openAlbumLightbox} />
-            {:else if liveRow}
-              <div class="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border bg-muted">
-                {#if liveShown && !liveFailed}
-                  {#if liveMime.startsWith("image/")}
-                    <button class="h-full w-full" aria-label="放大预览" onclick={openLiveLightbox}>
-                      <img
-                        src={liveSrc}
-                        alt="图片"
-                        class="h-full w-full object-cover"
-                        onerror={() => failLiveDecode("图片解码失败")}
-                      />
-                    </button>
-                  {:else if liveMime.startsWith("video/")}
-                    <video src={liveSrc} controls autoplay muted playsinline class="h-full w-full object-contain" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></video>
-                    <button
-                      type="button"
-                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
-                      aria-label="放大预览"
-                      onclick={openLiveLightbox}
-                    >
-                      <Maximize2 class="size-3.5" aria-hidden="true" />
-                    </button>
-                  {:else if liveMime.startsWith("audio/")}
-                    <audio src={liveSrc} controls class="w-full px-4" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></audio>
-                    <button
-                      type="button"
-                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
-                      aria-label="放大预览"
-                      onclick={openLiveLightbox}
-                    >
-                      <Maximize2 class="size-3.5" aria-hidden="true" />
-                    </button>
-                  {:else}
-                    <div class="flex flex-col items-center gap-1 p-2">
-                      <ImageIcon class="size-5 text-muted-foreground" aria-hidden="true" />
-                      <span class="max-w-full truncate font-mono text-[10px] text-muted-foreground">
-                        该媒体类型不支持在线预览（{liveMime || "未知"})
-                      </span>
-                      <a
-                        href={`${mediaLiveThumbUrl(liveRow.rowId)}?download=1`}
-                        class="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-1.5 font-mono text-[10px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                        aria-label="下载媒体文件"
-                      >
-                        <Download class="size-3" aria-hidden="true" />
-                      </a>
-                    </div>
-                  {/if}
-                  <span class="absolute left-1 top-1 rounded border bg-card/90 px-1 py-px font-mono text-[9px] text-muted-foreground">
-                    在线
-                  </span>
-                {:else}
-                  <div class="flex flex-col items-center gap-1 p-2">
-                    <ImageIcon class="size-5 text-muted-foreground" aria-hidden="true" />
-                    <span class="max-w-full truncate font-mono text-[10px] text-muted-foreground">
-                      {liveFailed ? liveErrorText : liveRow.mediaType ?? "媒体"}
-                    </span>
-                    {#if !archiveState?.session}
-                      <span class="font-mono text-[10px] text-muted-foreground/60">未配置会话，无法在线取回</span>
-                    {:else}
-                      <span class="flex items-center gap-1">
-                        <Button variant="outline" size="sm" class="h-7 px-1.5 font-mono text-[10px]" onclick={loadLiveThumb} disabled={liveBusy}>
-                          {liveBusy ? "取回中…" : "在线取回"}
-                        </Button>
-                        <a
-                          href={`${mediaLiveThumbUrl(liveRow.rowId)}?download=1`}
-                          class="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-1.5 font-mono text-[10px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                          aria-label="下载媒体文件"
-                        >
-                          <Download class="size-3" aria-hidden="true" />
-                        </a>
-                      </span>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {:else}
-              <div class="flex aspect-[4/3] items-center justify-center rounded-lg border bg-muted font-mono text-[10px] text-muted-foreground">
-                （无媒体）
-              </div>
-            {/if}
-          </div>
-        {:else if messageAnchor && (messageAnchor.mediaFiles.length > 0 || messageAnchor.hasMedia)}
-          <div class="border-t border-border/60 px-6 py-4">
-            {#if messageAnchor.mediaFiles.length > 0}
-              <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                {#each messageAnchor.mediaFiles as file (file.id)}
-                  <MediaTile {file} session={archiveState?.session ?? null} onpreview={openLightbox} />
-                {/each}
-              </div>
-            {:else if liveRow}
-              <div class="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border bg-muted">
-                {#if liveShown && !liveFailed}
-                  {#if liveMime.startsWith("image/")}
-                    <button class="h-full w-full" aria-label="放大预览" onclick={openLiveLightbox}>
-                      <img
-                        src={liveSrc}
-                        alt="图片"
-                        class="h-full w-full object-cover"
-                        onerror={() => failLiveDecode("图片解码失败")}
-                      />
-                    </button>
-                  {:else if liveMime.startsWith("video/")}
-                    <video src={liveSrc} controls autoplay muted playsinline class="h-full w-full object-contain" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></video>
-                    <button
-                      type="button"
-                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
-                      aria-label="放大预览"
-                      onclick={openLiveLightbox}
-                    >
-                      <Maximize2 class="size-3.5" aria-hidden="true" />
-                    </button>
-                  {:else if liveMime.startsWith("audio/")}
-                    <audio src={liveSrc} controls class="w-full px-4" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></audio>
-                    <button
-                      type="button"
-                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
-                      aria-label="放大预览"
-                      onclick={openLiveLightbox}
-                    >
-                      <Maximize2 class="size-3.5" aria-hidden="true" />
-                    </button>
-                  {:else}
-                    <div class="flex flex-col items-center gap-1 p-2">
-                      <ImageIcon class="size-5 text-muted-foreground" aria-hidden="true" />
-                      <span class="max-w-full truncate font-mono text-[10px] text-muted-foreground">
-                        该媒体类型不支持在线预览（{liveMime || "未知"})
-                      </span>
-                      <a
-                        href={`${mediaLiveThumbUrl(liveRow.rowId)}?download=1`}
-                        class="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-1.5 font-mono text-[10px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                        aria-label="下载媒体文件"
-                      >
-                        <Download class="size-3" aria-hidden="true" />
-                      </a>
-                    </div>
-                  {/if}
-                  <span class="absolute left-1 top-1 rounded border bg-card/90 px-1 py-px font-mono text-[9px] text-muted-foreground">
-                    在线
-                  </span>
-                {:else}
-                  <div class="flex flex-col items-center gap-1 p-2">
-                    <ImageIcon class="size-5 text-muted-foreground" aria-hidden="true" />
-                    <span class="max-w-full truncate font-mono text-[10px] text-muted-foreground">
-                      {liveFailed ? liveErrorText : liveRow.mediaType ?? "媒体"}
-                    </span>
-                    {#if !archiveState?.session}
-                      <span class="font-mono text-[10px] text-muted-foreground/60">未配置会话，无法在线取回</span>
-                    {:else}
-                      <span class="flex items-center gap-1">
-                        <Button variant="outline" size="sm" class="h-7 px-1.5 font-mono text-[10px]" onclick={loadLiveThumb} disabled={liveBusy}>
-                          {liveBusy ? "取回中…" : "在线取回"}
-                        </Button>
-                        <a
-                          href={`${mediaLiveThumbUrl(liveRow.rowId)}?download=1`}
-                          class="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-1.5 font-mono text-[10px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                          aria-label="下载媒体文件"
-                        >
-                          <Download class="size-3" aria-hidden="true" />
-                        </a>
-                      </span>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </div>
+        {#if stripTiles.length > 0}
+          <MediaStrip tiles={stripTiles} onselect={selectStrip} />
         {/if}
       </div>
 

@@ -1,10 +1,17 @@
 <script lang="ts">
-  import { ChevronLeft, ChevronRight, X } from "lucide-svelte";
-  import { closeLightbox, lightbox, stepLightbox } from "$lib/state.svelte";
+  import { AudioLines, ChevronLeft, ChevronRight, Download, File, Image as ImageIcon, Video, X } from "lucide-svelte";
+  import { closeLightbox, lightbox, selectLightbox, stepLightbox } from "$lib/state.svelte";
   import Button from "$lib/components/button.svelte";
   import { fmtBytes } from "$lib/format";
 
   const CLOSE_ID = "lightbox-close";
+
+  function iconOfKind(mime: string) {
+    if (mime.startsWith("video/")) return Video;
+    if (mime.startsWith("image/")) return ImageIcon;
+    if (mime.startsWith("audio/")) return AudioLines;
+    return File;
+  }
 
   $effect(() => {
     if (!lightbox.open) return;
@@ -17,6 +24,7 @@
         lightbox.src = result.url;
         lightbox.source = result.source;
         lightbox.mime = result.mime ?? "";
+        lightbox.downloadUrl = result.downloadUrl ?? "";
       }
     }).catch(() => {
       if (lightbox.index === index) lightbox.failed = true;
@@ -29,6 +37,8 @@
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "ArrowLeft") stepLightbox(-1);
       if (event.key === "ArrowRight") stepLightbox(1);
+      if (event.key === "Home") selectLightbox(0);
+      if (event.key === "End") selectLightbox(lightbox.items.length - 1);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
@@ -37,6 +47,7 @@
 
 {#if lightbox.open}
   {@const item = lightbox.items[lightbox.index]}
+  {@const hasNav = lightbox.items.length > 1}
   <div
     class="fixed inset-0 z-40 flex animate-fade-in flex-col bg-background/95 backdrop-blur-sm"
     role="dialog"
@@ -50,26 +61,37 @@
       aria-label="关闭预览"
       onclick={closeLightbox}
     ></button>
-    <div class="relative flex h-14 shrink-0 items-center gap-2 border-b px-3">
+    <div class="relative z-10 flex h-12 shrink-0 items-center gap-1.5 border-b px-2.5">
       <Button
         variant="ghost"
         size="icon"
-        disabled={lightbox.items.length < 2}
+        class="size-8"
+        disabled={!hasNav}
         aria-label="上一张"
         onclick={() => stepLightbox(-1)}
       >
         <ChevronLeft class="size-4" aria-hidden="true" />
       </Button>
-      <div class="min-w-0 flex-1 text-center">
-        <span class="truncate text-sm font-medium">{item?.name ?? ""}</span>
-        <span class="ml-2 font-mono text-[11px] text-muted-foreground">
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-center text-sm font-medium leading-5">{item?.name ?? ""}</p>
+        <p class="truncate text-center font-mono text-[10px] leading-4 text-muted-foreground">
           {item ? `${lightbox.source} · ${fmtBytes(item.size)} · ${item.spec}` : ""}
-        </span>
+        </p>
       </div>
+      {#if lightbox.downloadUrl}
+        <a
+          class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          href={lightbox.downloadUrl}
+          aria-label="下载媒体文件"
+        >
+          <Download class="size-4" aria-hidden="true" />
+        </a>
+      {/if}
       <Button
         variant="ghost"
         size="icon"
-        disabled={lightbox.items.length < 2}
+        class="size-8"
+        disabled={!hasNav}
         aria-label="下一张"
         onclick={() => stepLightbox(1)}
       >
@@ -79,13 +101,14 @@
         id={CLOSE_ID}
         variant="ghost"
         size="icon"
+        class="size-8"
         aria-label="关闭"
         onclick={closeLightbox}
       >
         <X class="size-4" aria-hidden="true" />
       </Button>
     </div>
-    <div class="relative flex min-h-0 flex-1 items-center justify-center p-4">
+    <div class="relative z-10 flex min-h-0 flex-1 items-center justify-center p-2">
       <div class="max-h-full max-w-full">
         {#if item}
           {@const mime = lightbox.mime || item.mime}
@@ -121,17 +144,46 @@
               <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
             {/if}
           {:else}
-            <div class="rounded-lg border border-border bg-card p-8 text-center font-mono text-xs text-muted-foreground">
-              该媒体类型不支持在线预览
-              <span class="mt-2 block">{mime || "未知类型"}</span>
-            </div>
+            {#if lightbox.failed}
+              <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">媒体加载失败</div>
+            {:else if lightbox.src}
+              <div class="rounded-lg border border-border bg-card p-8 text-center">
+                <p class="font-mono text-xs text-muted-foreground">该媒体类型不支持在线预览</p>
+                <p class="mt-1 font-mono text-[11px] text-muted-foreground/70">{mime || "未知类型"}</p>
+                {#if lightbox.downloadUrl}
+                  <a
+                    class="mt-3 inline-flex h-8 items-center justify-center gap-1 rounded-md border border-input bg-background px-3 font-mono text-[11px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                    href={lightbox.downloadUrl}
+                  >
+                    <Download class="size-3.5" aria-hidden="true" />
+                    下载文件
+                  </a>
+                {/if}
+              </div>
+            {:else}
+              <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
+            {/if}
           {/if}
         {/if}
       </div>
     </div>
-    {#if lightbox.items.length > 1}
-      <div class="relative h-10 shrink-0 border-t text-center font-mono text-[11px] leading-10 text-muted-foreground">
-        {lightbox.index + 1} / {lightbox.items.length}
+    {#if hasNav}
+      <div class="relative z-10 flex h-11 shrink-0 items-center gap-2 border-t px-2.5">
+        <span class="shrink-0 font-mono text-[10px] text-muted-foreground">{lightbox.index + 1} / {lightbox.items.length}</span>
+        <div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto px-1 py-1">
+          {#each lightbox.items as jumps, i (i)}
+            {@const Icon = iconOfKind(jumps.mime)}
+            <button
+              type="button"
+              class="flex size-7 shrink-0 items-center justify-center rounded-md border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring {i === lightbox.index ? 'border-transparent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
+              aria-label={`第 ${i + 1} 项`}
+              aria-current={i === lightbox.index ? "true" : undefined}
+              onclick={() => selectLightbox(i)}
+            >
+              <Icon class="size-3.5" aria-hidden="true" />
+            </button>
+          {/each}
+        </div>
       </div>
     {/if}
   </div>

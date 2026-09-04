@@ -154,7 +154,8 @@ export interface LightboxItem {
   readonly mime: string;
   readonly size?: number;
   readonly spec: string;
-  load(): Promise<{ url: string; source: "落盘" | "在线"; mime?: string }>;
+  readonly downloadUrl?: string;
+  load(): Promise<{ url: string; source: "落盘" | "在线"; mime?: string; downloadUrl?: string }>;
 }
 
 export const lightbox = $state<{
@@ -165,7 +166,8 @@ export const lightbox = $state<{
   failed: boolean;
   source: "落盘" | "在线";
   mime: string;
-}>({ open: false, items: [], index: 0, src: "", failed: false, source: "落盘", mime: "" });
+  downloadUrl: string;
+}>({ open: false, items: [], index: 0, src: "", failed: false, source: "落盘", mime: "", downloadUrl: "" });
 
 export function showLightbox(items: LightboxItem[], index: number): void {
   lightbox.items = items;
@@ -181,13 +183,21 @@ export function closeLightbox(): void {
 
 export function stepLightbox(delta: number): void {
   if (lightbox.items.length < 2) return;
-  lightbox.index = (lightbox.index + delta + lightbox.items.length) % lightbox.items.length;
+  selectLightbox(lightbox.index + delta);
+}
+
+/** 直接跳到指定项（含键盘 Home/End 与底部索引条）。 */
+export function selectLightbox(index: number): void {
+  const count = lightbox.items.length;
+  if (count === 0) return;
+  lightbox.index = ((index % count) + count) % count;
   releaseLightboxSrc();
 }
 
 function releaseLightboxSrc(): void {
   const src = lightbox.src;
   lightbox.src = "";
+  lightbox.downloadUrl = "";
   if (src.startsWith("blob:")) URL.revokeObjectURL(src);
 }
 

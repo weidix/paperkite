@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Paperclip } from "lucide-svelte";
-  import { fmtTs, senderName } from "$lib/format";
+  import { fmtTs, highlightSegments, senderName } from "$lib/format";
   import { navigate } from "$lib/state.svelte";
   import type { MessageRecord } from "$lib/model";
 
@@ -23,35 +23,6 @@
   const segments = $derived(highlightSegments(record.text, highlights));
   const canExpand = $derived(expandable && !fullText && record.text.length > 120);
   let expanded = $state(false);
-
-  interface TextSegment {
-    readonly text: string;
-    readonly hit: boolean;
-  }
-
-  /** 将文本按多个检索词切分为命中/未命中片段；命中的首个词优先。 */
-  function highlightSegments(text: string, highlights: readonly string[]): TextSegment[] {
-    const needles = highlights.map((term) => term.toLowerCase()).filter((term) => term.length > 0);
-    if (needles.length === 0 || text.length === 0) return [{ text, hit: false }];
-    const lower = text.toLowerCase();
-    const segments: TextSegment[] = [];
-    let cursor = 0;
-    while (cursor < text.length) {
-      let next: { index: number; word: string } | undefined;
-      for (const needle of needles) {
-        const index = lower.indexOf(needle, cursor);
-        if (index >= 0 && (next === undefined || index < next.index)) next = { index, word: needle };
-      }
-      if (next === undefined) {
-        segments.push({ text: text.slice(cursor), hit: false });
-        break;
-      }
-      if (next.index > cursor) segments.push({ text: text.slice(cursor, next.index), hit: false });
-      segments.push({ text: text.slice(next.index, next.index + next.word.length), hit: true });
-      cursor = next.index + next.word.length;
-    }
-    return segments;
-  }
 </script>
 
 <div
