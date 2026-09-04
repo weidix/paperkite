@@ -118,13 +118,70 @@ export interface ArchiveSearchResult {
   readonly offset: number;
 }
 
-/** 锚点消息及其两侧上下文；beforeN/afterN 为该侧可用的总条数（不含锚点）。 */
+export interface MessageContextEntry {
+  readonly kind: "message";
+  readonly record: MessageRecord;
+}
+
+export interface AlbumContextEntry {
+  readonly kind: "album";
+  readonly rows: readonly MessageRecord[];
+  readonly captionText: string;
+  readonly rowId: string;
+  readonly focusRowId?: string;
+}
+
+export type ContextEntry = MessageContextEntry | AlbumContextEntry;
+
+/** 锚点条目及两侧上下文；beforeN/afterN 为该侧条目总数（不含锚点）。 */
 export interface ArchiveContextResult {
-  readonly anchor: MessageRecord | undefined;
-  readonly before: readonly MessageRecord[];
-  readonly after: readonly MessageRecord[];
+  readonly anchor: ContextEntry | undefined;
+  readonly before: readonly ContextEntry[];
+  readonly after: readonly ContextEntry[];
   readonly beforeN: number;
   readonly afterN: number;
+}
+
+export function captionOf(rows: readonly MessageRecord[]): string {
+  return rows.find((row) => row.text.trim().length > 0)?.text ?? "";
+}
+
+export function uniqueGroupKeys(rows: readonly Record<string, unknown>[]): (readonly [string, string])[] {
+  const seen = new Set<string>();
+  const keys: (readonly [string, string])[] = [];
+  for (const row of rows) {
+    const value = row.grouped_id;
+    if (value === undefined || value === null || value === "") continue;
+    const grouped = String(value);
+    const key = groupKey(String(row.chat_id), grouped);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    keys.push([String(row.chat_id), grouped]);
+  }
+  return keys;
+}
+
+export function albumEntryOf(rows: readonly MessageRecord[], focusRowId?: string): ContextEntry {
+  if (rows.length < 2) return { kind: "message", record: rows[0]! };
+  return {
+    kind: "album",
+    rows,
+    captionText: captionOf(rows),
+    rowId: rows[0]!.rowId,
+    ...(focusRowId !== undefined ? { focusRowId } : {})
+  };
+}
+
+export function buildContextEntries(
+  baselines: readonly MessageRecord[],
+  groupRows: ReadonlyMap<string, readonly MessageRecord[]>
+): ContextEntry[] {
+  return baselines.map((row) => {
+    if (row.groupedId === undefined) return { kind: "message", record: row };
+    const rows = groupRows.get(groupKey(row.chatId, row.groupedId));
+    if (rows === undefined || rows.length < 2) return { kind: "message", record: row };
+    return { kind: "album", rows, captionText: captionOf(rows), rowId: row.rowId };
+  });
 }
 
 /** 会话清单行：chats 元数据 + 消息表的按会话聚合。 */

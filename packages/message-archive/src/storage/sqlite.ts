@@ -15,6 +15,8 @@ import {
   type MessageRecord,
   type MessageRow,
   type StoredMediaFile,
+  albumEntryOf,
+  buildContextEntries,
   groupKey,
   mediaKey,
   normalizeContextLimit,
@@ -23,7 +25,8 @@ import {
   normalizeRowId,
   normalizeTimeMode,
   splitTerms,
-  toIsoDate
+  toIsoDate,
+  uniqueGroupKeys
 } from "./model.js";
 
 const MESSAGE_COLUMNS = `
@@ -36,6 +39,16 @@ const MIME_SUBQUERY = `(
   SELECT mf.mime_type FROM media_files mf
    WHERE mf.chat_id = m.chat_id AND mf.message_id = m.message_id
    ORDER BY mf.id DESC LIMIT 1
+)`;
+
+/** 相册以组内第一条在时间线中定位，窗口按条目推进。 */
+const GROUP_FIRST_CONDITION = `(
+  m.grouped_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM messages g
+     WHERE g.chat_id = m.chat_id AND g.grouped_id = m.grouped_id
+       AND (g.date < m.date OR (g.date = m.date AND g.id < m.id))
+  )
 )`;
 
 export class SqliteArchiveStore implements ArchiveStore {
@@ -337,46 +350,97 @@ export class SqliteArchiveStore implements ArchiveStore {
     const afterLimit = normalizeContextLimit(afterN);
     const beforeOff = normalizeOffset(beforeOffset);
     const afterOff = normalizeOffset(afterOffset);
-    const anchor = await this.getMessageByRowId(rowId);
-    if (!anchor) {
+    const anchorRecord = await this.getMessageByRowId(rowId);
+    if (!anchorRecord) {
       return { anchor: undefined, before: [], after: [], beforeN: 0, afterN: 0 };
     }
 
-    const date = anchor.date;
-    const id = Number(anchor.rowId);
+    let lower = { date: anchorRecord.date, id: Number(anchorRecord.rowId) };
+    let upper = lower;
+    let anchorGroup: readonly MessageRecord[] | undefined;
+    if (anchorRecord.groupedId !== undefined) {
+      const group = await this.fetchGroupAttached(anchorRecord.chatId, anchorRecord.groupedId);
+      if (group.length > 1) {
+        anchorGroup = group;
+        lower = { date: group[0]!.date, id: Number(group[0]!.rowId) };
+        const last = group[group.length - 1]!;
+        upper = { date: last.date, id: Number(last.rowId) };
+      }
+    }
+
     const beforeRows = beforeLimit
       ? this.database.prepare(`
           SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
             FROM messages m
            WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
+             AND ${GROUP_FIRST_CONDITION}
            ORDER BY m.date DESC, m.id DESC
            LIMIT ? OFFSET ?
-        `).all(anchor.chatId, date, date, id, beforeLimit, beforeOff) as readonly Record<string, unknown>[]
+        `).all(anchorRecord.chatId, lower.date, lower.date, lower.id, beforeLimit, beforeOff) as readonly Record<string, unknown>[]
       : [];
     const afterRows = afterLimit
       ? this.database.prepare(`
           SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
             FROM messages m
            WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
+             AND ${GROUP_FIRST_CONDITION}
            ORDER BY m.date ASC, m.id ASC
            LIMIT ? OFFSET ?
-        `).all(anchor.chatId, date, date, id, afterLimit, afterOff) as readonly Record<string, unknown>[]
+        `).all(anchorRecord.chatId, upper.date, upper.date, upper.id, afterLimit, afterOff) as readonly Record<string, unknown>[]
       : [];
     const beforeCount = this.database.prepare(`
       SELECT COUNT(*) AS count FROM messages m
        WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
-    `).get(anchor.chatId, date, date, id) as { count: number };
+         AND ${GROUP_FIRST_CONDITION}
+    `).get(anchorRecord.chatId, lower.date, lower.date, lower.id) as { count: number };
     const afterCount = this.database.prepare(`
       SELECT COUNT(*) AS count FROM messages m
        WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
-    `).get(anchor.chatId, date, date, id) as { count: number };
+         AND ${GROUP_FIRST_CONDITION}
+    `).get(anchorRecord.chatId, upper.date, upper.date, upper.id) as { count: number };
+
+    const groupMap = await this.fetchGroupsAttached(uniqueGroupKeys([...beforeRows, ...afterRows]));
+    const before = buildContextEntries(await this.attachMedia([...beforeRows].reverse()), groupMap);
+    const after = buildContextEntries(await this.attachMedia(afterRows), groupMap);
+    const anchor = anchorGroup !== undefined
+      ? albumEntryOf(anchorGroup, anchorRecord.rowId)
+      : { kind: "message" as const, record: anchorRecord };
     return {
       anchor,
-      before: this.attachMedia([...beforeRows].reverse()),
-      after: this.attachMedia(afterRows),
+      before,
+      after,
       beforeN: Number(beforeCount.count),
       afterN: Number(afterCount.count)
     };
+  }
+
+  private async fetchGroupAttached(chatId: string, groupedId: string): Promise<MessageRecord[]> {
+    return this.attachMedia(this.groupRows([[chatId, groupedId]]));
+  }
+
+  private async fetchGroupsAttached(
+    keys: readonly (readonly [string, string])[]
+  ): Promise<Map<string, readonly MessageRecord[]>> {
+    const result = new Map<string, readonly MessageRecord[]>();
+    if (!keys.length) return result;
+    const byKey = new Map<string, Record<string, unknown>[]>();
+    for (const row of this.groupRows(keys)) {
+      pushGrouped(byKey, groupKey(String(row.chat_id), String(row.grouped_id)), row);
+    }
+    for (const [key, rows] of byKey) {
+      result.set(key, await this.attachMedia(rows));
+    }
+    return result;
+  }
+
+  private groupRows(keys: readonly (readonly [string, string])[]): readonly Record<string, unknown>[] {
+    const sql = `
+      SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+        FROM messages m
+       WHERE m.has_media = 1 AND ${pairClause("grouped_id", keys)}
+       ORDER BY m.date ASC, m.id ASC
+    `;
+    return this.database.prepare(sql).all(...pairValues(keys)) as readonly Record<string, unknown>[];
   }
 
   async getMediaFileById(id: string): Promise<StoredMediaFile | undefined> {

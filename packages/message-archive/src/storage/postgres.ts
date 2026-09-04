@@ -13,6 +13,8 @@ import {
   type MessageRecord,
   type MessageRow,
   type StoredMediaFile,
+  albumEntryOf,
+  buildContextEntries,
   groupKey,
   mediaKey,
   normalizeContextLimit,
@@ -22,7 +24,8 @@ import {
   normalizeTimeMode,
   paramPlaceholders,
   splitTerms,
-  toIsoDate
+  toIsoDate,
+  uniqueGroupKeys
 } from "./model.js";
 
 const SCHEMA_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -360,19 +363,35 @@ export class PostgresArchiveStore implements ArchiveStore {
     const afterLimit = normalizeContextLimit(afterN);
     const beforeOff = normalizeOffset(beforeOffset);
     const afterOff = normalizeOffset(afterOffset);
-    const anchor = await this.getMessageByRowId(rowId);
-    if (!anchor) {
+    const anchorRecord = await this.getMessageByRowId(rowId);
+    if (!anchorRecord) {
       return { anchor: undefined, before: [], after: [], beforeN: 0, afterN: 0 };
     }
 
+    let lower = { date: anchorRecord.date, id: Number(anchorRecord.rowId) };
+    let upper = lower;
+    let anchorGroup: readonly MessageRecord[] | undefined;
+    if (anchorRecord.groupedId !== undefined) {
+      const group = await this.fetchGroupAttached(anchorRecord.chatId, anchorRecord.groupedId);
+      if (group.length > 1) {
+        anchorGroup = group;
+        lower = { date: group[0]!.date, id: Number(group[0]!.rowId) };
+        const last = group[group.length - 1]!;
+        upper = { date: last.date, id: Number(last.rowId) };
+      }
+    }
+
+    const tables = this.table("messages");
+    const first = groupFirstCondition(tables);
     const beforeResult = beforeLimit
       ? await this.pool.query(
           `${messageSelect(this.table("messages"), this.table("media_files"))}
            WHERE m.chat_id = $1
              AND (m.date < $2::timestamptz OR (m.date = $2::timestamptz AND m.id < $3::bigint))
+             AND ${first}
            ORDER BY m.date DESC, m.id DESC
            LIMIT $4 OFFSET $5`,
-          [anchor.chatId, anchor.date, anchor.rowId, beforeLimit, beforeOff]
+          [anchorRecord.chatId, lower.date, lower.id, beforeLimit, beforeOff]
         )
       : { rows: [] as QueryResultRow[] };
     const afterResult = afterLimit
@@ -380,30 +399,71 @@ export class PostgresArchiveStore implements ArchiveStore {
           `${messageSelect(this.table("messages"), this.table("media_files"))}
            WHERE m.chat_id = $1
              AND (m.date > $2::timestamptz OR (m.date = $2::timestamptz AND m.id > $3::bigint))
+             AND ${first}
            ORDER BY m.date ASC, m.id ASC
            LIMIT $4 OFFSET $5`,
-          [anchor.chatId, anchor.date, anchor.rowId, afterLimit, afterOff]
+          [anchorRecord.chatId, upper.date, upper.id, afterLimit, afterOff]
         )
       : { rows: [] as QueryResultRow[] };
     const beforeCount = await this.pool.query(
-      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")}
-        WHERE chat_id = $1
-          AND (date < $2::timestamptz OR (date = $2::timestamptz AND id < $3::bigint))`,
-      [anchor.chatId, anchor.date, anchor.rowId]
+      `SELECT COUNT(*)::int AS count FROM ${tables} m
+        WHERE m.chat_id = $1
+          AND (m.date < $2::timestamptz OR (m.date = $2::timestamptz AND m.id < $3::bigint))
+          AND ${first}`,
+      [anchorRecord.chatId, lower.date, lower.id]
     );
     const afterCount = await this.pool.query(
-      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")}
-        WHERE chat_id = $1
-          AND (date > $2::timestamptz OR (date = $2::timestamptz AND id > $3::bigint))`,
-      [anchor.chatId, anchor.date, anchor.rowId]
+      `SELECT COUNT(*)::int AS count FROM ${tables} m
+        WHERE m.chat_id = $1
+          AND (m.date > $2::timestamptz OR (m.date = $2::timestamptz AND m.id > $3::bigint))
+          AND ${first}`,
+      [anchorRecord.chatId, upper.date, upper.id]
     );
+
+    const groupMap = await this.fetchGroupsAttached(uniqueGroupKeys([...beforeResult.rows, ...afterResult.rows]));
+    const before = buildContextEntries(await this.attachMedia([...beforeResult.rows].reverse()), groupMap);
+    const after = buildContextEntries(await this.attachMedia(afterResult.rows), groupMap);
+    const anchor = anchorGroup !== undefined
+      ? albumEntryOf(anchorGroup, anchorRecord.rowId)
+      : { kind: "message" as const, record: anchorRecord };
     return {
       anchor,
-      before: await this.attachMedia([...beforeResult.rows].reverse()),
-      after: await this.attachMedia(afterResult.rows),
+      before,
+      after,
       beforeN: Number(beforeCount.rows[0]?.count ?? 0),
       afterN: Number(afterCount.rows[0]?.count ?? 0)
     };
+  }
+
+  private async fetchGroupAttached(chatId: string, groupedId: string): Promise<MessageRecord[]> {
+    return this.attachMedia(await this.groupRows([[chatId, groupedId]]));
+  }
+
+  private async fetchGroupsAttached(
+    keys: readonly (readonly [string, string])[]
+  ): Promise<Map<string, readonly MessageRecord[]>> {
+    const result = new Map<string, readonly MessageRecord[]>();
+    if (!keys.length) return result;
+    const rows = await this.groupRows(keys);
+    const byKey = new Map<string, QueryResultRow[]>();
+    for (const row of rows) {
+      pushGrouped(byKey, groupKey(String(row.chat_id), String(row.grouped_id)), row);
+    }
+    for (const [key, groupRows] of byKey) {
+      result.set(key, await this.attachMedia(groupRows));
+    }
+    return result;
+  }
+
+  private async groupRows(keys: readonly (readonly [string, string])[]): Promise<QueryResultRow[]> {
+    const { clause, params } = pairSql("grouped_id", keys);
+    const result = await this.pool.query(
+      `${messageSelect(this.table("messages"), this.table("media_files"))}
+       WHERE m.has_media = TRUE AND ${clause}
+       ORDER BY m.date ASC, m.id ASC`,
+      params
+    );
+    return result.rows;
   }
 
   async getMediaFileById(id: string): Promise<StoredMediaFile | undefined> {
@@ -469,6 +529,18 @@ export class PostgresArchiveStore implements ArchiveStore {
   private table(name: string): string {
     return `${this.schema}.${quoteIdentifier(name)}`;
   }
+}
+
+/** 相册以组内第一条在时间线中定位，窗口按条目推进。 */
+function groupFirstCondition(messages: string): string {
+  return `(
+    m.grouped_id IS NULL
+    OR NOT EXISTS (
+      SELECT 1 FROM ${messages} g
+       WHERE g.chat_id = m.chat_id AND g.grouped_id = m.grouped_id
+         AND (g.date < m.date OR (g.date = m.date AND g.id < m.id))
+    )
+  )`;
 }
 
 function messageSelect(messages: string, mediaFiles: string): string {

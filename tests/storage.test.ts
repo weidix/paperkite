@@ -135,15 +135,84 @@ test("message context returns the neighborhood around an anchor", async () => {
     assert.ok(rowId);
 
     const context = await store.getMessageContext(rowId, 1, 1);
-    assert.equal(context.anchor?.text, "second");
-    assert.deepEqual(context.before.map((row) => row.text), ["first"]);
-    assert.deepEqual(context.after.map((row) => row.text), ["third"]);
+    assert.equal(context.anchor?.kind, "message");
+    assert.equal(context.anchor?.kind === "message" && context.anchor.record.text, "second");
+    assert.deepEqual(
+      context.before.map((entry) => (entry.kind === "message" ? entry.record.text : null)),
+      ["first"]
+    );
+    assert.deepEqual(
+      context.after.map((entry) => (entry.kind === "message" ? entry.record.text : null)),
+      ["third"]
+    );
     assert.equal(context.beforeN, 1);
     assert.equal(context.afterN, 3);
 
     const paged = await store.getMessageContext(rowId, 1, 1, 1, 2);
-    assert.deepEqual(paged.before.map((row) => row.text), []);
-    assert.deepEqual(paged.after.map((row) => row.text), ["fifth"]);
+    assert.deepEqual(
+      paged.before.map((entry) => (entry.kind === "message" ? entry.record.text : null)),
+      []
+    );
+    assert.deepEqual(
+      paged.after.map((entry) => (entry.kind === "message" ? entry.record.text : null)),
+      ["fifth"]
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("message context folds album members into a single entry", async () => {
+  const { store, cleanup } = await newStore();
+  try {
+    await store.saveBatch([
+      messageRow(1, { date: "2026-08-30T10:00:00.000Z", text: "alpha" }),
+      messageRow(2, { date: "2026-08-30T10:01:00.000Z", groupedId: "g1", text: "album caption", hasMedia: true, mediaType: "photo" }),
+      messageRow(3, { date: "2026-08-30T10:02:00.000Z", groupedId: "g1", text: "", hasMedia: true, mediaType: "photo" }),
+      messageRow(4, { date: "2026-08-30T10:03:00.000Z", groupedId: "g1", text: "", hasMedia: true, mediaType: "photo" }),
+      messageRow(5, { date: "2026-08-30T10:04:00.000Z", text: "omega" })
+    ], []);
+
+    // 锚点是相册中间的成员（rowId 3）：锚点条目为整个相册，窗口按条目计
+    const viaMiddle = await store.getMessageContext("3", 5, 5);
+    assert.equal(viaMiddle.anchor?.kind, "album");
+    if (viaMiddle.anchor?.kind !== "album") throw new Error("expected album anchor");
+    assert.equal(viaMiddle.anchor.captionText, "album caption");
+    assert.equal(viaMiddle.anchor.focusRowId, "3");
+    assert.equal(viaMiddle.anchor.rows.length, 3);
+    assert.deepEqual(viaMiddle.before.map((entry) => entry.kind), ["message"]);
+    assert.deepEqual(viaMiddle.after.map((entry) => entry.kind), ["message"]);
+    assert.equal(viaMiddle.beforeN, 1);
+    assert.equal(viaMiddle.afterN, 1);
+
+    // 锚点是普通消息：相册作为整体出现在 after，计数按条目
+    const viaFirst = await store.getMessageContext("1", 5, 5);
+    assert.deepEqual(viaFirst.after.map((entry) => entry.kind), ["album", "message"]);
+    const album = viaFirst.after[0];
+    if (album?.kind !== "album") throw new Error("expected album entry");
+    assert.equal(album.rows.length, 3);
+    assert.equal(album.captionText, "album caption");
+    assert.equal(viaFirst.afterN, 2);
+
+    // 锚点为组内最后一条（rowId 4）：整组居中，两侧窗口不含本组
+    const viaLast = await store.getMessageContext("4", 5, 5);
+    assert.equal(viaLast.anchor?.kind, "album");
+    assert.deepEqual(viaLast.before.map((entry) => entry.kind), ["message"]);
+    assert.deepEqual(viaLast.after.map((entry) => entry.kind), ["message"]);
+    assert.equal(viaLast.beforeN, 1);
+    assert.equal(viaLast.afterN, 1);
+
+    // 窗口边界补全：锚点 m5 且 before 只取 1 条 → 相册整体进入窗口，成员完整
+    const viaNext = await store.getMessageContext("5", 1, 0);
+    assert.deepEqual(viaNext.before.map((entry) => entry.kind), ["album"]);
+    const boundaryAlbum = viaNext.before[0];
+    if (boundaryAlbum?.kind !== "album") throw new Error("expected album entry");
+    assert.equal(boundaryAlbum.rows.length, 3);
+    assert.equal(viaNext.beforeN, 2);
+
+    // 偏移以条目为单位推进
+    const paged = await store.getMessageContext("1", 5, 5, 0, 1);
+    assert.deepEqual(paged.after.map((entry) => entry.kind), ["message"]);
   } finally {
     await cleanup();
   }

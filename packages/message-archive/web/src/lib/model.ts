@@ -55,11 +55,26 @@ export interface ArchiveSearchResult {
   readonly offset: number;
 }
 
-/** 锚点消息及两侧上下文；beforeN/afterN 为该侧可用总数（不含锚点）。 */
+export interface MessageContextEntry {
+  readonly kind: "message";
+  readonly record: MessageRecord;
+}
+
+export interface AlbumContextEntry {
+  readonly kind: "album";
+  readonly rows: readonly MessageRecord[];
+  readonly captionText: string;
+  readonly rowId: string;
+  readonly focusRowId?: string;
+}
+
+export type ContextEntry = MessageContextEntry | AlbumContextEntry;
+
+/** 锚点条目及两侧上下文；beforeN/afterN 为该侧条目总数（不含锚点）。 */
 export interface ArchiveContextResult {
-  readonly anchor: MessageRecord | undefined;
-  readonly before: readonly MessageRecord[];
-  readonly after: readonly MessageRecord[];
+  readonly anchor: ContextEntry | undefined;
+  readonly before: readonly ContextEntry[];
+  readonly after: readonly ContextEntry[];
   readonly beforeN: number;
   readonly afterN: number;
 }

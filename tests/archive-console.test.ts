@@ -199,16 +199,19 @@ test("archive console message and context endpoints return records", async () =>
     const context = await h.server.inject({ method: "GET", url: "/api/messages/4/context?before=2&after=2" });
     assert.equal(context.statusCode, 200);
     const ctx = context.json();
-    assert.equal(ctx.anchor.messageId, 4);
-    assert.deepEqual(ctx.before.map((item: { messageId: number }) => item.messageId), [1, 3]);
-    assert.deepEqual(ctx.after.map((item: { messageId: number }) => item.messageId), [5]);
+    const flat = (items: { kind: string; record?: { messageId: number } }[]): (number | null)[] =>
+      items.map((item) => (item.kind === "message" ? (item.record?.messageId ?? null) : null));
+    assert.equal(ctx.anchor?.kind, "message");
+    assert.equal(ctx.anchor?.kind === "message" && ctx.anchor.record.messageId, 4);
+    assert.deepEqual(flat(ctx.before), [1, 3]);
+    assert.deepEqual(flat(ctx.after), [5]);
     assert.equal(ctx.beforeN, 2);
     assert.equal(ctx.afterN, 1);
 
     const paged = await h.server.inject({ method: "GET", url: "/api/messages/4/context?before=1&after=1&beforeOffset=1&afterOffset=1" });
     assert.equal(paged.statusCode, 200);
-    assert.deepEqual(paged.json().before.map((item: { messageId: number }) => item.messageId), [1]);
-    assert.deepEqual(paged.json().after.map((item: { messageId: number }) => item.messageId), []);
+    assert.deepEqual(flat(paged.json().before), [1]);
+    assert.deepEqual(flat(paged.json().after), []);
   } finally {
     await h.close();
   }
