@@ -137,7 +137,10 @@ function registerRoutes(server: FastifyInstance, options: ArchiveConsoleServerOp
           fileName: `${record.messageId}`,
           mimeType: record.mimeType
         };
-        const result = await fetchLiveMedia(file, sessions, session, logger);
+        const result = await fetchLiveMedia(file, sessions, session, {
+          chatUsername: await store.getChatUsername(file.chatId),
+          logger
+        });
         if (!result.ok) {
           throw new HttpError(
             result.missing ? 410 : 404,
@@ -180,8 +183,16 @@ function registerRoutes(server: FastifyInstance, options: ArchiveConsoleServerOp
         if (!session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
         const file = await store.getMediaFileById(rowIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
-        const result = await fetchLiveMedia(file, sessions, session, logger);
-        if (!result.ok) throw new HttpError(404, "无法从 Telegram 取回该媒体");
+        const result = await fetchLiveMedia(file, sessions, session, {
+          chatUsername: await store.getChatUsername(file.chatId),
+          logger
+        });
+        if (!result.ok) {
+          throw new HttpError(
+            result.missing ? 410 : 404,
+            result.missing ? "消息已从 Telegram 删除或会话无法访问" : "无法从 Telegram 取回该媒体"
+          );
+        }
         sendDownloadHeaders(reply, file, result.mime, result.bytes.length, request.query.download === "1");
         reply.header("cache-control", "no-store");
         return reply.send(result.bytes);

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronRight, Download, Image as ImageIcon, X } from "lucide-svelte";
-  import { tick } from "svelte";
+  import { ArrowLeft, ChevronRight, Download, Image as ImageIcon, Maximize2, X } from "lucide-svelte";
+  import { tick, untrack } from "svelte";
   import { fetchContext, fetchMediaMeta, fetchState, mediaDiskUrl, mediaLiveThumbUrl, mediaLiveUrl, type ArchiveState } from "$lib/api";
   import { fmtCount, fmtTs, senderName } from "$lib/format";
   import { backToSearch, navigate, showLightbox, type LightboxItem } from "$lib/state.svelte";
@@ -67,14 +67,18 @@
       const index = focus !== undefined ? anchor.rows.findIndex((row) => row.rowId === focus) : 0;
       albumIndex = index >= 0 ? index : 0;
     }
-    liveShown = false;
-    liveFailed = false;
-    liveBusy = false;
-    liveErrorText = "";
-    if (liveSrc) {
-      URL.revokeObjectURL(liveSrc);
-      liveSrc = "";
-    }
+    // 仅锚点变化时复位预览状态；liveSrc 的读写不得成为本 effect 依赖
+    untrack(() => {
+      liveShown = false;
+      liveFailed = false;
+      liveBusy = false;
+      liveErrorText = "";
+      liveMime = "";
+      if (liveSrc) {
+        URL.revokeObjectURL(liveSrc);
+        liveSrc = "";
+      }
+    });
   });
 
   let liveShown = $state(false);
@@ -82,6 +86,7 @@
   let liveBusy = $state(false);
   let liveErrorText = $state("");
   let liveSrc = $state("");
+  let liveMime = $state("");
 
   const remainingBefore = $derived(beforeTotal - before.length);
   const remainingAfter = $derived(afterTotal - after.length);
@@ -152,6 +157,7 @@
     liveFailed = false;
     liveBusy = false;
     liveErrorText = "";
+    liveMime = "";
     if (liveSrc) {
       URL.revokeObjectURL(liveSrc);
       liveSrc = "";
@@ -180,6 +186,7 @@
         return;
       }
       liveSrc = URL.createObjectURL(await res.blob());
+      liveMime = res.headers.get("content-type") ?? "application/octet-stream";
       liveShown = true;
     } catch {
       liveErrorText = "网络错误";
@@ -191,13 +198,12 @@
 
   function openLiveLightbox(): void {
     if (!liveRow) return;
-    const url = mediaLiveThumbUrl(liveRow.rowId);
     showLightbox([{
       name: `media_${liveRow.rowId}`,
       mime: liveRow.mimeType ?? "image/jpeg",
       size: undefined,
       spec: liveRow.mediaType ?? "",
-      load: () => Promise.resolve({ url, source: "在线" })
+      load: () => loadLiveBlob(mediaLiveThumbUrl(liveRow.rowId))
     }], 0);
   }
 
@@ -219,13 +225,12 @@
           });
         }
       } else if (row.hasMedia) {
-        const url = mediaLiveThumbUrl(row.rowId);
         items.push({
           name: `media_${row.messageId}`,
           mime: row.mimeType ?? "image/jpeg",
           size: undefined,
           spec: row.mediaType ?? "",
-          load: () => Promise.resolve({ url, source: "在线" })
+          load: () => loadLiveBlob(mediaLiveThumbUrl(row.rowId))
         });
       }
     }
@@ -254,16 +259,25 @@
       || file.mediaType === "photo" || file.mediaType === "sticker" || file.mediaType === "animation";
   }
 
-  async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source: "落盘" | "在线" }> {
+  async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source: "落盘" | "在线"; mime?: string }> {
     try {
       const meta = await fetchMediaMeta(file.id);
-      return {
-        url: meta.onDisk ? mediaDiskUrl(file.id) : mediaLiveUrl(file.id),
-        source: meta.onDisk ? "落盘" : "在线"
-      };
+      if (meta.onDisk) {
+        return { url: mediaDiskUrl(file.id), source: "落盘", mime: file.mimeType ?? "" };
+      }
     } catch {
-      return { url: mediaLiveUrl(file.id), source: "在线" };
+      // 元数据不可得时按在线取回处理
     }
+    return loadLiveBlob(mediaLiveUrl(file.id));
+  }
+
+  /** 在线取回并转 object URL；mime 取响应头，供预览按实际内容分流。 */
+  async function loadLiveBlob(path: string): Promise<{ url: string; source: "落盘" | "在线"; mime: string }> {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(`取回失败 (${res.status})`);
+    const blob = await res.blob();
+    const mime = res.headers.get("content-type") ?? (blob.type || "application/octet-stream");
+    return { url: URL.createObjectURL(blob), source: "在线", mime };
   }
 
   function entryRowId(entry: ContextEntry): string {
@@ -280,6 +294,11 @@
 
   function messageOf(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  function failLiveDecode(text: string): void {
+    liveFailed = true;
+    liveErrorText = liveErrorText || text;
   }
 </script>
 
@@ -376,17 +395,50 @@
             {:else if liveRow}
               <div class="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border bg-muted">
                 {#if liveShown && !liveFailed}
-                  <button class="h-full w-full" aria-label="放大预览" onclick={openLiveLightbox}>
-                    <img
-                      src={liveSrc}
-                      alt="图片"
-                      class="h-full w-full object-cover"
-                      onerror={() => {
-                        liveFailed = true;
-                        liveErrorText = liveErrorText || "图片解码失败";
-                      }}
-                    />
-                  </button>
+                  {#if liveMime.startsWith("image/")}
+                    <button class="h-full w-full" aria-label="放大预览" onclick={openLiveLightbox}>
+                      <img
+                        src={liveSrc}
+                        alt="图片"
+                        class="h-full w-full object-cover"
+                        onerror={() => failLiveDecode("图片解码失败")}
+                      />
+                    </button>
+                  {:else if liveMime.startsWith("video/")}
+                    <video src={liveSrc} controls autoplay muted playsinline class="h-full w-full object-contain" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></video>
+                    <button
+                      type="button"
+                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
+                      aria-label="放大预览"
+                      onclick={openLiveLightbox}
+                    >
+                      <Maximize2 class="size-3.5" aria-hidden="true" />
+                    </button>
+                  {:else if liveMime.startsWith("audio/")}
+                    <audio src={liveSrc} controls class="w-full px-4" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></audio>
+                    <button
+                      type="button"
+                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
+                      aria-label="放大预览"
+                      onclick={openLiveLightbox}
+                    >
+                      <Maximize2 class="size-3.5" aria-hidden="true" />
+                    </button>
+                  {:else}
+                    <div class="flex flex-col items-center gap-1 p-2">
+                      <ImageIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+                      <span class="max-w-full truncate font-mono text-[10px] text-muted-foreground">
+                        该媒体类型不支持在线预览（{liveMime || "未知"})
+                      </span>
+                      <a
+                        href={`${mediaLiveThumbUrl(liveRow.rowId)}?download=1`}
+                        class="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-1.5 font-mono text-[10px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                        aria-label="下载媒体文件"
+                      >
+                        <Download class="size-3" aria-hidden="true" />
+                      </a>
+                    </div>
+                  {/if}
                   <span class="absolute left-1 top-1 rounded border bg-card/90 px-1 py-px font-mono text-[9px] text-muted-foreground">
                     在线
                   </span>
@@ -432,17 +484,50 @@
             {:else if liveRow}
               <div class="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border bg-muted">
                 {#if liveShown && !liveFailed}
-                  <button class="h-full w-full" aria-label="放大预览" onclick={openLiveLightbox}>
-                    <img
-                      src={liveSrc}
-                      alt="图片"
-                      class="h-full w-full object-cover"
-                      onerror={() => {
-                        liveFailed = true;
-                        liveErrorText = liveErrorText || "图片解码失败";
-                      }}
-                    />
-                  </button>
+                  {#if liveMime.startsWith("image/")}
+                    <button class="h-full w-full" aria-label="放大预览" onclick={openLiveLightbox}>
+                      <img
+                        src={liveSrc}
+                        alt="图片"
+                        class="h-full w-full object-cover"
+                        onerror={() => failLiveDecode("图片解码失败")}
+                      />
+                    </button>
+                  {:else if liveMime.startsWith("video/")}
+                    <video src={liveSrc} controls autoplay muted playsinline class="h-full w-full object-contain" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></video>
+                    <button
+                      type="button"
+                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
+                      aria-label="放大预览"
+                      onclick={openLiveLightbox}
+                    >
+                      <Maximize2 class="size-3.5" aria-hidden="true" />
+                    </button>
+                  {:else if liveMime.startsWith("audio/")}
+                    <audio src={liveSrc} controls class="w-full px-4" aria-label="在线媒体" onerror={() => failLiveDecode("媒体解码失败")}></audio>
+                    <button
+                      type="button"
+                      class="absolute right-1 top-1 inline-flex items-center justify-center rounded-md border border-border bg-card/90 px-1.5 py-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent"
+                      aria-label="放大预览"
+                      onclick={openLiveLightbox}
+                    >
+                      <Maximize2 class="size-3.5" aria-hidden="true" />
+                    </button>
+                  {:else}
+                    <div class="flex flex-col items-center gap-1 p-2">
+                      <ImageIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+                      <span class="max-w-full truncate font-mono text-[10px] text-muted-foreground">
+                        该媒体类型不支持在线预览（{liveMime || "未知"})
+                      </span>
+                      <a
+                        href={`${mediaLiveThumbUrl(liveRow.rowId)}?download=1`}
+                        class="inline-flex h-7 items-center justify-center rounded-md border border-input bg-background px-1.5 font-mono text-[10px] shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                        aria-label="下载媒体文件"
+                      >
+                        <Download class="size-3" aria-hidden="true" />
+                      </a>
+                    </div>
+                  {/if}
                   <span class="absolute left-1 top-1 rounded border bg-card/90 px-1 py-px font-mono text-[9px] text-muted-foreground">
                     在线
                   </span>

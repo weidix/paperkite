@@ -16,6 +16,7 @@
       if (lightbox.index === index) {
         lightbox.src = result.url;
         lightbox.source = result.source;
+        lightbox.mime = result.mime ?? "";
       }
     }).catch(() => {
       if (lightbox.index === index) lightbox.failed = true;
@@ -87,19 +88,43 @@
     <div class="relative flex min-h-0 flex-1 items-center justify-center p-4">
       <div class="max-h-full max-w-full">
         {#if item}
-          {#if item.mime.startsWith("video/")}
-            <video src={lightbox.src} controls class="max-h-[78vh] max-w-full rounded-lg border border-border shadow-sm" aria-label={item.name}><track kind="captions" /></video>
-          {:else if lightbox.failed}
-            <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">
-              媒体加载失败
-            </div>
+          {@const mime = lightbox.mime || item.mime}
+          {#if mime.startsWith("video/")}
+            {#if lightbox.failed}
+              <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">媒体加载失败</div>
+            {:else if lightbox.src}
+              <video src={lightbox.src} controls class="max-h-[78vh] max-w-full rounded-lg border border-border shadow-sm" aria-label={item.name}><track kind="captions" /></video>
+            {:else}
+              <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
+            {/if}
+          {:else if mime.startsWith("audio/")}
+            {#if lightbox.failed}
+              <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">媒体加载失败</div>
+            {:else if lightbox.src}
+              <audio src={lightbox.src} controls class="max-w-full" aria-label={item.name}></audio>
+            {:else}
+              <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
+            {/if}
+          {:else if mime.startsWith("image/")}
+            {#if lightbox.failed}
+              <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">
+                媒体加载失败
+              </div>
+            {:else if lightbox.src}
+              <img
+                src={lightbox.src}
+                alt={item.name}
+                class="max-h-[78vh] max-w-full animate-zoom-in rounded-lg border border-border bg-card object-contain shadow-sm"
+                onerror={() => (lightbox.failed = true)}
+              />
+            {:else}
+              <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
+            {/if}
           {:else}
-            <img
-              src={lightbox.src}
-              alt={item.name}
-              class="max-h-[78vh] max-w-full animate-zoom-in rounded-lg border border-border bg-card object-contain shadow-sm"
-              onerror={() => (lightbox.failed = true)}
-            />
+            <div class="rounded-lg border border-border bg-card p-8 text-center font-mono text-xs text-muted-foreground">
+              该媒体类型不支持在线预览
+              <span class="mt-2 block">{mime || "未知类型"}</span>
+            </div>
           {/if}
         {/if}
       </div>

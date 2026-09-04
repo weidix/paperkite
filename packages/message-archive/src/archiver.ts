@@ -29,7 +29,7 @@ export interface ArchiveClient {
   getEntity(identifier: string | number): Promise<unknown>;
   iterDialogs(): AsyncIterable<DialogEntry>;
   iterMessages(entity: unknown, options: { limit: number; maxId: number }): AsyncIterable<TelegramMessage>;
-  getMessages(entity: unknown, options: { ids: readonly number[] }): Promise<readonly TelegramMessage[]>;
+  getMessages(entity: unknown, options: { ids: readonly number[] }): Promise<readonly (TelegramMessage | undefined)[]>;
   downloadMedia(message: TelegramMessage, options: { outputFile?: string }): Promise<Buffer | string | undefined>;
 }
 
@@ -350,7 +350,8 @@ export class MessageArchiver {
     chatDir: string,
     messageIds: readonly number[]
   ): Promise<DownloadedMedia[]> {
-    const messages = (await client.getMessages(chatId, { ids: messageIds })).filter(Boolean);
+    const messages = (await client.getMessages(chatId, { ids: messageIds }))
+      .filter((message): message is TelegramMessage => message !== undefined);
     const results: DownloadedMedia[] = [];
     for (const message of messages) {
       if (!message.media) continue;
@@ -442,6 +443,9 @@ function describeMedia(media: unknown): { messageType: string; mediaType?: strin
     }
     if (attributes.some(hasName("DocumentAttributeAnimated"))) {
       return { messageType: "animation", mediaType: "animation", mimeType };
+    }
+    if (attributes.some(hasName("DocumentAttributeVideo"))) {
+      return { messageType: "video", mediaType: "video", mimeType };
     }
     return { messageType: "document", mediaType: "document", mimeType };
   }

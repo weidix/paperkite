@@ -1,13 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { utils } from "telegram";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
-import type { TelegramMessage } from "../archiver.js";
+import type { ArchiveClient, TelegramMessage } from "../archiver.js";
 import type { StoredMediaFile } from "../storage/index.js";
-
-export interface LiveMediaClient {
-  getMessages(chatId: string, options: { ids: readonly number[] }): Promise<readonly TelegramMessage[]>;
-  downloadMedia(message: TelegramMessage, options?: { outputFile?: string }): Promise<Buffer | string | undefined>;
-}
 
 export interface LiveMediaResult {
   readonly bytes: Buffer;
@@ -18,6 +14,12 @@ export interface LiveMediaResult {
 export type LiveMediaOutcome =
   | ({ readonly ok: true } & LiveMediaResult)
   | { readonly ok: false; readonly missing: boolean };
+
+export interface LiveMediaOptions {
+  /** 归档 chats 表里的会话句柄，供在线取回冷启动时解析实体。 */
+  readonly chatUsername?: string;
+  readonly logger: RuntimeLogger;
+}
 
 const EXT_MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -90,24 +92,26 @@ export function parseRange(header: string, size: number): { start: number; end: 
   return { start, end };
 }
 
-/** 经注入会话从 Telegram 取回未落盘媒体；message 缺失或下载失败时返回不可用结果。 */
+/** 经注入会话从 Telegram 取回未落盘媒体；消息/媒体不可得时返回不可用结果。 */
 export async function fetchLiveMedia(
   file: StoredMediaFile,
   sessions: SessionAccess,
   session: string,
-  logger: RuntimeLogger
+  options: LiveMediaOptions
 ): Promise<LiveMediaOutcome> {
+  const { chatUsername, logger } = options;
   try {
     const result = await sessions.run(session, async (client) => {
-      const host = client as LiveMediaClient;
-      const messages = await host.getMessages(file.chatId, { ids: [file.messageId] });
-      const message = messages.find((item) => item.id === file.messageId);
-      if (!message || !message.media) return undefined;
-      const bytes = await host.downloadMedia(message);
-      return { bytes, mime: liveMediaMime(message) };
+      const host = client as ArchiveClient;
+      const message = await fetchMessage(host, file, chatUsername);
+      if (!message) return { state: "missing" as const };
+      if (!message.media) return { state: "unavailable" as const };
+      const bytes = await host.downloadMedia(message, {});
+      if (bytes === undefined) return { state: "unavailable" as const };
+      return { state: "ok" as const, bytes, mime: liveMediaMime(message) };
     });
-    if (!result) return { ok: false, missing: false };
-    if (result.bytes === undefined) return { ok: false, missing: false };
+    if (result.state === "missing") return { ok: false, missing: true };
+    if (result.state === "unavailable") return { ok: false, missing: false };
     const buffer = result.bytes instanceof Buffer ? result.bytes : await readFile(result.bytes);
     return { ok: true, bytes: buffer, mime: result.mime };
   } catch (error) {
@@ -121,10 +125,78 @@ export async function fetchLiveMedia(
   }
 }
 
+/**
+ * 取回目标消息。冷启动会话没有实体缓存时，先按归档用户名解析实体再重试；
+ * 解析不到（渠道私密/不可达）时抛出原始错误，由缺失判定统一归类。
+ */
+async function fetchMessage(
+  host: ArchiveClient,
+  file: StoredMediaFile,
+  chatUsername: string | undefined
+): Promise<TelegramMessage | undefined> {
+  try {
+    return await fetchById(host, file, file.chatId);
+  } catch (error) {
+    if (!isUnresolvedEntityError(error)) throw error;
+    const entity = await resolveChatEntity(host, file, chatUsername);
+    if (entity === undefined) throw error;
+    return fetchById(host, file, entity);
+  }
+}
+
+async function fetchById(
+  host: ArchiveClient,
+  file: StoredMediaFile,
+  entity: unknown
+): Promise<TelegramMessage | undefined> {
+  const messages = await host.getMessages(entity, { ids: [file.messageId] });
+  return messages.find((item) => item !== undefined && item !== null && item.id === file.messageId);
+}
+
+/** 按归档用户名解析，失败后回退到会话清单扫描；返回与归档 chatId 匹配的实体。 */
+async function resolveChatEntity(
+  host: ArchiveClient,
+  file: StoredMediaFile,
+  chatUsername: string | undefined
+): Promise<unknown | undefined> {
+  const handle = chatUsername?.trim().replace(/^@/, "");
+  if (handle) {
+    try {
+      const entity = await host.getEntity("@" + handle);
+      if (peerIdOf(entity) === file.chatId) return entity;
+    } catch (error) {
+      // 句柄失效（删除/更名/私密），继续尝试会话清单
+    }
+  }
+  try {
+    for await (const dialog of host.iterDialogs()) {
+      const entity = dialog.entity;
+      if (entity !== undefined && entity !== null && peerIdOf(entity) === file.chatId) return entity;
+    }
+  } catch (error) {
+    // 会话清单不可迭代时按解析失败处理
+  }
+  return undefined;
+}
+
+function peerIdOf(entity: unknown): string {
+  try {
+    return String(utils.getPeerId(entity as Parameters<typeof utils.getPeerId>[0]));
+  } catch {
+    return "";
+  }
+}
+
 /** 会话/消息已删除或对当前账号不可见时的典型错误。 */
 function isMissingPeer(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /could not find (the )?input entity|could not find the entity|CHANNEL_PRIVATE|CHANNEL_INVALID|chat (was )?not found|peer id is invalid/i.test(message);
+  return /could not find (the )?input entity|could not find the entity|CHANNEL_PRIVATE|CHANNEL_INVALID|CHANNEL_FORBIDDEN|CHAT_FORBIDDEN|chat (was )?not found|peer id is invalid/i.test(message);
+}
+
+/** gramjs 本地实体缓存缺失、尚可尝试解析的错误。 */
+function isUnresolvedEntityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /could not find (the )?input entity/i.test(message);
 }
 
 function liveMediaMime(message: TelegramMessage): string {

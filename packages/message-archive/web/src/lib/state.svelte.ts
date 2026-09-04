@@ -154,7 +154,7 @@ export interface LightboxItem {
   readonly mime: string;
   readonly size?: number;
   readonly spec: string;
-  load(): Promise<{ url: string; source: "落盘" | "在线" }>;
+  load(): Promise<{ url: string; source: "落盘" | "在线"; mime?: string }>;
 }
 
 export const lightbox = $state<{
@@ -164,7 +164,8 @@ export const lightbox = $state<{
   src: string;
   failed: boolean;
   source: "落盘" | "在线";
-}>({ open: false, items: [], index: 0, src: "", failed: false, source: "落盘" });
+  mime: string;
+}>({ open: false, items: [], index: 0, src: "", failed: false, source: "落盘", mime: "" });
 
 export function showLightbox(items: LightboxItem[], index: number): void {
   lightbox.items = items;
@@ -175,12 +176,19 @@ export function showLightbox(items: LightboxItem[], index: number): void {
 export function closeLightbox(): void {
   lightbox.open = false;
   lightbox.items = [];
-  lightbox.src = "";
+  releaseLightboxSrc();
 }
 
 export function stepLightbox(delta: number): void {
   if (lightbox.items.length < 2) return;
   lightbox.index = (lightbox.index + delta + lightbox.items.length) % lightbox.items.length;
+  releaseLightboxSrc();
+}
+
+function releaseLightboxSrc(): void {
+  const src = lightbox.src;
+  lightbox.src = "";
+  if (src.startsWith("blob:")) URL.revokeObjectURL(src);
 }
 
 export const pendingSearchFocus = $state({ armed: false });

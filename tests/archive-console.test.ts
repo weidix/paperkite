@@ -4,25 +4,63 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Api } from "telegram";
 import type { RuntimeLogger, ServiceContext, SessionAccess } from "@paperkite/sdk";
-import type { TelegramMessage } from "../packages/message-archive/src/archiver.js";
+import type { DialogEntry, TelegramMessage } from "../packages/message-archive/src/archiver.js";
 import { createArchiveConsoleServer } from "../packages/message-archive/src/console/server.js";
 import { ArchiveConsoleWebService } from "../packages/message-archive/src/console/service.js";
 import { SqliteArchiveStore, type MediaRow, type MessageRow } from "../packages/message-archive/src/storage/index.js";
 
 const logger: RuntimeLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return logger; } };
 
+/** 与归档 chatId "100" 匹配的实体（用户无标记 peer id）。 */
+function userEntity(id = 100): Api.User {
+  return new Api.User({
+    id,
+    accessHash: 1,
+    username: "test_chat",
+    firstName: "测"
+  } as unknown as ConstructorParameters<typeof Api.User>[0]);
+}
+
 class FakeLiveClient {
   calls: string[] = [];
   message: TelegramMessage | undefined;
   missingIds: readonly number[] = [];
+  /** 用户名解析失败时置为空串；解析到不匹配实体时置为错 id。 */
+  username = "test_chat";
+  entityId = 100;
+  /** 冷启动模拟：首次 getMessages 抛实体缺失错误；置 always 时每次均抛。 */
+  entityErrorFirst = false;
+  entityErrorAlways = false;
+  /** 已删除消息：getMessages 返回空槽（gramjs 对 MessageEmpty 的行为）。 */
+  deletedIds: readonly number[] = [];
+  dialogs: DialogEntry[] = [];
 
-  async getMessages(_chatId: string, options: { ids: readonly number[] }): Promise<readonly TelegramMessage[]> {
+  async getMessages(_chatId: string, options: { ids: readonly number[] }): Promise<readonly (TelegramMessage | undefined)[]> {
     this.calls.push("getMessages:" + options.ids.join(","));
     if (options.ids.some((id) => this.missingIds.includes(id))) {
       throw new Error('Could not find the input entity for {"channelId":2614030056,"className":"PeerChannel"}');
     }
+    if (this.entityErrorFirst || this.entityErrorAlways) {
+      this.entityErrorFirst = false;
+      throw new Error('Could not find the input entity for {"channelId":2614030056,"className":"PeerChannel"}');
+    }
+    if (options.ids.some((id) => this.deletedIds.includes(id))) {
+      return [undefined];
+    }
     return this.message && options.ids.includes(this.message.id) ? [this.message] : [];
+  }
+
+  async getEntity(identifier: string | number): Promise<unknown> {
+    this.calls.push("getEntity:" + identifier);
+    if (this.username === "") throw new Error("USERNAME_NOT_OCCUPIED");
+    return userEntity(this.entityId);
+  }
+
+  async *iterDialogs(): AsyncIterable<DialogEntry> {
+    this.calls.push("iterDialogs");
+    for (const dialog of this.dialogs) yield dialog;
   }
 
   async downloadMedia(message: TelegramMessage): Promise<Buffer | undefined> {
@@ -47,7 +85,16 @@ interface Harness {
   close(): Promise<void>;
 }
 
-async function harness(options: { session?: boolean; missingIds?: readonly number[] } = {}): Promise<Harness> {
+async function harness(options: {
+  session?: boolean;
+  missingIds?: readonly number[];
+  username?: string;
+  entityId?: number;
+  entityErrorFirst?: boolean;
+  entityErrorAlways?: boolean;
+  deletedIds?: readonly number[];
+  dialogs?: DialogEntry[];
+} = {}): Promise<Harness> {
   const tmp = await mkdtemp(join(tmpdir(), "paperkite-archive-console-"));
   const mediaDir = join(tmp, "media");
   await mkdir(mediaDir, { recursive: true });
@@ -58,6 +105,12 @@ async function harness(options: { session?: boolean; missingIds?: readonly numbe
   const client = new FakeLiveClient();
   client.message = { id: 3, date: 0, media: { className: "MessageMediaPhoto" } };
   client.missingIds = options.missingIds ?? [];
+  client.username = options.username ?? "test_chat";
+  client.entityId = options.entityId ?? 100;
+  client.entityErrorFirst = options.entityErrorFirst ?? false;
+  client.entityErrorAlways = options.entityErrorAlways ?? false;
+  client.deletedIds = options.deletedIds ?? [];
+  client.dialogs = options.dialogs ?? [];
   const session = options.session ? fakeSessions(client) : undefined;
 
   const server = createArchiveConsoleServer({
@@ -290,13 +343,109 @@ test("archive console live media needs a session and streams telegram bytes", as
       assert.equal(res.rawPayload.toString(), "LIVE-PHOTO-BYTES");
       assert.deepEqual(withSession.client.calls, ["getMessages:3", "downloadMedia:3"]);
 
-      const notFound = await withSession.server.inject({ method: "GET", url: "/api/mediafiles/3/live" });
-      assert.equal(notFound.statusCode, 404);
+      const deleted = await withSession.server.inject({ method: "GET", url: "/api/mediafiles/3/live" });
+      assert.equal(deleted.statusCode, 410);
+      assert.equal(deleted.json().error, "消息已从 Telegram 删除或会话无法访问");
     } finally {
       await withSession.close();
     }
   } finally {
     await h.close();
+  }
+});
+
+test("archive console live media resolves cold-start entity via chat username", async () => {
+  const withSession = await harness({ session: true, entityErrorFirst: true });
+  try {
+    const res = await withSession.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers["content-type"], "image/jpeg");
+    assert.equal(res.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+    assert.deepEqual(withSession.client.calls, [
+      "getMessages:3",
+      "getEntity:@test_chat",
+      "getMessages:3",
+      "downloadMedia:3"
+    ]);
+
+    const live = await withSession.server.inject({ method: "GET", url: "/api/mediafiles/1/live" });
+    assert.equal(live.statusCode, 200);
+    assert.equal(live.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+  } finally {
+    await withSession.close();
+  }
+});
+
+test("archive console live media falls back to dialog scan when username is unresolvable or mismatched", async () => {
+  const withDialogs = await harness({
+    session: true,
+    entityErrorFirst: true,
+    username: "",
+    dialogs: [{ entity: userEntity() }]
+  });
+  try {
+    const res = await withDialogs.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+    assert.deepEqual(withDialogs.client.calls, [
+      "getMessages:3",
+      "getEntity:@test_chat",
+      "iterDialogs",
+      "getMessages:3",
+      "downloadMedia:3"
+    ]);
+  } finally {
+    await withDialogs.close();
+  }
+
+  const withMismatch = await harness({ session: true, entityErrorFirst: true, entityId: 999 });
+  try {
+    const res = await withMismatch.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(res.statusCode, 410);
+    assert.equal(res.json().error, "消息已从 Telegram 删除或会话无法访问");
+    assert.deepEqual(withMismatch.client.calls, ["getMessages:3", "getEntity:@test_chat", "iterDialogs"]);
+  } finally {
+    await withMismatch.close();
+  }
+});
+
+test("archive console live routes report 410 when chat cannot be resolved at all", async () => {
+  const withSession = await harness({ session: true, username: "", entityErrorAlways: true });
+  try {
+    const thumb = await withSession.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(thumb.statusCode, 410);
+    assert.equal(thumb.json().error, "消息已从 Telegram 删除或会话无法访问");
+    assert.deepEqual(withSession.client.calls, ["getMessages:3", "getEntity:@test_chat", "iterDialogs"]);
+
+    const live = await withSession.server.inject({ method: "GET", url: "/api/mediafiles/1/live" });
+    assert.equal(live.statusCode, 410);
+    assert.equal(live.json().error, "消息已从 Telegram 删除或会话无法访问");
+    assert.deepEqual(withSession.client.calls, [
+      "getMessages:3",
+      "getEntity:@test_chat",
+      "iterDialogs",
+      "getMessages:3",
+      "getEntity:@test_chat",
+      "iterDialogs"
+    ]);
+  } finally {
+    await withSession.close();
+  }
+});
+
+test("archive console live routes report 410 when the message was deleted on telegram", async () => {
+  const withSession = await harness({ session: true, deletedIds: [3] });
+  try {
+    const thumb = await withSession.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(thumb.statusCode, 410);
+    assert.equal(thumb.json().error, "消息已从 Telegram 删除或会话无法访问");
+    assert.deepEqual(withSession.client.calls, ["getMessages:3"]);
+
+    const live = await withSession.server.inject({ method: "GET", url: "/api/mediafiles/1/live" });
+    assert.equal(live.statusCode, 410);
+    assert.equal(live.json().error, "消息已从 Telegram 删除或会话无法访问");
+  } finally {
+    await withSession.close();
   }
 });
 
