@@ -1,14 +1,15 @@
 <script lang="ts">
   import { ArrowLeft, ChevronRight, X } from "lucide-svelte";
   import { tick } from "svelte";
-  import { fetchContext, fetchMediaMeta, fetchState, mediaDiskUrl, mediaDownloadUrl, mediaLiveThumbUrl, mediaLiveUrl, type ArchiveState } from "$lib/api";
+  import { fetchContext, fetchState, mediaDiskUrl, mediaRowUrl, type ArchiveState } from "$lib/api";
   import { fmtCount, fmtTs, highlightSegments, senderName } from "$lib/format";
-  import { backToSearch, navigate, showLightbox, type LightboxItem } from "$lib/state.svelte";
+  import { albumLightboxItems, kindOfFile, kindOfRow, openAlbumLightbox, openMessageLightbox } from "$lib/media";
+  import { backToSearch, navigate } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
   import MessageRow from "$lib/components/message-row.svelte";
   import MediaStrip, { type StripTile } from "$lib/components/media-strip.svelte";
-  import type { AlbumContextEntry, AlbumRow as AlbumRowRecord, ContextEntry, MessageRecord, StoredMediaFile } from "$lib/model";
+  import type { AlbumContextEntry, ContextEntry, MessageRecord } from "$lib/model";
 
   const WINDOW = 20;
   const PAGE = 20;
@@ -36,16 +37,27 @@
   const anchorRecord = $derived(album?.rows[0] ?? messageAnchor ?? null);
   const anchorText = $derived(album?.captionText ?? messageAnchor?.text ?? "");
   const segments = $derived(highlightSegments(anchorText, terms));
-  const canExpand = $derived(anchorText.length > 120);
-
-  /** 相册整体预览序列：跨行展平的全部媒体项与每行的起始序号。 */
-  const albumMedia = $derived(buildAlbumMedia(album));
-  const messageItems = $derived(
-    messageAnchor !== null && messageAnchor.mediaFiles.length > 0
-      ? messageAnchor.mediaFiles.map(itemForFile)
-      : (messageAnchor?.hasMedia ? [itemForRow(messageAnchor)] : [])
-  );
   const stripTiles = $derived(buildStripTiles());
+
+  /** 锚点文本实际被 line-clamp 截断时提供展开/收起（与字符数无关）。 */
+  let anchorTextEl = $state<HTMLParagraphElement | null>(null);
+  let anchorClipped = $state(false);
+
+  $effect(() => {
+    const el = anchorTextEl;
+    // 锚点文本变化时重新测量：元素被复用且 clamp 高度不变时 ResizeObserver 不会触发
+    void anchorText;
+    if (el === null || expanded) return;
+    const check = (): void => {
+      anchorClipped = el.scrollHeight > el.clientHeight + 1;
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+
+  const showExpand = $derived(anchorClipped || expanded);
 
   const remainingBefore = $derived(beforeTotal - before.length);
   const remainingAfter = $derived(afterTotal - after.length);
@@ -141,9 +153,9 @@
   /** 点击缩略图：定位到对应项并直接进入预览。 */
   function selectStrip(index: number): void {
     if (album !== null) {
-      showLightbox(albumMedia.items, albumMedia.starts[index] ?? 0);
-    } else {
-      showLightbox(messageItems, index);
+      openAlbumLightbox(album, index);
+    } else if (messageAnchor !== null) {
+      openMessageLightbox(messageAnchor, index);
     }
   }
 
@@ -154,127 +166,59 @@
         if (row.mediaFiles.length > 0) {
           const first = row.mediaFiles[0];
           if (!first) continue;
+          const kind = kindOfFile(first);
           tiles.push({
             key: `file-${first.id}`,
-            kind: kindOfFile(first),
+            kind,
             file: first,
             label: String(tiles.length + 1),
+            name: first.fileName ?? `media_${first.messageId}`,
             badge: row.mediaFiles.length > 1 ? `×${row.mediaFiles.length}` : undefined,
+            thumbUrl: hasThumbKind(kind) ? mediaDiskUrl(first.id) : undefined,
             live: false
           });
         } else if (row.hasMedia) {
-          tiles.push({
-            key: `live-${row.rowId}`,
-            kind: kindOfRow(row),
-            file: null,
-            label: String(tiles.length + 1),
-            live: true,
-            disabled: archiveState?.session === null
-          });
+          tiles.push(liveTile(row, String(tiles.length + 1)));
         }
       }
       return tiles;
     }
     if (messageAnchor !== null && messageAnchor.mediaFiles.length > 0) {
-      return messageAnchor.mediaFiles.map((file, i) => ({
-        key: `file-${file.id}`,
-        kind: kindOfFile(file),
-        file,
-        label: String(i + 1),
-        live: false
-      }));
+      return messageAnchor.mediaFiles.map((file, i) => {
+        const kind = kindOfFile(file);
+        return {
+          key: `file-${file.id}`,
+          kind,
+          file,
+          label: String(i + 1),
+          name: file.fileName ?? `media_${file.id}`,
+          thumbUrl: hasThumbKind(kind) ? mediaDiskUrl(file.id) : undefined,
+          live: false
+        };
+      });
     }
     if (messageAnchor?.hasMedia) {
-      return [{
-        key: `live-${messageAnchor.rowId}`,
-        kind: kindOfRow(messageAnchor),
-        file: null,
-        label: "1",
-        live: true,
-        disabled: archiveState?.session === null
-      }];
+      return [liveTile(messageAnchor, "1")];
     }
     return [];
   }
 
-  function buildAlbumMedia(album: AlbumContextEntry | null): { items: LightboxItem[]; starts: number[] } {
-    const items: LightboxItem[] = [];
-    const starts: number[] = [];
-    if (album === null) return { items, starts };
-    for (const row of album.rows) {
-      starts.push(items.length);
-      if (row.mediaFiles.length > 0) {
-        for (const file of row.mediaFiles) items.push(itemForFile(file));
-      } else if (row.hasMedia) {
-        items.push(itemForRow(row));
-      }
-    }
-    return { items, starts };
-  }
-
-  function itemForFile(file: StoredMediaFile): LightboxItem {
+  function liveTile(row: MessageRecord, label: string): StripTile {
+    const kind = kindOfRow(row);
     return {
-      name: file.fileName ?? `media_${file.id}`,
-      mime: file.mimeType ?? "",
-      size: file.fileSize,
-      spec: file.mediaType,
-      load: () => loadPreview(file)
-    };
-  }
-
-  function itemForRow(row: AlbumRowRecord | MessageRecord): LightboxItem {
-    return {
+      key: `live-${row.rowId}`,
+      kind,
+      file: null,
+      label,
       name: `media_${row.messageId}`,
-      mime: row.mimeType ?? "",
-      size: undefined,
-      spec: row.mediaType ?? "",
-      load: () => loadLiveBlob(mediaLiveThumbUrl(row.rowId))
+      live: true,
+      disabled: archiveState?.session === null,
+      thumbUrl: hasThumbKind(kind) && archiveState?.session !== null ? mediaRowUrl(row.rowId) : undefined
     };
   }
 
-  async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source: "落盘" | "在线"; mime?: string; downloadUrl?: string }> {
-    try {
-      const meta = await fetchMediaMeta(file.id);
-      if (meta.onDisk) {
-        return { url: mediaDiskUrl(file.id), source: "落盘", mime: file.mimeType ?? "", downloadUrl: mediaDownloadUrl(file.id, "file") };
-      }
-    } catch {
-      // 元数据不可得时按在线取回处理
-    }
-    return loadLiveBlob(mediaLiveUrl(file.id));
-  }
-
-  /** 在线取回并转 object URL；mime 取响应头，供预览按实际内容分流。 */
-  async function loadLiveBlob(path: string): Promise<{ url: string; source: "落盘" | "在线"; mime: string; downloadUrl: string }> {
-    const res = await fetch(path);
-    if (!res.ok) throw new Error(`取回失败 (${res.status})`);
-    const blob = await res.blob();
-    const mime = res.headers.get("content-type") ?? (blob.type || "application/octet-stream");
-    return {
-      url: URL.createObjectURL(blob),
-      source: "在线",
-      mime,
-      downloadUrl: `${path}${path.includes("?") ? "&" : "?"}download=1`
-    };
-  }
-
-  function kindOfFile(file: StoredMediaFile): StripTile["kind"] {
-    const mime = file.mimeType ?? "";
-    if (mime.startsWith("image/")) return "image";
-    if (mime.startsWith("video/")) return "video";
-    if (file.mediaType === "photo" || file.mediaType === "sticker" || file.mediaType === "animation") return "image";
-    return "file";
-  }
-
-  function kindOfRow(row: { mediaType?: string; mimeType?: string }): StripTile["kind"] {
-    const mime = row.mimeType ?? "";
-    if (mime.startsWith("image/")) return "image";
-    if (mime.startsWith("video/")) return "video";
-    const type = row.mediaType ?? "";
-    if (type === "photo" || type === "sticker" || type === "animation" || type === "video") {
-      return type === "video" ? "video" : "image";
-    }
-    return "file";
+  function hasThumbKind(kind: StripTile["kind"]): boolean {
+    return kind === "image" || kind === "video";
   }
 
   function entryRowId(entry: ContextEntry): string {
@@ -367,7 +311,10 @@
               {/if}
             </span>
           </div>
-          <p class="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-snug {expanded ? '' : 'line-clamp-3'}">
+          <p
+            class="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-snug {expanded ? '' : 'line-clamp-3'}"
+            bind:this={anchorTextEl}
+          >
             {#if anchorText}
               {#each segments as segment, i (i)}
                 {#if segment.hit}
@@ -380,7 +327,7 @@
               <span class="text-muted-foreground">（无文本）</span>
             {/if}
           </p>
-          {#if canExpand}
+          {#if showExpand}
             <button
               class="mt-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               onclick={() => (expanded = !expanded)}

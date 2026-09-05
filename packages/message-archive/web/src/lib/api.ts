@@ -62,9 +62,9 @@ export function mediaLiveUrl(id: string): string {
   return `/api/mediafiles/${id}/live`;
 }
 
-/** 未落盘媒体按消息行在线取回（图源 Telegram 会话）。 */
-export function mediaLiveThumbUrl(rowId: string): string {
-  return `/api/messages/${rowId}/thumb`;
+/** 未落盘媒体按消息行取回：size=thumb 为 Telegram 原生缩略图，size=full 为整图在线取回。 */
+export function mediaRowUrl(rowId: string, size: "thumb" | "full" = "thumb"): string {
+  return `/api/messages/${rowId}/thumb?size=${size}`;
 }
 
 export function mediaDownloadUrl(id: string, source: "file" | "live"): string {

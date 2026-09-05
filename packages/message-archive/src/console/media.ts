@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { utils } from "telegram";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
-import type { ArchiveClient, TelegramMessage } from "../archiver.js";
+import type { ArchiveClient, TelegramMessage, ThumbParam } from "../archiver.js";
 import type { StoredMediaFile } from "../storage/index.js";
 
 export interface LiveMediaResult {
@@ -14,6 +14,11 @@ export interface LiveMediaResult {
 export type LiveMediaOutcome =
   | ({ readonly ok: true } & LiveMediaResult)
   | { readonly ok: false; readonly missing: boolean };
+
+/** 在线缩略图结果：noThumb 表示媒体有缩略图可用的判定失败（文档类无 thumbs）。 */
+export type LiveThumbOutcome =
+  | ({ readonly ok: true } & LiveMediaResult)
+  | { readonly ok: false; readonly missing: boolean; readonly noThumb?: boolean };
 
 export interface LiveMediaOptions {
   /** 归档 chats 表里的会话句柄，供在线取回冷启动时解析实体。 */
@@ -123,6 +128,157 @@ export async function fetchLiveMedia(
     }
     return { ok: false, missing };
   }
+}
+
+/** 缩略图规格：thumb 为 GramJS 原生下载参数；无缩略图但属图片类时以整图回退。 */
+interface ThumbSpec {
+  readonly thumb: ThumbParam | undefined;
+  readonly mime: string;
+}
+
+/** photo 的最小可用 sizeType 次序（GramJS sizeTypes 中同序的最小两档）。 */
+const PHOTO_THUMB_TYPES = ["s", "m"] as const;
+
+/**
+ * 在线取回原生缩略图：photo 用最小可用 size，document 系用 videoThumbs/thumbs 首项；
+ * 图片类无任何 size 时回退整图，其余类型（无 thumbs 的文档/音频等）报告 noThumb。
+ */
+export async function fetchLiveThumb(
+  file: StoredMediaFile,
+  sessions: SessionAccess,
+  session: string,
+  options: LiveMediaOptions
+): Promise<LiveThumbOutcome> {
+  const { chatUsername, logger } = options;
+  try {
+    const result = await sessions.run(session, async (client) => {
+      const host = client as ArchiveClient;
+      const message = await fetchMessage(host, file, chatUsername);
+      if (!message) return { state: "missing" as const };
+      if (!message.media) return { state: "unavailable" as const };
+      const spec = thumbSpecOf(unwrapWebPage(message.media));
+      if (spec === undefined) return { state: "no-thumb" as const };
+      if (spec.thumb === undefined) {
+        const bytes = await host.downloadMedia(message, {});
+        if (bytes === undefined) return { state: "unavailable" as const };
+        return { state: "ok" as const, bytes, mime: liveMediaMime(message) };
+      }
+      const bytes = await host.downloadMedia(message, { thumb: spec.thumb });
+      if (bytes === undefined || (Buffer.isBuffer(bytes) && bytes.length === 0)) {
+        return { state: "unavailable" as const };
+      }
+      return { state: "ok" as const, bytes, mime: spec.mime };
+    });
+    if (result.state === "missing") return { ok: false, missing: true };
+    if (result.state === "no-thumb") return { ok: false, missing: false, noThumb: true };
+    if (result.state === "unavailable") return { ok: false, missing: false };
+    const buffer = result.bytes instanceof Buffer ? result.bytes : await readFile(result.bytes);
+    return { ok: true, bytes: buffer, mime: snifImageMime(buffer) ?? result.mime };
+  } catch (error) {
+    const missing = isMissingPeer(error);
+    if (missing) {
+      logger.debug("live media peer missing for message " + file.messageId + ", likely deleted");
+    } else {
+      logger.warn("live media thumb fetch failed for message " + file.messageId, error);
+    }
+    return { ok: false, missing };
+  }
+}
+
+function thumbSpecOf(media: unknown): ThumbSpec | undefined {
+  const name = className(media);
+  if (name === "MessageMediaPhoto") {
+    const photo = recordOf(recordOf(media)?.photo);
+    const sizes = [...arrayOf(photo?.sizes), ...arrayOf(photo?.videoSizes)];
+    const size = pickPhotoThumb(sizes);
+    return { thumb: size === undefined ? undefined : typeOf(size) ?? size, mime: "image/jpeg" };
+  }
+  if (name === "MessageMediaDocument") {
+    const document = recordOf(recordOf(media)?.document);
+    if (document === undefined) return undefined;
+    const videoThumbs = arrayOf(document.videoThumbs);
+    if (videoThumbs.length > 0) return { thumb: videoThumbs[0]!, mime: "image/jpeg" };
+    const size = arrayOf(document.thumbs).find(isUsableThumb);
+    if (size === undefined) return undefined;
+    return { thumb: typeOf(size) ?? size, mime: "image/jpeg" };
+  }
+  return undefined;
+}
+
+/** 消息内嵌网页链接的媒体（链接卡片图），解开到内部 photo/document 再判定。 */
+function unwrapWebPage(media: unknown): unknown {
+  if (className(media) !== "MessageMediaWebPage") return media;
+  const webpage = recordOf(recordOf(media)?.webpage);
+  if (webpage === undefined) return media;
+  return webpage.document ?? webpage.photo ?? media;
+}
+
+/** 按 sizeType 优先取最小可用 photo size；无匹配时按字节量取最小项。 */
+function pickPhotoThumb(sizes: readonly unknown[]): unknown | undefined {
+  for (const type of PHOTO_THUMB_TYPES) {
+    const size = sizes.find((item) => typeOf(item) === type && isUsableThumb(item));
+    if (size !== undefined) return size;
+  }
+  return smallestThumb(sizes);
+}
+
+function smallestThumb(thumbs: readonly unknown[]): unknown | undefined {
+  const usable = thumbs.filter(isUsableThumb);
+  if (usable.length === 0) return undefined;
+  return usable.reduce((best, item) => (thumbWeight(item) < thumbWeight(best) ? item : best));
+}
+
+function isUsableThumb(value: unknown): boolean {
+  const name = className(value);
+  return name !== "PhotoSizeEmpty" && name !== "PhotoPathSize";
+}
+
+function typeOf(value: unknown): string | undefined {
+  const record = recordOf(value);
+  return record && typeof record.type === "string" && record.type ? record.type : undefined;
+}
+
+/** 与 gramjs getThumb 排序一致的最小化权重：越小越接近最小缩略图。 */
+function thumbWeight(value: unknown): number {
+  const record = recordOf(value);
+  if (record === undefined) return 0;
+  switch (className(value)) {
+    case "PhotoStrippedSize":
+    case "PhotoCachedSize":
+      return numberValue((record.bytes as { readonly length?: unknown } | undefined)?.length) ?? 0;
+    case "PhotoSize":
+      return numberValue(record.size) ?? 0;
+    case "PhotoSizeProgressive": {
+      const sizes = arrayOf(record.sizes).map((item) => numberValue(item) ?? 0);
+      return sizes.length > 0 ? Math.max(...sizes) : 0;
+    }
+    case "VideoSize":
+      return numberValue(record.size) ?? 0;
+    default:
+      return 0;
+  }
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+/** 贴纸/动图缩略图常以 webp 字节返回：按魔数修正 content-type。 */
+function snifImageMime(bytes: Buffer): string | undefined {
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return "image/webp";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return "image/gif";
+  return undefined;
+}
+
+function arrayOf(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 /**

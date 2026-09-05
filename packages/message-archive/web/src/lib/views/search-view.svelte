@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { Archive, ChevronRight, Clock, Database, MessagesSquare, Search, X } from "lucide-svelte";
+  import { Archive, ChevronRight, Clock, Database, MessagesSquare, RefreshCw, Search, X } from "lucide-svelte";
   import { searchMessages, type SearchQuery } from "$lib/api";
   import { dayLabel, fmtCount, fmtTs, truncate } from "$lib/format";
   import { chats, isEmptySearch, loadChats, navigate, pendingSearchFocus, searchCache, searchScroll, viewStore } from "$lib/state.svelte";
@@ -46,8 +46,19 @@
     }
   });
 
+  /** 已加载的检索条件：结果写入会触发 effect 重跑，以 key 隔离避免重复请求。 */
+  let lastKey = $state("__init__");
+  /** 显式提交（按钮/回车/筛选器）强制重新取回，即使条件未变。 */
+  let refreshSeq = $state(0);
+  let lastRefresh = $state(0);
+
   $effect(() => {
-    if (viewStore.current.kind === "search") load();
+    if (viewStore.current.kind !== "search") return;
+    const key = isEmptySearch(viewStore.current) ? "" : queryKey();
+    if (key === lastKey && refreshSeq === lastRefresh) return;
+    lastKey = key;
+    lastRefresh = refreshSeq;
+    load();
   });
 
   const home = $derived(isEmptySearch(viewStore.current));
@@ -123,6 +134,7 @@
 
   function submit(): void {
     navigate({ kind: "search", q: q.trim(), chat: chat.trim(), from, to, mode });
+    refreshSeq += 1;
   }
 
   function clearFilters(): void {
@@ -214,7 +226,7 @@
         placeholder="检索归档消息 · / 聚焦"
         class="h-10 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
         onkeydown={(event) => {
-          if (event.key === "Enter") submit();
+          if (event.key === "Enter" && !event.isComposing) submit();
         }}
         aria-label="检索归档消息"
       />
@@ -229,58 +241,73 @@
         </Button>
       {/if}
     </div>
-    <div class="mt-3 grid grid-cols-1 gap-2 border-t border-border/60 pt-3 min-[560px]:grid-cols-2 xl:flex xl:flex-wrap xl:items-center xl:gap-2">
-      <label class="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-        会话
+    <div class="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3">
+      <label class="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+        <span class="w-8 shrink-0">会话</span>
         <Select
           bind:value={chat}
           options={[{ value: "", label: "全部" }, ...chats.items.map((item) => ({
             value: item.chatId,
             label: item.username ? `${item.title} @${item.username}` : item.title
           }))]}
-          triggerClass="h-8 w-52 text-xs"
-          contentMinWidth="24rem"
+          triggerClass="h-8 min-w-0 flex-1 max-w-80 text-xs"
+          contentMinWidth="min(24rem, calc(100vw - 2rem))"
           aria-label="会话筛选"
           onvaluechange={submit}
         />
       </label>
-      <label class="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-        从
-        <DatePicker
-          bind:value={from}
-          placeholder="选择日期"
-          triggerClass="h-8 w-48 font-mono text-xs"
-          aria-label="起始日期"
-          onvaluechange={() => submit()}
-        />
-      </label>
-      <label class="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-        至
-        <DatePicker
-          bind:value={to}
-          placeholder="选择日期"
-          triggerClass="h-8 w-48 font-mono text-xs"
-          aria-label="结束日期"
-          onvaluechange={() => submit()}
-        />
-      </label>
-      <div class="flex items-center">
-        <Select
-          bind:value={mode}
-          options={[
-            { value: "include", label: "区间内" },
-            { value: "exclude", label: "区间外" },
-            { value: "off", label: "忽略时间" }
-          ]}
-          triggerClass="h-8 w-28 text-xs"
-          contentMinWidth="10rem"
-          aria-label="时间模式"
-          onvaluechange={submit}
-        />
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <label class="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-muted-foreground min-[560px]:w-auto w-full">
+          <span class="w-8 shrink-0">从</span>
+          <DatePicker
+            bind:value={from}
+            placeholder="选择日期"
+            triggerClass="h-8 min-w-0 flex-1 font-mono text-xs min-[560px]:w-44"
+            aria-label="起始日期"
+            onvaluechange={() => submit()}
+          />
+        </label>
+        <label class="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-muted-foreground min-[560px]:w-auto w-full">
+          <span class="w-8 shrink-0">至</span>
+          <DatePicker
+            bind:value={to}
+            placeholder="选择日期"
+            triggerClass="h-8 min-w-0 flex-1 font-mono text-xs min-[560px]:w-44"
+            aria-label="结束日期"
+            onvaluechange={() => submit()}
+          />
+        </label>
+        <div class="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-muted-foreground min-[560px]:w-auto w-full">
+          <span class="w-8 shrink-0">时间</span>
+          <Select
+            bind:value={mode}
+            options={[
+              { value: "include", label: "区间内" },
+              { value: "exclude", label: "区间外" },
+              { value: "off", label: "忽略时间" }
+            ]}
+            triggerClass="h-8 min-w-0 flex-1 text-xs min-[560px]:w-36"
+            contentMinWidth="10rem"
+            aria-label="时间模式"
+            onvaluechange={submit}
+          />
+        </div>
       </div>
-      <div class="col-span-full flex items-center justify-end gap-1.5 xl:col-auto xl:ml-auto">
+      <div class="flex items-center justify-end gap-1.5">
         <Button variant="ghost" size="sm" onclick={clearFilters}>清除</Button>
-        <Button size="sm" onclick={submit}>检索</Button>
+        <Button
+          size="sm"
+          disabled={loading}
+          aria-label="检索归档消息"
+          onclick={submit}
+        >
+          {#if loading}
+            <RefreshCw class="size-3.5 animate-spin" aria-hidden="true" />
+            检索中…
+          {:else}
+            检索
+          {/if}
+        </Button>
       </div>
     </div>
     </div>
@@ -403,9 +430,9 @@
       </div>
       {#each day.items as item (entryKey(item))}
         {#if item.kind === "album"}
-          <AlbumRow entry={item} />
+          <AlbumRow entry={item} inlineThumb />
         {:else}
-          <MessageRow record={item.record} highlights={terms} />
+          <MessageRow record={item.record} highlights={terms} inlineThumb />
         {/if}
       {/each}
     {/each}

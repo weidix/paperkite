@@ -26,6 +26,8 @@ function userEntity(id = 100): Api.User {
 class FakeLiveClient {
   calls: string[] = [];
   message: TelegramMessage | undefined;
+  /** 最近一次 downloadMedia 收到的 thumb 参数（实例型）。 */
+  lastThumb: unknown;
   missingIds: readonly number[] = [];
   /** 用户名解析失败时置为空串；解析到不匹配实体时置为错 id。 */
   username = "test_chat";
@@ -63,8 +65,11 @@ class FakeLiveClient {
     for (const dialog of this.dialogs) yield dialog;
   }
 
-  async downloadMedia(message: TelegramMessage): Promise<Buffer | undefined> {
-    this.calls.push("downloadMedia:" + message.id);
+  async downloadMedia(message: TelegramMessage, options?: { thumb?: unknown }): Promise<Buffer | undefined> {
+    const thumb = options?.thumb;
+    this.lastThumb = thumb;
+    const marker = thumb === undefined ? "" : typeof thumb === "string" ? ":" + thumb : ":size";
+    this.calls.push("downloadMedia:" + message.id + marker);
     return Buffer.from("LIVE-PHOTO-BYTES");
   }
 }
@@ -87,6 +92,7 @@ interface Harness {
 
 async function harness(options: {
   session?: boolean;
+  message?: TelegramMessage;
   missingIds?: readonly number[];
   username?: string;
   entityId?: number;
@@ -103,7 +109,7 @@ async function harness(options: {
   await seed(store, mediaDir);
 
   const client = new FakeLiveClient();
-  client.message = { id: 3, date: 0, media: { className: "MessageMediaPhoto" } };
+  client.message = options.message ?? { id: 3, date: 0, media: { className: "MessageMediaPhoto" } };
   client.missingIds = options.missingIds ?? [];
   client.username = options.username ?? "test_chat";
   client.entityId = options.entityId ?? 100;
@@ -484,6 +490,117 @@ test("archive console live thumb fetches media by message row for chats without 
     } finally {
       await withSession.close();
     }
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console thumb prefers smallest photo sizeType and caches per row", async () => {
+  const h = await harness({
+    session: true,
+    message: {
+      id: 3,
+      date: 0,
+      media: {
+        className: "MessageMediaPhoto",
+        photo: {
+          className: "Photo",
+          sizes: [
+            { className: "PhotoSize", type: "m", size: 99_999 },
+            { className: "PhotoSize", type: "s", size: 320 },
+            { className: "PhotoStrippedSize", type: "i", bytes: Buffer.alloc(100) }
+          ]
+        }
+      }
+    }
+  });
+  try {
+    const first = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.headers["content-type"], "image/jpeg");
+    assert.match(first.headers["cache-control"] ?? "", /max-age=3600/);
+    assert.deepEqual(h.client.calls, ["getMessages:3", "downloadMedia:3:s"]);
+
+    const again = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(again.statusCode, 200);
+    assert.deepEqual(h.client.calls, ["getMessages:3", "downloadMedia:3:s"]);
+
+    const full = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb?size=full" });
+    assert.equal(full.statusCode, 200);
+    assert.equal(full.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+    assert.deepEqual(h.client.calls, [
+      "getMessages:3",
+      "downloadMedia:3:s",
+      "getMessages:3",
+      "downloadMedia:3"
+    ]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console thumb falls back to full media for photo without sizes", async () => {
+  const h = await harness({
+    session: true,
+    message: {
+      id: 3,
+      date: 0,
+      media: { className: "MessageMediaPhoto", photo: { className: "Photo", sizes: [] } }
+    }
+  });
+  try {
+    const res = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+    assert.deepEqual(h.client.calls, ["getMessages:3", "downloadMedia:3"]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console thumb passes videoThumbs instance for video documents", async () => {
+  const videoSize = { className: "VideoSize", type: "m", size: 20 };
+  const h = await harness({
+    session: true,
+    message: {
+      id: 3,
+      date: 0,
+      media: {
+        className: "MessageMediaDocument",
+        document: { className: "Document", thumbs: [], videoThumbs: [videoSize] }
+      }
+    }
+  });
+  try {
+    const res = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(h.client.calls, ["getMessages:3", "downloadMedia:3:size"]);
+    assert.equal(h.client.lastThumb, videoSize);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console thumb reports 404 and negative-caches documents without thumbs", async () => {
+  const h = await harness({
+    session: true,
+    message: {
+      id: 3,
+      date: 0,
+      media: {
+        className: "MessageMediaDocument",
+        document: { className: "Document", thumbs: [], videoThumbs: [] }
+      }
+    }
+  });
+  try {
+    const first = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(first.statusCode, 404);
+    assert.equal(first.json().error, "该媒体没有可用的缩略图");
+
+    const again = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb" });
+    assert.equal(again.statusCode, 404);
+    assert.deepEqual(h.client.calls, ["getMessages:3"]);
   } finally {
     await h.close();
   }

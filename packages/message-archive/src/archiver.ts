@@ -25,12 +25,15 @@ export interface DialogEntry {
   readonly entity?: unknown;
 }
 
+/** GramJS downloadMedia 的缩略图参数：sizeType 字符串（"s"/"m"…）或 PhotoSize/VideoSize 实例。 */
+export type ThumbParam = number | string | unknown;
+
 export interface ArchiveClient {
   getEntity(identifier: string | number): Promise<unknown>;
   iterDialogs(): AsyncIterable<DialogEntry>;
   iterMessages(entity: unknown, options: { limit: number; maxId: number }): AsyncIterable<TelegramMessage>;
   getMessages(entity: unknown, options: { ids: readonly number[] }): Promise<readonly (TelegramMessage | undefined)[]>;
-  downloadMedia(message: TelegramMessage, options: { outputFile?: string }): Promise<Buffer | string | undefined>;
+  downloadMedia(message: TelegramMessage, options?: { outputFile?: string; thumb?: ThumbParam }): Promise<Buffer | string | undefined>;
 }
 
 export interface ChatInfo {
