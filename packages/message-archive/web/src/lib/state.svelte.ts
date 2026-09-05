@@ -201,6 +201,16 @@ function releaseLightboxSrc(): void {
   if (src.startsWith("blob:")) URL.revokeObjectURL(src);
 }
 
+export const blockwordsOpen = $state({ open: false });
+
+export function openBlockwords(): void {
+  blockwordsOpen.open = true;
+}
+
+export function closeBlockwords(): void {
+  blockwordsOpen.open = false;
+}
+
 export const pendingSearchFocus = $state({ armed: false });
 
 /** / 快捷键：检索框存在即聚焦，否则先回检索页再聚焦。 */

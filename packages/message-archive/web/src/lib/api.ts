@@ -12,6 +12,16 @@ export interface ArchiveState {
   readonly backend: string;
   readonly session: string | null;
   readonly mediaRoot: string | null;
+  readonly blockwords: {
+    readonly version: number;
+    readonly count: number;
+  };
+}
+
+/** 屏蔽词列表快照（服务端内存缓存，读路径不触表）。 */
+export interface BlockwordState {
+  readonly words: readonly string[];
+  readonly version: number;
 }
 
 export interface ChatLedger {
@@ -110,8 +120,24 @@ export async function fetchMediaMeta(id: string): Promise<MediaMeta> {
   return request(`/api/mediafiles/${id}`);
 }
 
-async function request<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+export async function fetchBlockwords(): Promise<BlockwordState> {
+  return request("/api/blockwords");
+}
+
+export async function addBlockword(word: string): Promise<BlockwordState> {
+  return request("/api/blockwords", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ word })
+  });
+}
+
+export async function removeBlockword(word: string): Promise<BlockwordState> {
+  return request(`/api/blockwords/${encodeURIComponent(word)}`, { method: "DELETE" });
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
   const body = await res.json().catch(() => undefined);
   if (!res.ok) {
     const message = body && typeof body === "object" && "error" in body

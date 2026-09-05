@@ -8,6 +8,8 @@ import {
   type ArchiveSearchResult,
   type ArchiveStore,
   type BatchResult,
+  type BlockwordAddResult,
+  type BlockwordState,
   type ChatLedgerRow,
   type ChatRecord,
   type LastMessageInfo,
@@ -19,6 +21,7 @@ import {
   buildContextEntries,
   groupKey,
   mediaKey,
+  normalizeBlockword,
   normalizeContextLimit,
   normalizeLimit,
   normalizeOffset,
@@ -53,6 +56,9 @@ const GROUP_FIRST_CONDITION = `(
 
 export class SqliteArchiveStore implements ArchiveStore {
   private readonly database: DatabaseSync;
+  /** 屏蔽词内存缓存（小写归一）；读路径条件固定为 blocked = 0，与词数无关。 */
+  private blockwords: readonly string[] = [];
+  private blockwordsVersion = 0;
 
   constructor(readonly file: string) {
     mkdirSync(dirname(resolve(file)), { recursive: true });
@@ -122,7 +128,24 @@ export class SqliteArchiveStore implements ArchiveStore {
         sync_completed_at TEXT,
         status TEXT DEFAULT 'running'
       );
+      CREATE TABLE IF NOT EXISTS blockwords (
+        word TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+      );
     `);
+    this.ensureBlockedColumn();
+    this.blockwords = (this.database
+      .prepare("SELECT word FROM blockwords ORDER BY word")
+      .all() as readonly Record<string, unknown>[])
+      .map((row) => String(row.word));
+  }
+
+  /** 老库迁移：messages 补 blocked 标志列。 */
+  private ensureBlockedColumn(): void {
+    const columns = this.database.prepare("PRAGMA table_info(messages)").all() as readonly Record<string, unknown>[];
+    if (!columns.some((column) => String(column.name) === "blocked")) {
+      this.database.exec("ALTER TABLE messages ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   async close(): Promise<void> {
@@ -212,8 +235,8 @@ export class SqliteArchiveStore implements ArchiveStore {
         (message_id, chat_id, grouped_id, chat_title, sender_id, sender_username,
          sender_first_name, sender_last_name, date, text, message_type,
          reply_to_msg_id, forward_from_id, forward_from_name,
-         has_media, media_type, media_path, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         has_media, media_type, media_path, created_at, blocked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const mediaStatement = this.database.prepare(`
       INSERT INTO media_files
@@ -243,7 +266,8 @@ export class SqliteArchiveStore implements ArchiveStore {
           row.hasMedia ? 1 : 0,
           row.mediaType ?? null,
           row.mediaPath ?? null,
-          now
+          now,
+          matchesBlockword(row.text, this.blockwords) ? 1 : 0
         );
         inserted += Number(result.changes);
       }
@@ -265,6 +289,70 @@ export class SqliteArchiveStore implements ArchiveStore {
       this.database.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  async listBlockwords(): Promise<BlockwordState> {
+    return { words: [...this.blockwords], version: this.blockwordsVersion };
+  }
+
+  async addBlockword(word: string): Promise<BlockwordAddResult> {
+    const normalized = normalizeBlockword(word);
+    if (normalized === undefined) return "invalid";
+    this.database.exec("BEGIN");
+    try {
+      const result = this.database.prepare(
+        "INSERT OR IGNORE INTO blockwords (word, created_at) VALUES (?, ?)"
+      ).run(normalized, new Date().toISOString());
+      if (Number(result.changes) === 0) {
+        this.database.exec("ROLLBACK");
+        return "exists";
+      }
+      this.markBlockedMatches(normalized);
+      this.blockwords = [...this.blockwords, normalized];
+      this.blockwordsVersion += 1;
+      this.database.exec("COMMIT");
+      return "added";
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async removeBlockword(word: string): Promise<boolean> {
+    const normalized = normalizeBlockword(word);
+    if (normalized === undefined) return false;
+    this.database.exec("BEGIN");
+    try {
+      const result = this.database.prepare("DELETE FROM blockwords WHERE word = ?").run(normalized);
+      if (Number(result.changes) === 0) {
+        this.database.exec("ROLLBACK");
+        return false;
+      }
+      const next = this.blockwords.filter((item) => item !== normalized);
+      this.rebuildBlocked(next);
+      this.blockwords = next;
+      this.blockwordsVersion += 1;
+      this.database.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** 增量置位：只扫新词的命中，成本与词数无关。 */
+  private markBlockedMatches(word: string): void {
+    this.database.prepare(
+      "UPDATE messages SET blocked = 1 WHERE blocked = 0 AND instr(lower(text), ?) > 0"
+    ).run(word);
+  }
+
+  /** 删词后全量重算：清零后按剩余词表逐词置位（一次性成本，事务内调用）。 */
+  private rebuildBlocked(words: readonly string[]): void {
+    this.database.exec("UPDATE messages SET blocked = 0");
+    if (!words.length) return;
+    const condition = words.map(() => "instr(lower(text), ?) > 0").join(" OR ");
+    this.database.prepare(`UPDATE messages SET blocked = 1 WHERE ${condition}`).run(...words);
   }
 
   async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
@@ -314,12 +402,14 @@ export class SqliteArchiveStore implements ArchiveStore {
       LEFT JOIN (
         SELECT chat_id, COUNT(*) AS count
           FROM messages
+         WHERE blocked = 0
          GROUP BY chat_id
       ) agg ON agg.chat_id = c.chat_id
       LEFT JOIN (
         SELECT chat_id, chat_title, date, text,
                ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY date DESC, id DESC) AS rn
           FROM messages
+         WHERE blocked = 0
       ) latest ON latest.chat_id = c.chat_id AND latest.rn = 1
       ORDER BY last_date DESC NULLS LAST, c.chat_id
       LIMIT ?
@@ -341,7 +431,7 @@ export class SqliteArchiveStore implements ArchiveStore {
     const row = this.database.prepare(`
       SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
         FROM messages m
-       WHERE m.id = ?
+       WHERE m.id = ? AND m.blocked = 0
        LIMIT 1
     `).get(Number(normalizeRowId(rowId))) as Record<string, unknown> | undefined;
     return row ? this.attachMedia([row])[0] : undefined;
@@ -382,6 +472,7 @@ export class SqliteArchiveStore implements ArchiveStore {
             FROM messages m
            WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
              AND ${GROUP_FIRST_CONDITION}
+             AND m.blocked = 0
            ORDER BY m.date DESC, m.id DESC
            LIMIT ? OFFSET ?
         `).all(anchorRecord.chatId, lower.date, lower.date, lower.id, beforeLimit, beforeOff) as readonly Record<string, unknown>[]
@@ -392,6 +483,7 @@ export class SqliteArchiveStore implements ArchiveStore {
             FROM messages m
            WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
              AND ${GROUP_FIRST_CONDITION}
+             AND m.blocked = 0
            ORDER BY m.date ASC, m.id ASC
            LIMIT ? OFFSET ?
         `).all(anchorRecord.chatId, upper.date, upper.date, upper.id, afterLimit, afterOff) as readonly Record<string, unknown>[]
@@ -400,11 +492,13 @@ export class SqliteArchiveStore implements ArchiveStore {
       SELECT COUNT(*) AS count FROM messages m
        WHERE m.chat_id = ? AND (m.date < ? OR (m.date = ? AND m.id < ?))
          AND ${GROUP_FIRST_CONDITION}
+         AND m.blocked = 0
     `).get(anchorRecord.chatId, lower.date, lower.date, lower.id) as { count: number };
     const afterCount = this.database.prepare(`
       SELECT COUNT(*) AS count FROM messages m
        WHERE m.chat_id = ? AND (m.date > ? OR (m.date = ? AND m.id > ?))
          AND ${GROUP_FIRST_CONDITION}
+         AND m.blocked = 0
     `).get(anchorRecord.chatId, upper.date, upper.date, upper.id) as { count: number };
 
     const groupMap = await this.fetchGroupsAttached(uniqueGroupKeys([...beforeRows, ...afterRows]));
@@ -445,7 +539,7 @@ export class SqliteArchiveStore implements ArchiveStore {
     const sql = `
       SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
         FROM messages m
-       WHERE m.has_media = 1 AND ${pairClause("grouped_id", keys)}
+       WHERE m.has_media = 1 AND m.blocked = 0 AND ${pairClause("grouped_id", keys)}
        ORDER BY m.date ASC, m.id ASC
     `;
     return this.database.prepare(sql).all(...pairValues(keys)) as readonly Record<string, unknown>[];
@@ -453,9 +547,14 @@ export class SqliteArchiveStore implements ArchiveStore {
 
   async getMediaFileById(id: string): Promise<StoredMediaFile | undefined> {
     const row = this.database.prepare(`
-      SELECT id, message_id, chat_id, media_type, file_name, file_path, file_size, mime_type
-        FROM media_files
-       WHERE id = ?
+      SELECT mf.id, mf.message_id, mf.chat_id, mf.media_type, mf.file_name, mf.file_path, mf.file_size, mf.mime_type
+        FROM media_files mf
+       WHERE mf.id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM messages m
+            WHERE m.chat_id = mf.chat_id AND m.message_id = mf.message_id
+              AND m.blocked = 1
+         )
        LIMIT 1
     `).get(Number(normalizeRowId(id))) as Record<string, unknown> | undefined;
     return row ? toStoredMediaFile(row) : undefined;
@@ -498,7 +597,7 @@ export class SqliteArchiveStore implements ArchiveStore {
              m.has_media, m.media_type, m.message_type,
              ${MIME_SUBQUERY} AS mime_type
         FROM messages m
-       WHERE m.has_media = 1 AND ${pairClause("grouped_id", pairs)}
+       WHERE m.has_media = 1 AND m.blocked = 0 AND ${pairClause("grouped_id", pairs)}
        ORDER BY m.date ASC, m.id ASC
     `;
     const rows = this.database.prepare(sql).all(...pairValues(pairs)) as readonly Record<string, unknown>[];
@@ -629,6 +728,7 @@ function buildWhere(query: ArchiveQuery, alias = "m"): { where: string; values: 
     values.push(`%${escapeLike(query.chatTitle.trim())}%`);
   }
   appendTimeWhere(conditions, values, query, alias);
+  conditions.push(`${alias}.blocked = 0`);
   return { where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
 }
 
@@ -666,6 +766,13 @@ function appendTimeWhere(
 
 function escapeLike(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+/** 屏蔽词命中判定（子串、大小写不敏感）；空文本永不命中。 */
+function matchesBlockword(text: string | undefined, words: readonly string[]): boolean {
+  if (text === undefined || text === "") return false;
+  const lower = text.toLowerCase();
+  return words.some((word) => lower.includes(word));
 }
 
 function optionalString(value: unknown): string | undefined {

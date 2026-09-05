@@ -626,13 +626,175 @@ test("archive console service boots over http and stops on abort", async () => {
   const base = `http://127.0.0.1:${port}`;
   await waitForHttp(base + "/api/state");
   const state = await (await fetch(base + "/api/state")).json();
-  assert.deepEqual(state, { backend: "sqlite", session: null, mediaRoot: null });
+  assert.deepEqual(state, { backend: "sqlite", session: null, mediaRoot: null, blockwords: { version: 0, count: 0 } });
   const page = await (await fetch(base + "/")).text();
   assert.match(page, /归档台/);
 
   controller.abort();
   await running;
   await assert.rejects(fetch(base + "/api/state"));
+});
+
+test("archive console blockwords hide matching messages across all surfaces", async () => {
+  const h = await harness();
+  try {
+    const before = await h.server.inject({ method: "GET", url: "/api/search" });
+    assert.equal(before.json().total, 5);
+
+    let res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "维护" } });
+    assert.equal(res.statusCode, 201);
+    let body = res.json();
+    assert.deepEqual(body.words, ["维护"]);
+    assert.equal(body.version, 1);
+
+    res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "维护" } });
+    assert.equal(res.statusCode, 409);
+    res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "   " } });
+    assert.equal(res.statusCode, 400);
+    res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "x".repeat(65) } });
+    assert.equal(res.statusCode, 400);
+    res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: 7 } });
+    assert.equal(res.statusCode, 400);
+
+    const all = await h.server.inject({ method: "GET", url: "/api/search" });
+    body = all.json();
+    assert.equal(body.total, 3);
+    assert.equal(body.totalMessages, 3);
+
+    const keyword = await h.server.inject({ method: "GET", url: "/api/search?q=%E7%BB%B4%E6%8A%A4" });
+    assert.equal(keyword.json().total, 0);
+    assert.equal(keyword.json().totalMessages, 0);
+
+    const chat = await h.server.inject({ method: "GET", url: "/api/search?chat=200" });
+    assert.equal(chat.json().total, 0);
+
+    res = await h.server.inject({ method: "GET", url: "/api/messages/5" });
+    assert.equal(res.statusCode, 404);
+    res = await h.server.inject({ method: "GET", url: "/api/messages/5/context" });
+    assert.equal(res.statusCode, 404);
+
+    const context = await h.server.inject({ method: "GET", url: "/api/messages/1/context?before=10&after=10" });
+    body = context.json();
+    assert.equal(body.beforeN, 0);
+    assert.equal(body.afterN, 2);
+    const afterTexts = body.after.map((entry: { record: { text: string } }) => entry.record.text);
+    assert.deepEqual(afterTexts, ["附上截图看看效果", "好的收到"]);
+
+    const chats = await h.server.inject({ method: "GET", url: "/api/chats" });
+    const ledger = chats.json().chats as { chatId: string; count: number; lastText?: string }[];
+    assert.equal(ledger.find((item) => item.chatId === "100")?.count, 3);
+    assert.equal(ledger.find((item) => item.chatId === "100")?.lastText, "好的收到");
+    assert.equal(ledger.find((item) => item.chatId === "200")?.count, 0);
+    assert.equal(ledger.find((item) => item.chatId === "200")?.lastText, undefined);
+
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockwords/%E7%BB%B4%E6%8A%A4" });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().version, 2);
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockwords/%E7%BB%B4%E6%8A%A4" });
+    assert.equal(res.statusCode, 404);
+
+    const restored = await h.server.inject({ method: "GET", url: "/api/search" });
+    assert.equal(restored.json().total, 5);
+    const state = await h.server.inject({ method: "GET", url: "/api/state" });
+    assert.equal(state.json().blockwords.count, 0);
+    assert.equal(state.json().blockwords.version, 2);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console blockwords drop album members and block their media", async () => {
+  const h = await harness();
+  try {
+    await h.store.saveBatch(
+      [
+        {
+          messageId: 7, chatId: "100", chatTitle: "测试群", groupedId: "album-1",
+          date: "2025-03-04T10:00:00.000Z", text: "相册第一条", messageType: "photo",
+          hasMedia: true, mediaType: "photo"
+        },
+        {
+          messageId: 8, chatId: "100", chatTitle: "测试群", groupedId: "album-1",
+          date: "2025-03-04T10:01:00.000Z", text: "这里有可疑词", messageType: "photo",
+          hasMedia: true, mediaType: "photo"
+        }
+      ],
+      [
+        { messageId: 7, chatId: "100", mediaType: "photo", fileName: "a.jpg", filePath: "/tmp/a.jpg" },
+        { messageId: 8, chatId: "100", mediaType: "photo", fileName: "b.jpg", filePath: "/tmp/b.jpg" }
+      ]
+    );
+
+    let res = await h.server.inject({ method: "GET", url: "/api/search?q=%E7%9B%B8%E5%86%8C" });
+    let body = res.json();
+    assert.equal(body.total, 1);
+    assert.equal(body.totalMessages, 1);
+    assert.equal(body.items[0].kind, "album");
+    assert.equal(body.items[0]!.rows.length, 2);
+
+    res = await h.server.inject({ method: "GET", url: "/api/mediafiles/4" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/mediafiles/5" });
+    assert.equal(res.statusCode, 200);
+
+    res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "可疑词" } });
+    assert.equal(res.statusCode, 201);
+
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=%E7%9B%B8%E5%86%8C" });
+    body = res.json();
+    assert.equal(body.total, 1);
+    assert.equal(body.items[0].kind, "message");
+    assert.equal(body.items[0].record.text, "相册第一条");
+
+    res = await h.server.inject({ method: "GET", url: "/api/mediafiles/5" });
+    assert.equal(res.statusCode, 404);
+    res = await h.server.inject({ method: "GET", url: "/api/mediafiles/4" });
+    assert.equal(res.statusCode, 200);
+
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockwords/%E5%8F%AF%E7%96%91%E8%AF%8D" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/mediafiles/5" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=%E7%9B%B8%E5%86%8C" });
+    assert.equal(res.json().items[0].kind, "album");
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console blockwords are case-insensitive and cover new writes", async () => {
+  const h = await harness();
+  try {
+    await h.store.saveBatch(
+      [{ messageId: 9, chatId: "100", chatTitle: "测试群", date: "2025-03-05T09:00:00.000Z", text: "Check the VIP channel", messageType: "text", hasMedia: false }],
+      []
+    );
+    let res = await h.server.inject({ method: "GET", url: "/api/search?q=check" });
+    assert.equal(res.json().total, 1);
+
+    res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "vip" } });
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.json().words[0], "vip");
+
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=check" });
+    assert.equal(res.json().total, 0);
+
+    await h.store.saveBatch(
+      [{ messageId: 10, chatId: "100", chatTitle: "测试群", date: "2025-03-05T10:00:00.000Z", text: "vip only for members", messageType: "text", hasMedia: false }],
+      []
+    );
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=only" });
+    assert.equal(res.json().total, 0);
+
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockwords/vip" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=check" });
+    assert.equal(res.json().total, 1);
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=only" });
+    assert.equal(res.json().total, 1);
+  } finally {
+    await h.close();
+  }
 });
 
 async function freePort(): Promise<number> {

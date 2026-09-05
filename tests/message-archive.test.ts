@@ -100,6 +100,9 @@ class CountingStore implements ArchiveStore {
   getMessageContext(rowId: string, beforeN: number, afterN: number) { return this.inner.getMessageContext(rowId, beforeN, afterN); }
   getMessageByRowId(rowId: string) { return this.inner.getMessageByRowId(rowId); }
   getMediaFileById(id: string) { return this.inner.getMediaFileById(id); }
+  listBlockwords() { return this.inner.listBlockwords(); }
+  addBlockword(word: string) { return this.inner.addBlockword(word); }
+  removeBlockword(word: string) { return this.inner.removeBlockword(word); }
 }
 
 interface Harness {

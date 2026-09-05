@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { Menu } from "lucide-svelte";
-  import { Moon, Sun } from "lucide-svelte";
-  import { themeStore, toggleTheme, viewStore } from "$lib/state.svelte";
+  import { Menu, Moon, ShieldBan, Sun } from "lucide-svelte";
+  import { openBlockwords, themeStore, toggleTheme, viewStore } from "$lib/state.svelte";
   import { fetchState, type ArchiveState } from "$lib/api";
   import Button from "$lib/components/button.svelte";
 
@@ -36,6 +35,15 @@
     <span class="hidden rounded-md border px-2 py-0.5 font-mono text-[11px] text-muted-foreground md:inline">
       {state?.backend ?? "…"}
     </span>
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="全局屏蔽词"
+      title="全局屏蔽词"
+      onclick={openBlockwords}
+    >
+      <ShieldBan class="size-4" aria-hidden="true" />
+    </Button>
     <Button variant="ghost" size="icon" aria-label="切换深浅主题" onclick={toggleTheme}>
       {#if themeStore.value === "dark"}
         <Sun class="size-4" aria-hidden="true" />

@@ -207,6 +207,14 @@ export interface ArchiveStoreOptions {
   readonly schema?: string;
 }
 
+/** 屏蔽词快照：词表（已归一化小写）与内存缓存版本号。 */
+export interface BlockwordState {
+  readonly words: readonly string[];
+  readonly version: number;
+}
+
+export type BlockwordAddResult = "added" | "exists" | "invalid";
+
 export interface ArchiveStore {
   init(): Promise<void>;
   close(): Promise<void>;
@@ -228,6 +236,12 @@ export interface ArchiveStore {
   ): Promise<ArchiveContextResult>;
   getMessageByRowId(rowId: string): Promise<MessageRecord | undefined>;
   getMediaFileById(id: string): Promise<StoredMediaFile | undefined>;
+  /** 屏蔽词内存缓存快照，读路径不触表。 */
+  listBlockwords(): Promise<BlockwordState>;
+  /** 写透缓存：先落库再更新内存缓存，并同步三条消息的 blocked 标志。 */
+  addBlockword(word: string): Promise<BlockwordAddResult>;
+  /** 写透缓存；删除后全量重算 blocked 标志。 */
+  removeBlockword(word: string): Promise<boolean>;
 }
 
 export function normalizeLimit(value: number | undefined): number {
@@ -267,6 +281,15 @@ export function normalizeDate(value: string | undefined): string | undefined {
 export function normalizeText(value: string | undefined): string | undefined {
   const text = (value ?? "").trim();
   return text || undefined;
+}
+
+export const BLOCKWORD_MAX_LENGTH = 64;
+
+/** 屏蔽词归一化：裁剪、小写；空词或超长返回 undefined。 */
+export function normalizeBlockword(value: string): string | undefined {
+  const text = value.trim().toLowerCase();
+  if (!text || text.length > BLOCKWORD_MAX_LENGTH) return undefined;
+  return text;
 }
 
 export function normalizeRowId(value: string): string {

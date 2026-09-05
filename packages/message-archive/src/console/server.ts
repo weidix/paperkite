@@ -52,11 +52,33 @@ function registerRoutes(
 ): void {
   const { store, mediaRoot, session, sessions, logger } = options;
 
-  server.get("/api/state", async () => ({
-    backend: options.backend ?? "sqlite",
-    session: session ?? null,
-    mediaRoot: mediaRoot ?? null
-  }));
+  server.get("/api/state", async () => {
+    const blockwords = await store.listBlockwords();
+    return {
+      backend: options.backend ?? "sqlite",
+      session: session ?? null,
+      mediaRoot: mediaRoot ?? null,
+      blockwords: { version: blockwords.version, count: blockwords.words.length }
+    };
+  });
+
+  server.get("/api/blockwords", async () => store.listBlockwords());
+
+  server.post<{ Body: { word?: unknown } }>("/api/blockwords", async (request, reply) => {
+    const { word } = request.body ?? {};
+    if (typeof word !== "string") throw new HttpError(400, "屏蔽词必须是字符串");
+    const result = await store.addBlockword(word);
+    if (result === "invalid") throw new HttpError(400, "屏蔽词需为 1-64 字符");
+    if (result === "exists") throw new HttpError(409, "屏蔽词已存在");
+    reply.code(201);
+    return store.listBlockwords();
+  });
+
+  server.delete<{ Params: { word: string } }>("/api/blockwords/:word", async (request) => {
+    const removed = await store.removeBlockword(request.params.word);
+    if (!removed) throw new HttpError(404, "屏蔽词不存在");
+    return store.listBlockwords();
+  });
 
   server.get<{
     Querystring: {

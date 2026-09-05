@@ -87,6 +87,8 @@ services:
 
 存储配置（`backend`/`file`/`url`/`schema`）必须与要查的 `archive.sync` 指向同一数据库；`mediaRoot` 是媒体相对路径的解析基准，未配置时相对进程工作目录解析。终端基于存储的只读接口组合数据：`searchStructured` 检索（关键词、会话、日期区间、包含/排除时间模式、分页）、`getMessageContext` 取同群上下文、`getMessageByRowId` 取完整消息（含媒体与相册行）、`getMediaFileById` 定位落盘媒体。媒体预览两路取源：已落盘文件直接流式返回（支持 Range 与附件下载），未落盘的经服务注入的 `session` 实时从 Telegram 取回；未配置会话时在线取回返回 503。JSON API 错误统一为 `{ error: string }`，4xx 为参数与不存在、503 为依赖不可用。界面为黑白灰双主题，`/` 聚焦检索、`Esc` 关闭浮层，长列表分批加载，媒体点击才取图。
 
+归档台内置全局屏蔽词：词表落库（`blockwords` 表，`messages` 表物化 `blocked` 标志列），服务启动载入内存缓存，读查询统一注入 `blocked = 0` 条件——检索、上下文、消息详情、聊天清单的计数与分页与可见集严格一致，屏蔽词数量不影响读路径成本；增词为单趟增量置位，删词触发一次全量重算。命中屏蔽词的整条消息隐身（含其媒体与相册成员），聊天标题等元数据不受影响。词表管理走 `GET/POST /api/blockwords`、`DELETE /api/blockwords/:word`，前端 Topbar 的屏蔽词按钮打开管理对话框；`/api/state` 返回 `blockwords` 版本与词数。
+
 命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
 
 运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 SvelteKit + Bits UI 组成：

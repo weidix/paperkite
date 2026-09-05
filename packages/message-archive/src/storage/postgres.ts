@@ -1,4 +1,4 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import {
   type AlbumRow,
   type ArchiveContextResult,
@@ -6,6 +6,8 @@ import {
   type ArchiveSearchResult,
   type ArchiveStore,
   type BatchResult,
+  type BlockwordAddResult,
+  type BlockwordState,
   type ChatLedgerRow,
   type ChatRecord,
   type LastMessageInfo,
@@ -17,6 +19,7 @@ import {
   buildContextEntries,
   groupKey,
   mediaKey,
+  normalizeBlockword,
   normalizeContextLimit,
   normalizeLimit,
   normalizeOffset,
@@ -32,10 +35,15 @@ const SCHEMA_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export class PostgresArchiveStore implements ArchiveStore {
   private readonly pool: Pool;
+  private readonly schemaName: string;
   private readonly schema: string;
+  /** 屏蔽词内存缓存（小写归一）；读路径条件固定为 blocked = FALSE，与词数无关。 */
+  private blockwords: readonly string[] = [];
+  private blockwordsVersion = 0;
 
   constructor(readonly url: string, schema = "public") {
     if (!SCHEMA_PATTERN.test(schema)) throw new Error(`invalid schema name: ${schema}`);
+    this.schemaName = schema;
     this.schema = quoteIdentifier(schema);
     this.pool = new Pool({ connectionString: url });
   }
@@ -113,9 +121,32 @@ export class PostgresArchiveStore implements ArchiveStore {
           sync_completed_at TIMESTAMPTZ,
           status TEXT DEFAULT 'running'
         );
+        CREATE TABLE IF NOT EXISTS ${this.table("blockwords")} (
+          word TEXT PRIMARY KEY,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
       `);
+      await this.ensureBlockedColumn(client);
+      const words = await client.query(
+        `SELECT word FROM ${this.table("blockwords")} ORDER BY word`
+      );
+      this.blockwords = words.rows.map((row) => String(row.word));
     } finally {
       client.release();
+    }
+  }
+
+  /** 老库迁移：messages 补 blocked 标志列。 */
+  private async ensureBlockedColumn(client: PoolClient): Promise<void> {
+    const exists = await client.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema = $1 AND table_name = 'messages' AND column_name = 'blocked'`,
+      [this.schemaName]
+    );
+    if (exists.rows.length === 0) {
+      await client.query(
+        `ALTER TABLE ${this.table("messages")} ADD COLUMN blocked BOOLEAN NOT NULL DEFAULT FALSE`
+      );
     }
   }
 
@@ -205,7 +236,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     try {
       await client.query("BEGIN");
       const messagePlaceholders = messages
-        .map((_, index) => `(${paramPlaceholders(index * 18 + 1, 18)})`)
+        .map((_, index) => `(${paramPlaceholders(index * 19 + 1, 19)})`)
         .join(", ");
       const messageValues: unknown[] = [];
       for (const row of messages) {
@@ -227,7 +258,8 @@ export class PostgresArchiveStore implements ArchiveStore {
           row.hasMedia,
           row.mediaType ?? null,
           row.mediaPath ?? null,
-          new Date().toISOString()
+          new Date().toISOString(),
+          matchesBlockword(row.text, this.blockwords)
         );
       }
       const inserted = await client.query(
@@ -235,7 +267,7 @@ export class PostgresArchiveStore implements ArchiveStore {
           (message_id, chat_id, grouped_id, chat_title, sender_id, sender_username,
            sender_first_name, sender_last_name, date, text, message_type,
            reply_to_msg_id, forward_from_id, forward_from_name,
-           has_media, media_type, media_path, created_at)
+           has_media, media_type, media_path, created_at, blocked)
          VALUES ${messagePlaceholders}
          ON CONFLICT (message_id, chat_id) DO NOTHING`,
         messageValues
@@ -274,6 +306,89 @@ export class PostgresArchiveStore implements ArchiveStore {
     } finally {
       client.release();
     }
+  }
+
+  async listBlockwords(): Promise<BlockwordState> {
+    return { words: [...this.blockwords], version: this.blockwordsVersion };
+  }
+
+  async addBlockword(word: string): Promise<BlockwordAddResult> {
+    const normalized = normalizeBlockword(word);
+    if (normalized === undefined) return "invalid";
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `INSERT INTO ${this.table("blockwords")} (word) VALUES ($1)
+         ON CONFLICT (word) DO NOTHING`,
+        [normalized]
+      );
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return "exists";
+      }
+      await this.markBlockedMatches(client, normalized);
+      this.blockwords = [...this.blockwords, normalized];
+      this.blockwordsVersion += 1;
+      await client.query("COMMIT");
+      return "added";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async removeBlockword(word: string): Promise<boolean> {
+    const normalized = normalizeBlockword(word);
+    if (normalized === undefined) return false;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `DELETE FROM ${this.table("blockwords")} WHERE word = $1`,
+        [normalized]
+      );
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const next = this.blockwords.filter((item) => item !== normalized);
+      await this.rebuildBlocked(client, next);
+      this.blockwords = next;
+      this.blockwordsVersion += 1;
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** 增量置位：只扫新词的命中，成本与词数无关。 */
+  private async markBlockedMatches(client: PoolClient, word: string): Promise<void> {
+    await client.query(
+      `UPDATE ${this.table("messages")}
+          SET blocked = TRUE
+        WHERE blocked = FALSE AND strpos(lower(COALESCE(text, '')), $1) > 0`,
+      [word]
+    );
+  }
+
+  /** 删词后全量重算：清零后按剩余词表逐词置位（一次性成本，事务内调用）。 */
+  private async rebuildBlocked(client: PoolClient, words: readonly string[]): Promise<void> {
+    await client.query(`UPDATE ${this.table("messages")} SET blocked = FALSE`);
+    if (!words.length) return;
+    const condition = words
+      .map((_, index) => `strpos(lower(COALESCE(text, '')), $${index + 1}) > 0`)
+      .join(" OR ");
+    await client.query(
+      `UPDATE ${this.table("messages")} SET blocked = TRUE WHERE ${condition}`,
+      [...words]
+    );
   }
 
   async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
@@ -325,12 +440,12 @@ export class PostgresArchiveStore implements ArchiveStore {
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS count
            FROM ${this.table("messages")} m
-          WHERE m.chat_id = c.chat_id
+          WHERE m.chat_id = c.chat_id AND m.blocked = FALSE
        ) agg ON TRUE
        LEFT JOIN LATERAL (
          SELECT chat_title, date, text
            FROM ${this.table("messages")} m
-          WHERE m.chat_id = c.chat_id
+          WHERE m.chat_id = c.chat_id AND m.blocked = FALSE
           ORDER BY m.date DESC, m.id DESC
           LIMIT 1
        ) latest ON TRUE
@@ -354,7 +469,7 @@ export class PostgresArchiveStore implements ArchiveStore {
   async getMessageByRowId(rowId: string): Promise<MessageRecord | undefined> {
     const result = await this.pool.query(
       `${messageSelect(this.table("messages"), this.table("media_files"))}
-       WHERE m.id = $1::bigint
+       WHERE m.id = $1::bigint AND m.blocked = FALSE
        LIMIT 1`,
       [normalizeRowId(rowId)]
     );
@@ -398,6 +513,7 @@ export class PostgresArchiveStore implements ArchiveStore {
            WHERE m.chat_id = $1
              AND (m.date < $2::timestamptz OR (m.date = $2::timestamptz AND m.id < $3::bigint))
              AND ${first}
+             AND m.blocked = FALSE
            ORDER BY m.date DESC, m.id DESC
            LIMIT $4 OFFSET $5`,
           [anchorRecord.chatId, lower.date, lower.id, beforeLimit, beforeOff]
@@ -409,6 +525,7 @@ export class PostgresArchiveStore implements ArchiveStore {
            WHERE m.chat_id = $1
              AND (m.date > $2::timestamptz OR (m.date = $2::timestamptz AND m.id > $3::bigint))
              AND ${first}
+             AND m.blocked = FALSE
            ORDER BY m.date ASC, m.id ASC
            LIMIT $4 OFFSET $5`,
           [anchorRecord.chatId, upper.date, upper.id, afterLimit, afterOff]
@@ -418,14 +535,16 @@ export class PostgresArchiveStore implements ArchiveStore {
       `SELECT COUNT(*)::int AS count FROM ${tables} m
         WHERE m.chat_id = $1
           AND (m.date < $2::timestamptz OR (m.date = $2::timestamptz AND m.id < $3::bigint))
-          AND ${first}`,
+          AND ${first}
+          AND m.blocked = FALSE`,
       [anchorRecord.chatId, lower.date, lower.id]
     );
     const afterCount = await this.pool.query(
       `SELECT COUNT(*)::int AS count FROM ${tables} m
         WHERE m.chat_id = $1
           AND (m.date > $2::timestamptz OR (m.date = $2::timestamptz AND m.id > $3::bigint))
-          AND ${first}`,
+          AND ${first}
+          AND m.blocked = FALSE`,
       [anchorRecord.chatId, upper.date, upper.id]
     );
 
@@ -468,7 +587,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const { clause, params } = pairSql("grouped_id", keys);
     const result = await this.pool.query(
       `${messageSelect(this.table("messages"), this.table("media_files"))}
-       WHERE m.has_media = TRUE AND ${clause}
+       WHERE m.has_media = TRUE AND m.blocked = FALSE AND ${clause}
        ORDER BY m.date ASC, m.id ASC`,
       params
     );
@@ -477,10 +596,15 @@ export class PostgresArchiveStore implements ArchiveStore {
 
   async getMediaFileById(id: string): Promise<StoredMediaFile | undefined> {
     const result = await this.pool.query(
-      `SELECT id::text AS id, message_id, chat_id, media_type, file_name, file_path,
-              file_size, mime_type
-         FROM ${this.table("media_files")}
-        WHERE id = $1::bigint
+      `SELECT mf.id::text AS id, mf.message_id, mf.chat_id, mf.media_type, mf.file_name,
+              mf.file_path, mf.file_size, mf.mime_type
+         FROM ${this.table("media_files")} mf
+        WHERE mf.id = $1::bigint
+          AND NOT EXISTS (
+            SELECT 1 FROM ${this.table("messages")} m
+             WHERE m.chat_id = mf.chat_id AND m.message_id = mf.message_id
+               AND m.blocked = TRUE
+          )
         LIMIT 1`,
       [normalizeRowId(id)]
     );
@@ -524,7 +648,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const { clause, params } = pairSql("grouped_id", pairs);
     const result = await this.pool.query(
       `${albumSelect(this.table("messages"), this.table("media_files"))}
-       WHERE m.has_media = TRUE AND ${clause}
+       WHERE m.has_media = TRUE AND m.blocked = FALSE AND ${clause}
        ORDER BY m.date ASC, m.id ASC`,
       params
     );
@@ -637,6 +761,7 @@ function buildWhere(query: ArchiveQuery, alias = "m"): { where: string; values: 
   if (query.chatId?.trim()) add(`${alias}.chat_id = $N`, query.chatId.trim());
   if (query.chatTitle?.trim()) add(`${alias}.chat_title ILIKE $N`, `%${query.chatTitle.trim()}%`);
   appendTimeWhere(conditions, values, query, add, alias);
+  conditions.push(`${alias}.blocked = FALSE`);
   return { where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
 }
 
@@ -751,6 +876,13 @@ function pushGrouped<T>(map: Map<string, T[]>, key: string, item: T): void {
 
 function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
+}
+
+/** 屏蔽词命中判定（子串、大小写不敏感）；空文本永不命中。 */
+function matchesBlockword(text: string | undefined, words: readonly string[]): boolean {
+  if (text === undefined || text === "") return false;
+  const lower = text.toLowerCase();
+  return words.some((word) => lower.includes(word));
 }
 
 function optionalString(value: unknown): string | undefined {

@@ -1,12 +1,25 @@
 <script lang="ts">
   import "../app.css";
   import { X } from "lucide-svelte";
+  import BlockwordsDialog from "$lib/components/blockwords-dialog.svelte";
   import ChatsRail from "$lib/components/chats-rail.svelte";
   import Lightbox from "$lib/components/lightbox.svelte";
   import Topbar from "$lib/components/topbar.svelte";
   import MessageView from "$lib/views/message-view.svelte";
   import SearchView from "$lib/views/search-view.svelte";
-  import { backToSearch, chats, closeLightbox, initRouter, lightbox, navigate, requestSearchFocus, themeStore, viewStore } from "$lib/state.svelte";
+  import {
+    backToSearch,
+    blockwordsOpen,
+    chats,
+    closeBlockwords,
+    closeLightbox,
+    initRouter,
+    lightbox,
+    navigate,
+    requestSearchFocus,
+    themeStore,
+    viewStore
+  } from "$lib/state.svelte";
   import { fmtCount } from "$lib/format";
 
   let railOpen = $state(false);
@@ -31,7 +44,9 @@
         requestSearchFocus();
       }
       if (event.key === "Escape") {
-        if (lightbox.open) {
+        if (blockwordsOpen.open) {
+          closeBlockwords();
+        } else if (lightbox.open) {
           closeLightbox();
         } else if (viewStore.current.kind === "message") {
           navigate(backToSearch());
@@ -117,3 +132,7 @@
 </div>
 
 <Lightbox />
+
+{#if blockwordsOpen.open}
+  <BlockwordsDialog />
+{/if}
