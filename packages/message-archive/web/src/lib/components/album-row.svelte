@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Image as ImageIcon, Images, Play } from "lucide-svelte";
-  import { fmtTs, senderName } from "$lib/format";
+  import { fmtTs, highlightSegments, senderName } from "$lib/format";
   import { fileThumbOf, openAlbumLightbox } from "$lib/media";
   import { navigate } from "$lib/state.svelte";
   import type { AlbumContextEntry, MessageRecord } from "$lib/model";
@@ -8,15 +8,18 @@
   let {
     entry = { kind: "album", rows: [], captionText: "", rowId: "" },
     anchor = false,
-    inlineThumb = false
+    inlineThumb = false,
+    highlights = []
   }: {
     entry: AlbumContextEntry;
     anchor?: boolean;
     /** 检索列表内联缩略图：带媒体行直接预览，不进详情。 */
     inlineThumb?: boolean;
+    highlights?: readonly string[];
   } = $props();
 
   const first = $derived(entry.rows[0]);
+  const captionSegments = $derived(highlightSegments(entry.captionText, highlights));
   /** 相册内联缩略图：带媒体的行取前 3 张，保留原行号供预览定位。 */
   const thumbs = $derived(entry.rows
     .map((row, index) => ({ row, index }))
@@ -24,6 +27,23 @@
     .slice(0, 3));
   const extraMedia = $derived(entry.rows.filter((row) => row.hasMedia).length - thumbs.length);
   let failedKeys = $state<Record<string, boolean>>({});
+  /** 说明实际被 line-clamp 截断（与字符数无关：换行/长词也会截断）。 */
+  let captionEl = $state<HTMLParagraphElement | null>(null);
+  let captionExpanded = $state(false);
+  let captionClipped = $state(false);
+
+  $effect(() => {
+    const el = captionEl;
+    if (el === null || captionExpanded) return;
+    void entry.captionText;
+    const check = (): void => {
+      captionClipped = el.scrollHeight > el.clientHeight + 1;
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
 </script>
 
 <div
@@ -48,9 +68,18 @@
             {entry.rows.length}
           </span>
         </div>
-        <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-[13px] leading-snug">
+        <p
+          class="mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-snug {captionExpanded ? '' : 'line-clamp-2'}"
+          bind:this={captionEl}
+        >
           {#if entry.captionText}
-            {entry.captionText}
+            {#each captionSegments as segment, i (i)}
+              {#if segment.hit}
+                <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
+              {:else}
+                <span>{segment.text}</span>
+              {/if}
+            {/each}
           {:else}
             <span class="text-muted-foreground">（相册）</span>
           {/if}
@@ -95,4 +124,17 @@
       </div>
     {/if}
   </div>
+  {#if captionClipped || captionExpanded}
+    <div class="flex self-start pb-2 pl-[130px]">
+      <button
+        class="inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        onclick={() => (captionExpanded = !captionExpanded)}
+        aria-expanded={captionExpanded}
+        aria-label={captionExpanded ? "收起全文" : "展开全文"}
+      >
+        <span>{captionExpanded ? "收起" : "展开全文"}</span>
+        <span class="text-muted-foreground/60">· {entry.captionText.length} 字</span>
+      </button>
+    </div>
+  {/if}
 </div>

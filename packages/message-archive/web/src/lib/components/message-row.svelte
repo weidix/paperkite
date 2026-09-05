@@ -81,7 +81,7 @@
         {#if record.text}
           {#each segments as segment, i (i)}
             {#if segment.hit}
-              <mark class="rounded-[2px] bg-foreground/15 text-foreground">{segment.text}</mark>
+              <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
             {:else}
               <span>{segment.text}</span>
             {/if}

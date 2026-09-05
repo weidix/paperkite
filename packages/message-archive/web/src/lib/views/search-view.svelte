@@ -223,7 +223,7 @@
       <input
         id="global-search"
         bind:value={q}
-        placeholder="检索归档消息 · / 聚焦"
+        placeholder="检索归档消息 · 空格分隔多个关键词"
         class="h-10 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
         onkeydown={(event) => {
           if (event.key === "Enter" && !event.isComposing) submit();
@@ -417,8 +417,17 @@
       <Button variant="outline" size="sm" class="mt-3" onclick={clearFilters}>清除筛选</Button>
     </div>
   {:else if results}
-    <div class="flex items-baseline justify-between px-1 font-mono text-[11px] text-muted-foreground">
-      <span>共 {fmtCount(results.total)} 条 · 已加载 {fmtCount(results.items.length)}</span>
+    <div class="flex items-baseline justify-between gap-3 px-1 font-mono text-[11px] text-muted-foreground">
+      <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {#if terms.length > 0}
+          <span class="flex flex-wrap items-center gap-1">
+            {#each terms as term (term)}
+              <span class="rounded-md bg-muted px-1.5 py-0.5 text-foreground">{term}</span>
+            {/each}
+          </span>
+        {/if}
+        <span>共 {fmtCount(results.total)} 条 · 已加载 {fmtCount(results.items.length)}</span>
+      </span>
       {#if viewStore.current.kind === "search" && viewStore.current.chat}
         <span>仅 {truncate(chatTitle(viewStore.current.chat), 24)}</span>
       {/if}
@@ -430,7 +439,7 @@
       </div>
       {#each day.items as item (entryKey(item))}
         {#if item.kind === "album"}
-          <AlbumRow entry={item} inlineThumb />
+          <AlbumRow entry={item} highlights={terms} inlineThumb />
         {:else}
           <MessageRow record={item.record} highlights={terms} inlineThumb />
         {/if}

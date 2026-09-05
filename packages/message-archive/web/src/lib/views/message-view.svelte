@@ -318,7 +318,7 @@
             {#if anchorText}
               {#each segments as segment, i (i)}
                 {#if segment.hit}
-                  <mark class="rounded-[2px] bg-foreground/15 text-foreground">{segment.text}</mark>
+                  <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
                 {:else}
                   <span>{segment.text}</span>
                 {/if}
@@ -355,14 +355,14 @@
       </div>
       {#each before as entry (entryRowId(entry))}
         {#if entry.kind === "album"}
-          <AlbumRow {entry} />
+          <AlbumRow {entry} highlights={terms} />
         {:else}
           <MessageRow record={entry.record} highlights={terms} />
         {/if}
       {/each}
       <div class="my-1">
         {#if anchor.kind === "album"}
-          <AlbumRow entry={anchor} anchor />
+          <AlbumRow entry={anchor} anchor highlights={terms} />
         {:else}
           <MessageRow record={anchor.record} anchor fullText highlights={terms} />
         {/if}
@@ -378,7 +378,7 @@
       </div>
       {#each after as entry (entryRowId(entry))}
         {#if entry.kind === "album"}
-          <AlbumRow {entry} />
+          <AlbumRow {entry} highlights={terms} />
         {:else}
           <MessageRow record={entry.record} highlights={terms} />
         {/if}
