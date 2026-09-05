@@ -1,10 +1,12 @@
-import { mkdtemp, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { RuntimeControl, RuntimeEvent, RuntimeEventListener, RuntimeLogger } from "@paperkite/sdk";
+import type { RuntimeControl, RuntimeEvent, RuntimeEventListener, RuntimeLogger, ServiceContext } from "@paperkite/sdk";
 import { createRuntimeConsoleServer } from "../packages/console-web/src/console/server.js";
+import { RuntimeConsoleWebService } from "../packages/console-web/src/index.js";
 
 const logger: RuntimeLogger = {
   debug() {},
@@ -257,3 +259,72 @@ test("runtime console streams runtime events over SSE and unsubscribes on discon
     assert.equal(listeners.length, 0);
   }
 });
+
+test("runtime console serves the SPA shell for direct deep links", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-console-web-"));
+  const publicDir = join(directory, "public");
+  await mkdir(publicDir, { recursive: true });
+  await writeFile(join(publicDir, "index.html"), "<h1>运行时控制台</h1>");
+  const port = await freePort();
+  const controller = new AbortController();
+  const context: ServiceContext<Record<string, unknown>> = {
+    id: "console-web",
+    capability: "runtime.console_web",
+    payload: { host: "127.0.0.1", port, publicDir },
+    signal: controller.signal,
+    control: stubRuntime().runtime,
+    logger
+  };
+  const service = new RuntimeConsoleWebService(context);
+  const running = service.run();
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await waitForHttp(base + "/api/plugins");
+    const root = await (await fetch(base + "/")).text();
+    assert.match(root, /运行时控制台/);
+
+    const flows = await (await fetch(base + "/flows")).text();
+    assert.match(flows, /运行时控制台/);
+    const events = await (await fetch(base + "/events")).text();
+    assert.match(events, /运行时控制台/);
+
+    const unknown = await fetch(base + "/api/unknown");
+    assert.equal(unknown.status, 404);
+    assert.deepEqual(await unknown.json(), { error: "not found" });
+
+    const post = await fetch(base + "/flows", { method: "POST" });
+    assert.equal(post.status, 405);
+  } finally {
+    controller.abort();
+    await running;
+  }
+});
+
+async function freePort(): Promise<number> {
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("failed to allocate port"));
+        return;
+      }
+      server.close(() => resolvePromise(address.port));
+    });
+  });
+}
+
+async function waitForHttp(url: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return;
+    } catch {
+      // 服务尚未就绪，继续等待
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+  throw new Error("runtime console service did not become ready");
+}

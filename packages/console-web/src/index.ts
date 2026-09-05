@@ -2,7 +2,7 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Service, definePlugin, type PluginContext, type RuntimeLogger } from "@paperkite/sdk";
 import { createRuntimeConsoleServer } from "./console/server.js";
 
@@ -12,7 +12,7 @@ interface ConsoleWebConfig {
   readonly publicDir?: string;
 }
 
-class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
+export class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
   async run(): Promise<void> {
     if (!this.control) throw new Error("runtime.console_web needs the runtime control contract");
     const server = createRuntimeConsoleServer(this.control, { logger: this.context.logger });
@@ -21,6 +21,7 @@ class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
         root: await publicDirectory(this.payload?.publicDir),
         index: "index.html"
       });
+      server.setNotFoundHandler(spaFallback);
       const host = this.payload?.host ?? "127.0.0.1";
       const port = normalizePort(this.payload?.port);
       await listenRetrying(server, host, port, this.context.logger);
@@ -93,4 +94,14 @@ async function publicDirectory(configured: string | undefined): Promise<string> 
   } catch {
     return resolve(process.cwd(), "packages/console-web/public");
   }
+}
+
+async function spaFallback(request: FastifyRequest, reply: FastifyReply): Promise<unknown> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return reply.code(405).send({ error: "method not allowed" });
+  }
+  if (request.url.startsWith("/api/")) {
+    return reply.code(404).send({ error: "not found" });
+  }
+  return reply.sendFile("index.html");
 }
