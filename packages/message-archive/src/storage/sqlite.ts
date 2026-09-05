@@ -92,6 +92,8 @@ export class SqliteArchiveStore implements ArchiveStore {
       CREATE INDEX IF NOT EXISTS idx_messages_chat_date ON messages(chat_id, date);
       CREATE INDEX IF NOT EXISTS idx_messages_chat_date_id ON messages(chat_id, date, id);
       CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped ON messages(chat_id, grouped_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped_date_id ON messages(chat_id, grouped_id, date, id);
+      CREATE INDEX IF NOT EXISTS idx_messages_date_id ON messages(date, id);
       CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
       CREATE TABLE IF NOT EXISTS media_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -390,27 +392,30 @@ export class SqliteArchiveStore implements ArchiveStore {
     const rows = this.database.prepare(`
       SELECT
         c.chat_id AS chat_id,
-        COALESCE(c.title, latest.chat_title) AS title,
+        COALESCE(c.title, (
+          SELECT m.chat_title FROM messages m
+           WHERE m.chat_id = c.chat_id AND m.blocked = 0
+           ORDER BY m.date DESC, m.id DESC LIMIT 1
+        )) AS title,
         c.username,
         c.type,
         c.description,
         c.members_count,
-        agg.count,
-        latest.date AS last_date,
-        substr(latest.text, 1, 120) AS last_text
+        (
+          SELECT COUNT(*) FROM messages m
+           WHERE m.chat_id = c.chat_id AND m.blocked = 0
+        ) AS count,
+        (
+          SELECT m.date FROM messages m
+           WHERE m.chat_id = c.chat_id AND m.blocked = 0
+           ORDER BY m.date DESC, m.id DESC LIMIT 1
+        ) AS last_date,
+        (
+          SELECT substr(m.text, 1, 120) FROM messages m
+           WHERE m.chat_id = c.chat_id AND m.blocked = 0
+           ORDER BY m.date DESC, m.id DESC LIMIT 1
+        ) AS last_text
       FROM chats c
-      LEFT JOIN (
-        SELECT chat_id, COUNT(*) AS count
-          FROM messages
-         WHERE blocked = 0
-         GROUP BY chat_id
-      ) agg ON agg.chat_id = c.chat_id
-      LEFT JOIN (
-        SELECT chat_id, chat_title, date, text,
-               ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY date DESC, id DESC) AS rn
-          FROM messages
-         WHERE blocked = 0
-      ) latest ON latest.chat_id = c.chat_id AND latest.rn = 1
       ORDER BY last_date DESC NULLS LAST, c.chat_id
       LIMIT ?
     `).all(cap) as readonly Record<string, unknown>[];

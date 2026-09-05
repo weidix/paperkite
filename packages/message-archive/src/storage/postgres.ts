@@ -81,6 +81,10 @@ export class PostgresArchiveStore implements ArchiveStore {
           ON ${this.table("messages")} (chat_id, date, id);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped
           ON ${this.table("messages")} (chat_id, grouped_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped_date_id
+          ON ${this.table("messages")} (chat_id, grouped_id, date, id);
+        CREATE INDEX IF NOT EXISTS idx_messages_date_id
+          ON ${this.table("messages")} (date, id);
         CREATE INDEX IF NOT EXISTS idx_messages_sender
           ON ${this.table("messages")} (sender_id);
         CREATE TABLE IF NOT EXISTS ${this.table("media_files")} (
