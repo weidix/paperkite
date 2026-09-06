@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RefreshCw } from "lucide-svelte";
   import { chats, loadChats, navigate, viewStore } from "$lib/state.svelte";
-  import { fmtCount, fmtTs } from "$lib/format";
+  import { chatLabel, fmtCount, fmtTs } from "$lib/format";
   import Button from "$lib/components/button.svelte";
   import { cn } from "$lib/utils";
 
@@ -55,7 +55,7 @@
             <span class="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary" aria-hidden="true"></span>
           {/if}
           <span class="block truncate text-[13px] font-medium leading-5">
-            {chat.title}
+            {chatLabel(chat)}
             {#if chat.username}
               <span class="font-mono text-[10px] text-muted-foreground/80">@{chat.username}</span>
             {/if}

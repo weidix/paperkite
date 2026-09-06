@@ -2,7 +2,7 @@
   import { ArrowLeft, ChevronRight, X } from "lucide-svelte";
   import { tick } from "svelte";
   import { fetchContext, fetchState, mediaDiskUrl, mediaRowUrl, type ArchiveState } from "$lib/api";
-  import { fmtCount, fmtTs, highlightSegments, senderName } from "$lib/format";
+  import { chatLabel, fmtCount, fmtTs, highlightSegments, senderName } from "$lib/format";
   import { albumLightboxItems, kindOfFile, kindOfRow, openAlbumLightbox, openMessageLightbox } from "$lib/media";
   import { backToSearch, navigate } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
@@ -247,7 +247,10 @@
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2">
           <h1 class="truncate font-display text-base font-semibold tracking-tight">
-            {album?.rows[0]?.chatTitle ?? messageAnchor?.chatTitle ?? "未知会话"}
+            {chatLabel({
+              chatId: album?.rows[0]?.chatId ?? messageAnchor?.chatId ?? "",
+              title: album?.rows[0]?.chatTitle ?? messageAnchor?.chatTitle
+            })}
           </h1>
           {#if archiveState?.session}
             <span class="shrink-0 font-mono text-[10px] text-muted-foreground">会话 {archiveState.session}</span>
@@ -296,13 +299,6 @@
         <div class="px-4 py-3">
           <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span class="truncate text-sm font-medium">{anchorRecord ? senderName(anchorRecord) : ""}</span>
-            {#if anchorRecord?.senderUsername || anchorRecord?.senderId}
-              <span class="truncate font-mono text-[10px] text-muted-foreground">
-                {anchorRecord?.senderUsername ? `@${anchorRecord?.senderUsername}` : ""}
-                {anchorRecord?.senderUsername && anchorRecord?.senderId ? " · " : ""}
-                {anchorRecord?.senderId ?? ""}
-              </span>
-            {/if}
             <span class="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
               {#if album !== null}
                 相册 {album.rows.length} 张 · #{album.rows[0]?.messageId} · {fmtTs(album.rows[0]?.date)}

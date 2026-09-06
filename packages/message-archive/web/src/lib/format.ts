@@ -36,9 +36,39 @@ export function dayLabel(iso: string): string {
   return `${d.getFullYear()}年${month}月${day}日`;
 }
 
+/** Telegram 数值 Peer 的可读类型标签；缺台账类型时按 ID 形态推断。 */
+export function kindLabel(type: string | undefined, chatId?: string): string {
+  if (type === "channel") return "频道";
+  if (type === "group") return "群组";
+  if (type === "user") return "用户";
+  if (chatId !== undefined) {
+    if (/^-100\d+$/.test(chatId)) return "频道";
+    if (/^-\d+$/.test(chatId)) return "群组";
+    if (/^\d+$/.test(chatId)) return "用户";
+  }
+  return "会话";
+}
+
+/** 去掉 Telegram 前缀（-100/-）的短 ID，供降级展示。 */
+export function shortPeer(id: string): string {
+  return id.replace(/^-100/, "").replace(/^-/, "");
+}
+
+/** 会话展示名：标题缺省或退化为数值 ID 时按类型给出占位名。 */
+export function chatLabel(chat: { chatId: string; title?: string; type?: string }): string {
+  const title = chat.title?.trim() ?? "";
+  if (title !== "" && !/^-?\d+$/.test(title)) return title;
+  return `未命名${kindLabel(chat.type, chat.chatId)}`;
+}
+
 export function senderName(record: MessageRecord): string {
   const display = [record.senderFirstName, record.senderLastName].filter(Boolean).join(" ");
-  return display || record.senderUsername || record.senderId || "未知";
+  if (display) return display;
+  // 频道/群组以自身身份发布：发送者即会话本身，直接用会话名。
+  if (record.senderId === record.chatId && record.chatTitle) return record.chatTitle;
+  if (record.senderUsername) return `@${record.senderUsername}`;
+  if (record.senderId) return `${kindLabel(undefined, record.senderId)} ${shortPeer(record.senderId)}`;
+  return "未知";
 }
 
 export function truncate(text: string, length: number): string {

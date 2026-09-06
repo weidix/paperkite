@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { Archive, ChevronRight, Clock, Database, MessagesSquare, RefreshCw, Search, X } from "lucide-svelte";
   import { searchMessages, type SearchQuery } from "$lib/api";
-  import { dayLabel, fmtCount, fmtTs, truncate } from "$lib/format";
+  import { chatLabel, dayLabel, fmtCount, fmtTs, kindLabel, shortPeer, truncate } from "$lib/format";
   import { chats, isEmptySearch, loadChats, navigate, pendingSearchFocus, searchCache, searchScroll, viewStore } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
@@ -211,7 +211,8 @@
   }
 
   function chatTitle(chatId: string): string {
-    return chats.items.find((item) => item.chatId === chatId)?.title ?? chatId;
+    const chat = chats.items.find((item) => item.chatId === chatId);
+    return chat ? chatLabel(chat) : "未命名会话";
   }
 </script>
 
@@ -248,7 +249,7 @@
           bind:value={chat}
           options={[{ value: "", label: "全部" }, ...chats.items.map((item) => ({
             value: item.chatId,
-            label: item.username ? `${item.title} @${item.username}` : item.title
+            label: item.username ? `${chatLabel(item)} @${item.username}` : chatLabel(item)
           }))]}
           triggerClass="h-8 min-w-0 flex-1 max-w-80 text-xs"
           contentMinWidth="min(24rem, calc(100vw - 2rem))"
@@ -396,8 +397,18 @@
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline gap-2">
-                <span class="truncate text-sm font-medium">{chat.title}</span>
-                <span class="shrink-0 font-mono text-[11px] text-muted-foreground/60">{chat.chatId}</span>
+                <span class="truncate text-sm font-medium">{chatLabel(chat)}</span>
+                <span
+                  class="shrink-0 font-mono text-[11px] text-muted-foreground/60"
+                  title={`Telegram 会话 ID ${chat.chatId}`}
+                >
+                  {kindLabel(chat.type, chat.chatId)}
+                  {#if chat.username}
+                    · @{chat.username}
+                  {:else}
+                    ID {shortPeer(chat.chatId)}
+                  {/if}
+                </span>
               </div>
               <p class="mt-0.5 truncate text-xs text-muted-foreground">{chat.lastText}</p>
             </div>
