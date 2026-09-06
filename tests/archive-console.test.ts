@@ -38,6 +38,8 @@ class FakeLiveClient {
   /** 已删除消息：getMessages 返回空槽（gramjs 对 MessageEmpty 的行为）。 */
   deletedIds: readonly number[] = [];
   dialogs: DialogEntry[] = [];
+  /** 文档型媒体逐块产出的字节。 */
+  chunks: readonly Buffer[] = [Buffer.from("LIVE-VIDEO-CHUNK")];
 
   async getMessages(_chatId: string, options: { ids: readonly number[] }): Promise<readonly (TelegramMessage | undefined)[]> {
     this.calls.push("getMessages:" + options.ids.join(","));
@@ -72,6 +74,22 @@ class FakeLiveClient {
     this.calls.push("downloadMedia:" + message.id + marker);
     return Buffer.from("LIVE-PHOTO-BYTES");
   }
+
+  iterMediaChunks(message: TelegramMessage): AsyncIterable<Buffer> | undefined {
+    if (message.media === undefined || (message.media as { className?: string }).className !== "MessageMediaDocument") {
+      return undefined;
+    }
+    this.calls.push("iterMediaChunks:" + message.id);
+    return chunkIterable(this.chunks);
+  }
+}
+
+function chunkIterable(chunks: readonly Buffer[]): AsyncIterable<Buffer> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) yield chunk;
+    }
+  };
 }
 
 function fakeSessions(client: FakeLiveClient): SessionAccess & { get(name: string): unknown } {
@@ -100,13 +118,15 @@ async function harness(options: {
   entityErrorAlways?: boolean;
   deletedIds?: readonly number[];
   dialogs?: DialogEntry[];
+  chunks?: readonly Buffer[];
+  seedVideo?: boolean;
 } = {}): Promise<Harness> {
   const tmp = await mkdtemp(join(tmpdir(), "paperkite-archive-console-"));
   const mediaDir = join(tmp, "media");
   await mkdir(mediaDir, { recursive: true });
   const store = new SqliteArchiveStore(join(tmp, "archive.db"));
   await store.init();
-  await seed(store, mediaDir);
+  await seed(store, mediaDir, options.seedVideo ?? false);
 
   const client = new FakeLiveClient();
   client.message = options.message ?? { id: 3, date: 0, media: { className: "MessageMediaPhoto" } };
@@ -117,6 +137,7 @@ async function harness(options: {
   client.entityErrorAlways = options.entityErrorAlways ?? false;
   client.deletedIds = options.deletedIds ?? [];
   client.dialogs = options.dialogs ?? [];
+  client.chunks = options.chunks ?? client.chunks;
   const session = options.session ? fakeSessions(client) : undefined;
 
   const server = createArchiveConsoleServer({
@@ -140,7 +161,7 @@ async function harness(options: {
   };
 }
 
-async function seed(store: SqliteArchiveStore, mediaDir: string): Promise<void> {
+async function seed(store: SqliteArchiveStore, mediaDir: string, video = false): Promise<void> {
   await store.saveChat({ chatId: "100", title: "测试群", username: "test_chat", type: "group" });
   await store.saveChat({ chatId: "200", title: "重要通知", type: "channel" });
   const photoPath = join(mediaDir, "photo1.jpg");
@@ -186,6 +207,40 @@ async function seed(store: SqliteArchiveStore, mediaDir: string): Promise<void> 
   await store.startSyncSession("100", "2025-03-01T00:00:00.000Z", "2025-03-04T00:00:00.000Z");
   await store.saveBatch(messages, media);
   await store.completeSyncSession(1, messages.length, media.length);
+  if (video) {
+    await store.saveBatch(
+      [{
+        messageId: 6, chatId: "100", chatTitle: "测试群", date: "2025-03-03T10:00:00.000Z",
+        text: "视频片段", messageType: "video", hasMedia: true, mediaType: "video"
+      }],
+      [{
+        messageId: 6, chatId: "100", mediaType: "video", fileName: "clip.mp4",
+        filePath: join(mediaDir, "missing-clip.mp4"), fileSize: 20, mimeType: "video/mp4"
+      }]
+    );
+  }
+}
+
+/** 文档型消息夹具：真实 gramjs 对象，供 getFileInfo/iterMediaChunks 走构造。 */
+function videoMessage(id: number, size: number, mime = "video/mp4"): TelegramMessage {
+  return {
+    id,
+    date: 0,
+    media: new Api.MessageMediaDocument({
+      document: new Api.Document({
+        id: 1n,
+        accessHash: 1n,
+        dcId: 1,
+        mimeType: mime,
+        size,
+        fileReference: Buffer.from("ref"),
+        date: 0,
+        attributes: [],
+        thumbs: [],
+        videoThumbs: []
+      } as unknown as ConstructorParameters<typeof Api.Document>[0])
+    } as unknown as ConstructorParameters<typeof Api.MessageMediaDocument>[0])
+  };
 }
 
 test("archive console search returns items, total and filters", async () => {
@@ -797,6 +852,95 @@ test("archive console blockwords are case-insensitive and cover new writes", asy
     assert.equal(res.json().total, 1);
     res = await h.server.inject({ method: "GET", url: "/api/search?q=only" });
     assert.equal(res.json().total, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console streams live video progressively with range support and cache reuse", async () => {
+  const chunks = [Buffer.from("0123456789"), Buffer.from("abcdefghij")];
+  const h = await harness({ session: true, seedVideo: true, chunks, message: videoMessage(6, 20) });
+  try {
+    const full = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live" });
+    assert.equal(full.statusCode, 200);
+    assert.equal(full.headers["content-type"], "video/mp4");
+    assert.equal(full.headers["content-length"], "20");
+    assert.equal(full.headers["accept-ranges"], "bytes");
+    assert.equal(full.rawPayload.toString(), "0123456789abcdefghij");
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+
+    const range = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live", headers: { range: "bytes=5-9" } });
+    assert.equal(range.statusCode, 206);
+    assert.equal(range.headers["content-range"], "bytes 5-9/20");
+    assert.equal(range.rawPayload.toString(), "56789");
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+
+    const suffix = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live", headers: { range: "bytes=-5" } });
+    assert.equal(suffix.statusCode, 206);
+    assert.equal(suffix.headers["content-range"], "bytes 15-19/20");
+    assert.equal(suffix.rawPayload.toString(), "fghij");
+
+    const bad = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live", headers: { range: "bytes=99-" } });
+    assert.equal(bad.statusCode, 416);
+    assert.equal(bad.headers["content-range"], "bytes */20");
+
+    const download = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live?download=1" });
+    assert.equal(download.statusCode, 200);
+    assert.equal(download.headers["content-disposition"], 'attachment; filename="clip.mp4"');
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console streams video by message row without stored media", async () => {
+  const chunks = [Buffer.from("0123456789")];
+  const h = await harness({ session: true, chunks, message: videoMessage(6, 10) });
+  try {
+    await h.store.saveBatch(
+      [{
+        messageId: 6, chatId: "100", chatTitle: "测试群", date: "2025-03-03T10:00:00.000Z",
+        text: "视频片段", messageType: "video", hasMedia: true, mediaType: "video"
+      }],
+      []
+    );
+    const full = await h.server.inject({ method: "GET", url: "/api/messages/6/thumb?size=full" });
+    assert.equal(full.statusCode, 200);
+    assert.equal(full.headers["content-type"], "video/mp4");
+    assert.equal(full.headers["content-length"], "10");
+    assert.equal(full.rawPayload.toString(), "0123456789");
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+
+    const download = await h.server.inject({ method: "GET", url: "/api/messages/6/thumb?size=full&download=1" });
+    assert.equal(download.headers["content-disposition"], 'attachment; filename="6.mp4"');
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console streaming live media keeps photo rows on the full-fetch path", async () => {
+  const h = await harness({ session: true });
+  try {
+    const full = await h.server.inject({ method: "GET", url: "/api/messages/3/thumb?size=full" });
+    assert.equal(full.statusCode, 200);
+    assert.equal(full.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+    assert.deepEqual(h.client.calls, ["getMessages:3", "downloadMedia:3"]);
+
+    const live = await h.server.inject({ method: "GET", url: "/api/mediafiles/1/live" });
+    assert.equal(live.statusCode, 200);
+    assert.equal(live.rawPayload.toString(), "LIVE-PHOTO-BYTES");
+    assert.deepEqual(h.client.calls, ["getMessages:3", "downloadMedia:3", "getMessages:3", "downloadMedia:3"]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console streaming live media reports 410 when the message is gone", async () => {
+  const h = await harness({ session: true, seedVideo: true, missingIds: [6] });
+  try {
+    const res = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live" });
+    assert.equal(res.statusCode, 410);
+    assert.equal(res.json().error, "消息已从 Telegram 删除或会话无法访问");
   } finally {
     await h.close();
   }

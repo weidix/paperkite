@@ -66,6 +66,14 @@ export function mimeFromName(path: string): string {
   return EXT_MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
+/** 图片类媒体整图取回，其余（视频/音频/文档）走渐进式流。 */
+export function isPhotoLike(value: { readonly mediaType?: string; readonly mimeType?: string }): boolean {
+  const mime = value.mimeType ?? "";
+  if (mime.startsWith("image/")) return true;
+  const type = value.mediaType;
+  return type === "photo" || type === "sticker";
+}
+
 /** MIME 反查扩展名（用于在线取回媒体的下载命名）。 */
 export function extFromMime(mime: string): string {
   return Object.entries(EXT_MIME).find(([, value]) => value === mime)?.[0] ?? "";
@@ -206,7 +214,7 @@ function thumbSpecOf(media: unknown): ThumbSpec | undefined {
 }
 
 /** 消息内嵌网页链接的媒体（链接卡片图），解开到内部 photo/document 再判定。 */
-function unwrapWebPage(media: unknown): unknown {
+export function unwrapWebPage(media: unknown): unknown {
   if (className(media) !== "MessageMediaWebPage") return media;
   const webpage = recordOf(recordOf(media)?.webpage);
   if (webpage === undefined) return media;
@@ -285,7 +293,7 @@ function arrayOf(value: unknown): unknown[] {
  * 取回目标消息。冷启动会话没有实体缓存时，先按归档用户名解析实体再重试；
  * 解析不到（渠道私密/不可达）时抛出原始错误，由缺失判定统一归类。
  */
-async function fetchMessage(
+export async function fetchMessage(
   host: ArchiveClient,
   file: StoredMediaFile,
   chatUsername: string | undefined
@@ -344,7 +352,7 @@ function peerIdOf(entity: unknown): string {
 }
 
 /** 会话/消息已删除或对当前账号不可见时的典型错误。 */
-function isMissingPeer(error: unknown): boolean {
+export function isMissingPeer(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /could not find (the )?input entity|could not find the entity|CHANNEL_PRIVATE|CHANNEL_INVALID|CHANNEL_FORBIDDEN|CHAT_FORBIDDEN|chat (was )?not found|peer id is invalid/i.test(message);
 }
@@ -355,7 +363,7 @@ function isUnresolvedEntityError(error: unknown): boolean {
   return /could not find (the )?input entity/i.test(message);
 }
 
-function liveMediaMime(message: TelegramMessage): string {
+export function liveMediaMime(message: TelegramMessage): string {
   const media = message.media;
   if (className(media) === "MessageMediaPhoto") return "image/jpeg";
   if (className(media) === "MessageMediaDocument") {

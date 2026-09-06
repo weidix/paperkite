@@ -34,6 +34,8 @@ export interface ArchiveClient {
   iterMessages(entity: unknown, options: { limit: number; maxId: number }): AsyncIterable<TelegramMessage>;
   getMessages(entity: unknown, options: { ids: readonly number[] }): Promise<readonly (TelegramMessage | undefined)[]>;
   downloadMedia(message: TelegramMessage, options?: { outputFile?: string; thumb?: ThumbParam }): Promise<Buffer | string | undefined>;
+  /** 逐块产出媒体字节；未提供时控制台以 gramjs 原生迭代回退。 */
+  iterMediaChunks?(message: TelegramMessage): AsyncIterable<Buffer> | undefined;
 }
 
 export interface ChatInfo {

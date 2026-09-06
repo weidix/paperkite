@@ -1,10 +1,12 @@
 import { createReadStream } from "node:fs";
+import { join, resolve } from "node:path";
 import fastify from "fastify";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
 import type { ArchiveStore, StoredMediaFile, TimeMode } from "../storage/index.js";
 import { normalizeContextLimit, normalizeDate, normalizeLimit, normalizeOffset, normalizeRowId, normalizeTimeMode } from "../storage/index.js";
-import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf, mimeFromName, parseRange } from "./media.js";
+import { LiveMediaManager } from "./live.js";
+import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf, isPhotoLike, mimeFromName, parseRange } from "./media.js";
 
 export interface ArchiveConsoleServerOptions {
   readonly store: ArchiveStore;
@@ -27,9 +29,17 @@ export function createArchiveConsoleServer(options: ArchiveConsoleServerOptions)
   const server = fastify({ logger: false });
   const thumbCache = new Map<string, CachedThumb>();
   const negativeCache = new Map<string, NegativeThumb>();
-  server.addHook("onClose", (_instance, done) => {
+  const live = options.session && options.sessions
+    ? new LiveMediaManager({
+        sessions: options.sessions,
+        session: options.session,
+        logger: options.logger,
+        cacheDir: join(resolve(options.mediaRoot ?? "data/downloads"), ".live")
+      })
+    : undefined;
+  server.addHook("onClose", async () => {
+    if (live !== undefined) await live.close();
     releaseIdleConnections(server);
-    done();
   });
   server.setErrorHandler((error: unknown, _request, reply) => {
     const status = error instanceof HttpError
@@ -40,7 +50,7 @@ export function createArchiveConsoleServer(options: ArchiveConsoleServerOptions)
       return reply.code(status).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });
-  registerRoutes(server, options, thumbCache, negativeCache);
+  registerRoutes(server, options, thumbCache, negativeCache, live);
   return server;
 }
 
@@ -48,7 +58,8 @@ function registerRoutes(
   server: FastifyInstance,
   options: ArchiveConsoleServerOptions,
   thumbCache: Map<string, CachedThumb>,
-  negativeCache: Map<string, NegativeThumb>
+  negativeCache: Map<string, NegativeThumb>,
+  live: LiveMediaManager | undefined
 ): void {
   const { store, mediaRoot, session, sessions, logger } = options;
 
@@ -173,7 +184,11 @@ function registerRoutes(
           mimeType: record.mimeType
         };
         if (request.query.size === "full") {
-          return sendLiveFull(reply, file, sessions, session, store, logger, request.query.download === "1");
+          if (live === undefined) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+          if (isPhotoLike(file)) {
+            return sendLiveFull(reply, file, sessions, session, store, logger, request.query.download === "1");
+          }
+          return serveLiveStream(request, reply, live, file, await store.getChatUsername(file.chatId), request.query.download === "1");
         }
         const cached = thumbCacheGet(rowId, thumbCache);
         if (cached) {
@@ -225,22 +240,13 @@ function registerRoutes(
     "/api/mediafiles/:id/live",
     async (request, reply) => {
       try {
-        if (!session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+        if (live === undefined || !session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
         const file = await store.getMediaFileById(rowIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
-        const result = await fetchLiveMedia(file, sessions, session, {
-          chatUsername: await store.getChatUsername(file.chatId),
-          logger
-        });
-        if (!result.ok) {
-          throw new HttpError(
-            result.missing ? 410 : 404,
-            result.missing ? "消息已从 Telegram 删除或会话无法访问" : "无法从 Telegram 取回该媒体"
-          );
+        if (isPhotoLike(file)) {
+          return sendLiveFull(reply, file, sessions, session, store, logger, request.query.download === "1");
         }
-        sendDownloadHeaders(reply, file, result.mime, result.bytes.length, request.query.download === "1");
-        reply.header("cache-control", "no-store");
-        return reply.send(result.bytes);
+        return serveLiveStream(request, reply, live, file, await store.getChatUsername(file.chatId), request.query.download === "1");
       } catch (error) {
         return sendError(reply, error, logger);
       }
@@ -294,6 +300,55 @@ function sendDownloadHeaders(
     const name = fileNameOf(file, "");
     reply.header("content-disposition", `attachment; filename="${name}"`);
   }
+}
+
+/** 渐进式在线媒体：等待元数据就绪后按范围流式输出，全程以同一份下载缓存服务。 */
+async function serveLiveStream(
+  request: FastifyRequest<{ Querystring: { download?: string } }>,
+  reply: FastifyReply,
+  live: LiveMediaManager,
+  file: StoredMediaFile,
+  chatUsername: string | undefined,
+  download: boolean
+): Promise<FastifyReply | undefined> {
+  const handle = live.acquire(file, chatUsername);
+  handle.attach();
+  reply.raw.on("close", () => handle.detach());
+  try {
+    const outcome = await handle.ready;
+    if (!outcome.ok) throw new HttpError(outcome.status, outcome.message);
+    reply.header("content-type", outcome.mime);
+    reply.header("accept-ranges", "bytes");
+    reply.header("cache-control", "no-store");
+    if (download) {
+      reply.header("content-disposition", `attachment; filename="${downloadNameOf(file, outcome.mime)}"`);
+    }
+    const range = request.headers.range;
+    if (range) {
+      const part = parseRange(range, outcome.size);
+      if (!part) {
+        reply.header("content-type", "application/json; charset=utf-8");
+        reply.code(416).header("content-range", `bytes */${outcome.size}`);
+        return reply.send({ error: "range 请求无效" });
+      }
+      reply.code(206);
+      reply.header("content-range", `bytes ${part.start}-${part.end}/${outcome.size}`);
+      reply.header("content-length", String(part.end - part.start + 1));
+      return reply.send(handle.readStream(part.start, part.end));
+    }
+    reply.header("content-length", String(outcome.size));
+    return reply.send(handle.readStream(0, outcome.size - 1));
+  } catch (error) {
+    handle.detach();
+    throw error;
+  }
+}
+
+/** 下载文件名：缺扩展名时按 mime 补齐。 */
+function downloadNameOf(file: StoredMediaFile, mime: string): string {
+  const name = fileNameOf(file, "");
+  const ext = extFromMime(mime);
+  return ext !== "" && !name.includes(".") ? name + ext : name;
 }
 
 /** 整图在线取回（预览器用）：不经缩略图缓存，直接透传 Telegram 字节。 */

@@ -54,6 +54,18 @@ export function rowThumbOf(row: { rowId: string; hasMedia: boolean; mediaType?: 
   return { kind, url: mediaRowUrl(row.rowId) };
 }
 
+/** 预览 mime：库里缺 mime 时按媒体类型给占位，保证预览分支正确分流。 */
+export function previewMimeOf(value: { readonly mimeType?: string; readonly mediaType?: string }): string {
+  const mime = value.mimeType?.trim();
+  if (mime) return mime;
+  switch (value.mediaType) {
+    case "video": return "video/mp4";
+    case "audio": return "audio/mpeg";
+    case "animation": return "image/gif";
+    default: return "application/octet-stream";
+  }
+}
+
 /** 预览器条目：落盘文件优先，否则走消息行整图在线取回。 */
 export function lightboxItemsOf(record: MessageRecord): LightboxItem[] {
   if (record.mediaFiles.length > 0) return record.mediaFiles.map(itemForFile);
@@ -96,12 +108,15 @@ function itemForFile(file: StoredMediaFile): LightboxItem {
 }
 
 function itemForRow(row: { rowId: string; messageId: number; mediaType?: string; mimeType?: string }): LightboxItem {
+  const kind = kindOfRow(row);
+  const mime = previewMimeOf(row);
+  const url = mediaRowUrl(row.rowId, "full");
   return {
     name: `media_${row.messageId}`,
-    mime: row.mimeType ?? "",
+    mime,
     size: undefined,
     spec: row.mediaType ?? "",
-    load: () => loadLiveBlob(mediaRowUrl(row.rowId, "full"))
+    load: () => (kind === "image" ? loadLiveBlob(url) : Promise.resolve(directLive(url, mime)))
   };
 }
 
@@ -114,7 +129,19 @@ async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source
   } catch {
     // 元数据不可得时按在线取回处理
   }
-  return loadLiveBlob(mediaLiveUrl(file.id));
+  const url = mediaLiveUrl(file.id);
+  if (kindOfFile(file) === "image") return loadLiveBlob(url);
+  return directLive(url, previewMimeOf(file));
+}
+
+/** 在线直接取回：媒体元素直连流式端点，边下边播并支持拖动。 */
+function directLive(path: string, mime: string): { url: string; source: "在线"; mime: string; downloadUrl: string } {
+  return {
+    url: path,
+    source: "在线",
+    mime,
+    downloadUrl: `${path}${path.includes("?") ? "&" : "?"}download=1`
+  };
 }
 
 /** 在线取回并转 object URL；mime 取响应头，供预览按实际内容分流。 */

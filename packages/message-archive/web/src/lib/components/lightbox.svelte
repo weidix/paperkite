@@ -116,7 +116,7 @@
             {#if lightbox.failed}
               <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">媒体加载失败</div>
             {:else if lightbox.src}
-              <video src={lightbox.src} controls class="max-h-[78vh] max-w-full rounded-lg border border-border shadow-sm" aria-label={item.name}><track kind="captions" /></video>
+              <video src={lightbox.src} controls class="max-h-[78vh] max-w-full rounded-lg border border-border shadow-sm" aria-label={item.name} onerror={() => (lightbox.failed = true)}><track kind="captions" /></video>
             {:else}
               <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
             {/if}
@@ -124,7 +124,7 @@
             {#if lightbox.failed}
               <div class="rounded-lg border border-border bg-card p-8 font-mono text-xs text-muted-foreground">媒体加载失败</div>
             {:else if lightbox.src}
-              <audio src={lightbox.src} controls class="max-w-full" aria-label={item.name}></audio>
+              <audio src={lightbox.src} controls class="max-w-full" aria-label={item.name} onerror={() => (lightbox.failed = true)}></audio>
             {:else}
               <div class="p-8 font-mono text-xs text-muted-foreground">加载中…</div>
             {/if}
