@@ -75,12 +75,14 @@ class FakeLiveClient {
     return Buffer.from("LIVE-PHOTO-BYTES");
   }
 
-  iterMediaChunks(message: TelegramMessage): AsyncIterable<Buffer> | undefined {
-    if (message.media === undefined || (message.media as { className?: string }).className !== "MessageMediaDocument") {
+  iterMediaChunks(media: unknown, options?: { offset?: number; limit?: number }): AsyncIterable<Buffer> | undefined {
+    if (media === undefined || (media as { className?: string }).className !== "MessageMediaDocument") {
       return undefined;
     }
-    this.calls.push("iterMediaChunks:" + message.id);
-    return chunkIterable(this.chunks);
+    this.calls.push("iterMediaChunks:" + (options?.offset ?? 0));
+    const flat = Buffer.concat(this.chunks);
+    const slice = flat.subarray(Math.min(options?.offset ?? 0, flat.length));
+    return chunkIterable(slice.length > 0 ? [slice] : []);
   }
 }
 
@@ -857,7 +859,7 @@ test("archive console blockwords are case-insensitive and cover new writes", asy
   }
 });
 
-test("archive console streams live video progressively with range support and cache reuse", async () => {
+test("archive console streams live video directly from telegram with byte-range support", async () => {
   const chunks = [Buffer.from("0123456789"), Buffer.from("abcdefghij")];
   const h = await harness({ session: true, seedVideo: true, chunks, message: videoMessage(6, 20) });
   try {
@@ -867,18 +869,23 @@ test("archive console streams live video progressively with range support and ca
     assert.equal(full.headers["content-length"], "20");
     assert.equal(full.headers["accept-ranges"], "bytes");
     assert.equal(full.rawPayload.toString(), "0123456789abcdefghij");
-    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:0"]);
 
     const range = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live", headers: { range: "bytes=5-9" } });
     assert.equal(range.statusCode, 206);
     assert.equal(range.headers["content-range"], "bytes 5-9/20");
     assert.equal(range.rawPayload.toString(), "56789");
-    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:0", "getMessages:6", "iterMediaChunks:5"]);
 
     const suffix = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live", headers: { range: "bytes=-5" } });
     assert.equal(suffix.statusCode, 206);
     assert.equal(suffix.headers["content-range"], "bytes 15-19/20");
     assert.equal(suffix.rawPayload.toString(), "fghij");
+    assert.deepEqual(h.client.calls, [
+      "getMessages:6", "iterMediaChunks:0",
+      "getMessages:6", "iterMediaChunks:5",
+      "getMessages:6", "iterMediaChunks:15"
+    ]);
 
     const bad = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live", headers: { range: "bytes=99-" } });
     assert.equal(bad.statusCode, 416);
@@ -887,7 +894,6 @@ test("archive console streams live video progressively with range support and ca
     const download = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live?download=1" });
     assert.equal(download.statusCode, 200);
     assert.equal(download.headers["content-disposition"], 'attachment; filename="clip.mp4"');
-    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
   } finally {
     await h.close();
   }
@@ -909,7 +915,7 @@ test("archive console streams video by message row without stored media", async 
     assert.equal(full.headers["content-type"], "video/mp4");
     assert.equal(full.headers["content-length"], "10");
     assert.equal(full.rawPayload.toString(), "0123456789");
-    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:6"]);
+    assert.deepEqual(h.client.calls, ["getMessages:6", "iterMediaChunks:0"]);
 
     const download = await h.server.inject({ method: "GET", url: "/api/messages/6/thumb?size=full&download=1" });
     assert.equal(download.headers["content-disposition"], 'attachment; filename="6.mp4"');

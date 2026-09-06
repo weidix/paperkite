@@ -154,6 +154,9 @@ importers:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
+      big-integer:
+        specifier: ^1.6.52
+        version: 1.6.52
       fastify:
         specifier: ^5.12.1
         version: 5.12.1
