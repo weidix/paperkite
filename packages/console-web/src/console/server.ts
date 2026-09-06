@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fastify from "fastify";
 import type { Socket } from "node:net";
-import type { ActionSpecInput, FlowPatch, RuntimeControl, RuntimeLogger } from "@paperkite/sdk";
+import type { ActionSpecInput, FlowPatch, RuntimeControl, RuntimeEvent, RuntimeLogger } from "@paperkite/sdk";
 import { HttpError, isHttpError } from "./errors.js";
 import { tailFile } from "./logs.js";
+
+const MAX_BUFFERED_EVENTS = 2000;
 
 export interface RuntimeConsoleServerOptions {
   readonly logger: RuntimeLogger;
@@ -15,7 +17,15 @@ export function createRuntimeConsoleServer(
 ): FastifyInstance {
   const server = fastify({ logger: false });
   const liveSockets = new Set<Socket>();
+  const bufferedEvents: RuntimeEvent[] = [];
+  const unsubscribeBuffer = control.subscribe((event) => {
+    bufferedEvents.push(event);
+    if (bufferedEvents.length > MAX_BUFFERED_EVENTS) {
+      bufferedEvents.splice(0, bufferedEvents.length - MAX_BUFFERED_EVENTS);
+    }
+  });
   server.addHook("onClose", (_instance, done) => {
+    unsubscribeBuffer();
     for (const socket of liveSockets) socket.destroy();
     liveSockets.clear();
     releaseIdleConnections(server);
@@ -26,7 +36,7 @@ export function createRuntimeConsoleServer(
     if (status >= 500) options.logger.error("runtime console request failed", error);
     if (!reply.sent) return reply.code(status).send({ error: error instanceof Error ? error.message : String(error) });
   });
-  registerRoutes(server, control, options.logger, liveSockets);
+  registerRoutes(server, control, options.logger, liveSockets, bufferedEvents);
   return server;
 }
 
@@ -34,7 +44,8 @@ function registerRoutes(
   server: FastifyInstance,
   control: RuntimeControl,
   logger: RuntimeLogger,
-  liveSockets: Set<Socket>
+  liveSockets: Set<Socket>,
+  bufferedEvents: RuntimeEvent[]
 ): void {
   server.get("/api/snapshot", async () => control.snapshot);
 
@@ -56,7 +67,9 @@ function registerRoutes(
     }
   });
 
-  server.get("/api/events", async (request, reply) => streamEvents(request, reply, control, liveSockets));
+  server.get("/api/events", async (request, reply) =>
+    streamEvents(request, reply, control, liveSockets, bufferedEvents)
+  );
 
   server.post<{ Body: { spec?: ActionSpecInput } }>("/api/action/run", async (request, reply) => {
     try {
@@ -150,7 +163,8 @@ async function streamEvents(
   request: FastifyRequest,
   reply: FastifyReply,
   control: RuntimeControl,
-  liveSockets: Set<Socket>
+  liveSockets: Set<Socket>,
+  bufferedEvents: RuntimeEvent[]
 ): Promise<void> {
   reply.hijack();
   const raw = reply.raw;
@@ -158,6 +172,7 @@ async function streamEvents(
   if (socket) liveSockets.add(socket);
   raw.writeHead(200, EVENT_HEADERS);
   raw.write("retry: 3000\n\n");
+  for (const event of bufferedEvents) raw.write(`data: ${JSON.stringify(event)}\n\n`);
   const unsubscribe = control.subscribe((event) => {
     raw.write(`data: ${JSON.stringify(event)}\n\n`);
   });

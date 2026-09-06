@@ -31,6 +31,7 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
   runtime: RuntimeControl;
   listeners: RuntimeEventListener[];
   calls: string[];
+  emit: (event: RuntimeEvent) => void;
 } {
   const listeners: RuntimeEventListener[] = [];
   const calls: string[] = [];
@@ -94,7 +95,14 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       };
     }
   };
-  return { runtime, listeners, calls };
+  return {
+    runtime,
+    listeners,
+    calls,
+    emit(event) {
+      for (const listener of [...listeners]) listener(event);
+    }
+  };
 }
 
 test("runtime console exposes snapshot, plugins, and control operations", async () => {
@@ -216,7 +224,7 @@ test("runtime console accepts bodyless posts and normalizes parser errors", asyn
 });
 
 test("runtime console streams runtime events over SSE and unsubscribes on disconnect", async () => {
-  const { runtime, listeners } = stubRuntime();
+  const { runtime, listeners, emit } = stubRuntime();
   const server = createRuntimeConsoleServer(runtime, { logger });
   await server.listen({ host: "127.0.0.1", port: 0 });
   const address = server.server.address();
@@ -227,7 +235,7 @@ test("runtime console streams runtime events over SSE and unsubscribes on discon
     const response = await fetch(`${base}/api/events`, { signal: controller.signal });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "text/event-stream");
-    assert.equal(listeners.length, 1);
+    assert.equal(listeners.length, 2);
 
     const reader = response.body?.getReader();
     assert.ok(reader);
@@ -240,7 +248,7 @@ test("runtime console streams runtime events over SSE and unsubscribes on discon
       durationMs: 42,
       at: "2026-09-02T00:00:00.000Z"
     };
-    listeners[0]?.(event);
+    emit(event);
 
     const decoder = new TextDecoder();
     let buffer = "";
@@ -252,6 +260,60 @@ test("runtime console streams runtime events over SSE and unsubscribes on discon
     }
     assert.ok(buffer.includes('"action.finished"'), buffer);
     assert.ok(buffer.includes('"notifications.bark"'), buffer);
+  } finally {
+    controller.abort();
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    await server.close();
+    assert.equal(listeners.length, 0);
+  }
+});
+
+test("runtime console replays events buffered before the connection opens", async () => {
+  const { runtime, listeners, emit } = stubRuntime();
+  const server = createRuntimeConsoleServer(runtime, { logger });
+  await server.listen({ host: "127.0.0.1", port: 0 });
+  const address = server.server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}`;
+  const controller = new AbortController();
+  const early: RuntimeEvent = {
+    type: "schedule.fired",
+    id: "daily",
+    cron: "0 9 * * *",
+    at: "2026-09-02T08:00:00.000Z"
+  };
+  emit(early);
+  const live: RuntimeEvent = {
+    type: "config.reloaded",
+    ok: true,
+    at: "2026-09-02T09:00:00.000Z"
+  };
+  try {
+    const response = await fetch(`${base}/api/events`, { signal: controller.signal });
+    assert.equal(response.status, 200);
+    assert.equal(listeners.length, 2);
+
+    const reader = response.body?.getReader();
+    assert.ok(reader);
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes('"schedule.fired"')) break;
+    }
+    assert.ok(buffer.includes('"schedule.fired"'), buffer);
+    assert.ok(buffer.includes('"daily"'), buffer);
+
+    emit(live);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes('"config.reloaded"')) break;
+    }
+    assert.ok(buffer.includes('"config.reloaded"'), buffer);
   } finally {
     controller.abort();
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));

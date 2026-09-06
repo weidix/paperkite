@@ -6,7 +6,7 @@ export interface EventEntry {
   readonly event: RuntimeEvent;
 }
 
-const MAX_EVENTS = 600;
+const MAX_EVENTS = 2000;
 const POLL_INTERVAL_MS = 6_000;
 const REFRESH_DEBOUNCE_MS = 400;
 
