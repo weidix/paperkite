@@ -215,6 +215,27 @@ export interface BlockwordState {
 
 export type BlockwordAddResult = "added" | "exists" | "invalid";
 
+/** 被屏蔽用户：以 sender_id 精确匹配消息行，附展示信息供管理界面使用。 */
+export interface BlockedUserInfo {
+  readonly userId: string;
+  readonly name?: string;
+  readonly username?: string;
+}
+
+export interface BlockedUserInput {
+  readonly userId: string;
+  readonly name?: string;
+  readonly username?: string;
+}
+
+/** 屏蔽用户快照：名单与内存缓存版本号。 */
+export interface BlockedUserState {
+  readonly users: readonly BlockedUserInfo[];
+  readonly version: number;
+}
+
+export type BlockedUserAddResult = "added" | "exists" | "invalid";
+
 export interface ArchiveStore {
   init(): Promise<void>;
   close(): Promise<void>;
@@ -240,8 +261,14 @@ export interface ArchiveStore {
   listBlockwords(): Promise<BlockwordState>;
   /** 写透缓存：先落库再更新内存缓存，并同步三条消息的 blocked 标志。 */
   addBlockword(word: string): Promise<BlockwordAddResult>;
-  /** 写透缓存；删除后全量重算 blocked 标志。 */
+  /** 写透缓存；删除后仅重算命中被删词的行。 */
   removeBlockword(word: string): Promise<boolean>;
+  /** 屏蔽用户内存缓存快照，读路径不触表。 */
+  listBlockedUsers(): Promise<BlockedUserState>;
+  /** 写透缓存：先落库再更新内存缓存，并同步 sender 命中行的 blocked 标志。 */
+  addBlockedUser(input: BlockedUserInput): Promise<BlockedUserAddResult>;
+  /** 写透缓存；删除后仅重算发送者为被删用户的行。 */
+  removeBlockedUser(userId: string): Promise<boolean>;
 }
 
 export function normalizeLimit(value: number | undefined): number {
@@ -289,6 +316,15 @@ export const BLOCKWORD_MAX_LENGTH = 64;
 export function normalizeBlockword(value: string): string | undefined {
   const text = value.trim().toLowerCase();
   if (!text || text.length > BLOCKWORD_MAX_LENGTH) return undefined;
+  return text;
+}
+
+export const BLOCKED_USER_MAX_LENGTH = 64;
+
+/** 屏蔽用户 ID 归一化：裁剪；空串或超长返回 undefined。 */
+export function normalizeUserId(value: string): string | undefined {
+  const text = value.trim();
+  if (!text || text.length > BLOCKED_USER_MAX_LENGTH) return undefined;
   return text;
 }
 

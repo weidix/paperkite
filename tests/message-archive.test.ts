@@ -103,6 +103,9 @@ class CountingStore implements ArchiveStore {
   listBlockwords() { return this.inner.listBlockwords(); }
   addBlockword(word: string) { return this.inner.addBlockword(word); }
   removeBlockword(word: string) { return this.inner.removeBlockword(word); }
+  listBlockedUsers() { return this.inner.listBlockedUsers(); }
+  addBlockedUser(input: Parameters<ArchiveStore["addBlockedUser"]>[0]) { return this.inner.addBlockedUser(input); }
+  removeBlockedUser(userId: string) { return this.inner.removeBlockedUser(userId); }
 }
 
 interface Harness {

@@ -6,6 +6,10 @@ import {
   type ArchiveSearchResult,
   type ArchiveStore,
   type BatchResult,
+  type BlockedUserAddResult,
+  type BlockedUserInfo,
+  type BlockedUserInput,
+  type BlockedUserState,
   type BlockwordAddResult,
   type BlockwordState,
   type ChatLedgerRow,
@@ -25,6 +29,7 @@ import {
   normalizeOffset,
   normalizeRowId,
   normalizeTimeMode,
+  normalizeUserId,
   paramPlaceholders,
   splitTerms,
   toIsoDate,
@@ -40,6 +45,9 @@ export class PostgresArchiveStore implements ArchiveStore {
   /** 屏蔽词内存缓存（小写归一）；读路径条件固定为 blocked = FALSE，与词数无关。 */
   private blockwords: readonly string[] = [];
   private blockwordsVersion = 0;
+  /** 屏蔽用户内存缓存（sender_id 精确匹配）。 */
+  private blockedUsers: readonly BlockedUserInfo[] = [];
+  private blockedUsersVersion = 0;
 
   constructor(readonly url: string, schema = "public") {
     if (!SCHEMA_PATTERN.test(schema)) throw new Error(`invalid schema name: ${schema}`);
@@ -129,12 +137,23 @@ export class PostgresArchiveStore implements ArchiveStore {
           word TEXT PRIMARY KEY,
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS ${this.table("blocked_users")} (
+          user_id TEXT PRIMARY KEY,
+          name TEXT,
+          username TEXT,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
       `);
       await this.ensureBlockedColumn(client);
+      await this.ensureBlockedIndexes(client);
       const words = await client.query(
         `SELECT word FROM ${this.table("blockwords")} ORDER BY word`
       );
       this.blockwords = words.rows.map((row) => String(row.word));
+      const users = await client.query(
+        `SELECT user_id, name, username FROM ${this.table("blocked_users")} ORDER BY user_id`
+      );
+      this.blockedUsers = users.rows.map((row) => toBlockedUserInfo(row));
     } finally {
       client.release();
     }
@@ -152,6 +171,18 @@ export class PostgresArchiveStore implements ArchiveStore {
         `ALTER TABLE ${this.table("messages")} ADD COLUMN blocked BOOLEAN NOT NULL DEFAULT FALSE`
       );
     }
+  }
+
+  /** blocked 标志维护的部分索引：置位只扫未屏蔽行，解锁只扫已屏蔽行。 */
+  private async ensureBlockedIndexes(client: PoolClient): Promise<void> {
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_messages_blocked_zero
+         ON ${this.table("messages")} (blocked) WHERE blocked = FALSE`
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_messages_blocked_one
+         ON ${this.table("messages")} (blocked) WHERE blocked = TRUE`
+    );
   }
 
   async close(): Promise<void> {
@@ -263,7 +294,7 @@ export class PostgresArchiveStore implements ArchiveStore {
           row.mediaType ?? null,
           row.mediaPath ?? null,
           new Date().toISOString(),
-          matchesBlockword(row.text, this.blockwords)
+          blockedOf(row, this.blockwords, this.blockedUsers)
         );
       }
       const inserted = await client.query(
@@ -331,7 +362,7 @@ export class PostgresArchiveStore implements ArchiveStore {
         await client.query("ROLLBACK");
         return "exists";
       }
-      await this.markBlockedMatches(client, normalized);
+      await this.markBlockwordMatches(client, normalized);
       this.blockwords = [...this.blockwords, normalized];
       this.blockwordsVersion += 1;
       await client.query("COMMIT");
@@ -359,7 +390,7 @@ export class PostgresArchiveStore implements ArchiveStore {
         return false;
       }
       const next = this.blockwords.filter((item) => item !== normalized);
-      await this.rebuildBlocked(client, next);
+      await this.unmarkBlockwordMatches(client, normalized, next);
       this.blockwords = next;
       this.blockwordsVersion += 1;
       await client.query("COMMIT");
@@ -372,26 +403,146 @@ export class PostgresArchiveStore implements ArchiveStore {
     }
   }
 
-  /** 增量置位：只扫新词的命中，成本与词数无关。 */
-  private async markBlockedMatches(client: PoolClient, word: string): Promise<void> {
+  async listBlockedUsers(): Promise<BlockedUserState> {
+    return { users: [...this.blockedUsers], version: this.blockedUsersVersion };
+  }
+
+  async addBlockedUser(input: BlockedUserInput): Promise<BlockedUserAddResult> {
+    const userId = normalizeUserId(input.userId);
+    if (userId === undefined) return "invalid";
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `INSERT INTO ${this.table("blocked_users")} (user_id, name, username) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [userId, input.name?.trim() || null, input.username?.trim() || null]
+      );
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return "exists";
+      }
+      await this.markBlockedUserMatches(client, userId);
+      this.blockedUsers = [...this.blockedUsers, toBlockedUserInfo({
+        user_id: userId,
+        name: input.name?.trim() || null,
+        username: input.username?.trim() || null
+      })];
+      this.blockedUsersVersion += 1;
+      await client.query("COMMIT");
+      return "added";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async removeBlockedUser(userId: string): Promise<boolean> {
+    const normalized = normalizeUserId(userId);
+    if (normalized === undefined) return false;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `DELETE FROM ${this.table("blocked_users")} WHERE user_id = $1`,
+        [normalized]
+      );
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const next = this.blockedUsers.filter((user) => user.userId !== normalized);
+      await this.unmarkBlockedUserMatches(client, normalized, next);
+      this.blockedUsers = next;
+      this.blockedUsersVersion += 1;
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** 增量置位：只置未屏蔽行中命中新词的行的标志。 */
+  private async markBlockwordMatches(client: PoolClient, word: string): Promise<void> {
     await client.query(
-      `UPDATE ${this.table("messages")}
-          SET blocked = TRUE
-        WHERE blocked = FALSE AND strpos(lower(COALESCE(text, '')), $1) > 0`,
+      `UPDATE ${this.table("messages")} SET blocked = TRUE
+        WHERE id IN (
+          SELECT id FROM ${this.table("messages")}
+           WHERE blocked = FALSE AND strpos(lower(COALESCE(text, '')), $1) > 0
+        )`,
       [word]
     );
   }
 
-  /** 删词后全量重算：清零后按剩余词表逐词置位（一次性成本，事务内调用）。 */
-  private async rebuildBlocked(client: PoolClient, words: readonly string[]): Promise<void> {
-    await client.query(`UPDATE ${this.table("messages")} SET blocked = FALSE`);
-    if (!words.length) return;
-    const condition = words
-      .map((_, index) => `strpos(lower(COALESCE(text, '')), $${index + 1}) > 0`)
-      .join(" OR ");
+  /** 增量解锁：只重算已屏蔽且命中被删词的行，其余行不受影响。 */
+  private async unmarkBlockwordMatches(
+    client: PoolClient,
+    word: string,
+    remaining: readonly string[]
+  ): Promise<void> {
+    const holds = [
+      ...remaining.map((_, index) => `strpos(lower(COALESCE(text, '')), $${index + 2}) > 0`),
+      ...this.blockedUsers.map((_, index) => `COALESCE(sender_id::text, '') = $${remaining.length + index + 2}`)
+    ];
+    const values = [...remaining, ...this.blockedUsers.map((user) => user.userId)];
+    await this.runUnblock(
+      client,
+      `strpos(lower(COALESCE(text, '')), $1) > 0`,
+      word,
+      holds,
+      values
+    );
+  }
+
+  /** 增量置位：只置未屏蔽行中发送者为新用户的行的标志。 */
+  private async markBlockedUserMatches(client: PoolClient, userId: string): Promise<void> {
     await client.query(
-      `UPDATE ${this.table("messages")} SET blocked = TRUE WHERE ${condition}`,
-      [...words]
+      `UPDATE ${this.table("messages")} SET blocked = TRUE
+        WHERE id IN (
+          SELECT id FROM ${this.table("messages")}
+           WHERE blocked = FALSE AND COALESCE(sender_id::text, '') = $1
+        )`,
+      [userId]
+    );
+  }
+
+  /** 增量解锁：只重算已屏蔽且发送者为被删用户的行。 */
+  private async unmarkBlockedUserMatches(
+    client: PoolClient,
+    userId: string,
+    remaining: readonly BlockedUserInfo[]
+  ): Promise<void> {
+    const holds = [
+      ...remaining.map((_, index) => `COALESCE(sender_id::text, '') = $${index + 2}`),
+      ...this.blockwords.map((_, index) =>
+        `strpos(lower(COALESCE(text, '')), $${remaining.length + index + 2}) > 0`)
+    ];
+    const values = [...remaining.map((user) => user.userId), ...this.blockwords];
+    await this.runUnblock(client, "COALESCE(sender_id::text, '') = $1", userId, holds, values);
+  }
+
+  /**
+   * 增量解锁执行：match 命中已屏蔽行，剩余规则（holds）全不命中时解锁。
+   * 命中行先经子查询物化，避免 UPDATE 边扫索引边改 blocked 时漏行。
+   */
+  private async runUnblock(
+    client: PoolClient,
+    match: string,
+    matchValue: string,
+    holds: readonly string[],
+    holdValues: readonly (string | number)[]
+  ): Promise<void> {
+    const inner = holds.length
+      ? `SELECT id FROM ${this.table("messages")} WHERE blocked = TRUE AND ${match} AND NOT (${holds.join(" OR ")})`
+      : `SELECT id FROM ${this.table("messages")} WHERE blocked = TRUE AND ${match}`;
+    await client.query(
+      `UPDATE ${this.table("messages")} SET blocked = FALSE WHERE id IN (${inner})`,
+      [matchValue, ...holdValues]
     );
   }
 
@@ -675,6 +826,7 @@ function groupFirstCondition(messages: string): string {
     OR NOT EXISTS (
       SELECT 1 FROM ${messages} g
        WHERE g.chat_id = m.chat_id AND g.grouped_id = m.grouped_id
+         AND g.blocked = FALSE
          AND (g.date < m.date OR (g.date = m.date AND g.id < m.id))
     )
   )`;
@@ -748,7 +900,7 @@ function buildSearchWhere(
     : "";
   const matches = row ? ` AND (${row}${member})` : "";
   return {
-    where: `WHERE ${groupFirstCondition(messages)}${matches}`,
+    where: `WHERE ${groupFirstCondition(messages)} AND m.blocked = FALSE${matches}`,
     values: [...rowValues, ...memberValues]
   };
 }
@@ -887,6 +1039,20 @@ function matchesBlockword(text: string | undefined, words: readonly string[]): b
   if (text === undefined || text === "") return false;
   const lower = text.toLowerCase();
   return words.some((word) => lower.includes(word));
+}
+
+/** 新落库消息是否屏蔽：命中任一屏蔽词，或发送者在屏蔽用户名单内。 */
+function blockedOf(row: MessageRow, words: readonly string[], users: readonly BlockedUserInfo[]): boolean {
+  if (matchesBlockword(row.text, words)) return true;
+  return row.senderId !== undefined && users.some((user) => user.userId === row.senderId);
+}
+
+function toBlockedUserInfo(row: QueryResultRow): BlockedUserInfo {
+  return {
+    userId: String(row.user_id),
+    name: optionalString(row.name),
+    username: optionalString(row.username)
+  };
 }
 
 function optionalString(value: unknown): string | undefined {

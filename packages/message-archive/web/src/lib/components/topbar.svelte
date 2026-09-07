@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Menu, Moon, ShieldBan, Sun } from "lucide-svelte";
-  import { openBlockwords, themeStore, toggleTheme, viewStore } from "$lib/state.svelte";
+  import { openBlocks, themeStore, toggleTheme, viewStore } from "$lib/state.svelte";
   import { fetchState, type ArchiveState } from "$lib/api";
   import Button from "$lib/components/button.svelte";
 
@@ -38,9 +38,9 @@
     <Button
       variant="ghost"
       size="icon"
-      aria-label="全局屏蔽词"
-      title="全局屏蔽词"
-      onclick={openBlockwords}
+      aria-label="屏蔽管理"
+      title="屏蔽管理"
+      onclick={openBlocks}
     >
       <ShieldBan class="size-4" aria-hidden="true" />
     </Button>

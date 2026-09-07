@@ -201,14 +201,34 @@ function releaseLightboxSrc(): void {
   if (src.startsWith("blob:")) URL.revokeObjectURL(src);
 }
 
-export const blockwordsOpen = $state({ open: false });
+export const blocksOpen = $state({ open: false });
 
-export function openBlockwords(): void {
-  blockwordsOpen.open = true;
+export function openBlocks(): void {
+  blocksOpen.open = true;
 }
 
-export function closeBlockwords(): void {
-  blockwordsOpen.open = false;
+export function closeBlocks(): void {
+  blocksOpen.open = false;
+}
+
+export const toast = $state<{ text: string }>({ text: "" });
+
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** 轻提示：自动消失，重复调用重置计时。 */
+export function showToast(text: string): void {
+  toast.text = text;
+  if (toastTimer !== undefined) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.text = "";
+  }, 2600);
+}
+
+/** 屏蔽名单变更信号：检索列表与会话清单据此刷新可见集。 */
+export const blockBump = $state({ value: 0 });
+
+export function bumpBlocks(): void {
+  blockBump.value += 1;
 }
 
 export const pendingSearchFocus = $state({ armed: false });

@@ -62,11 +62,13 @@ function registerRoutes(
 
   server.get("/api/state", async () => {
     const blockwords = await store.listBlockwords();
+    const blockedUsers = await store.listBlockedUsers();
     return {
       backend: options.backend ?? "sqlite",
       session: session ?? null,
       mediaRoot: mediaRoot ?? null,
-      blockwords: { version: blockwords.version, count: blockwords.words.length }
+      blockwords: { version: blockwords.version, count: blockwords.words.length },
+      blockedUsers: { version: blockedUsers.version, count: blockedUsers.users.length }
     };
   });
 
@@ -86,6 +88,31 @@ function registerRoutes(
     const removed = await store.removeBlockword(request.params.word);
     if (!removed) throw new HttpError(404, "屏蔽词不存在");
     return store.listBlockwords();
+  });
+
+  server.get("/api/blockedusers", async () => store.listBlockedUsers());
+
+  server.post<{ Body: { userId?: unknown; name?: unknown; username?: unknown } }>(
+    "/api/blockedusers",
+    async (request, reply) => {
+      const { userId, name, username } = request.body ?? {};
+      if (typeof userId !== "string") throw new HttpError(400, "用户 ID 必须是字符串");
+      const result = await store.addBlockedUser({
+        userId,
+        ...(typeof name === "string" ? { name } : {}),
+        ...(typeof username === "string" ? { username } : {})
+      });
+      if (result === "invalid") throw new HttpError(400, "用户 ID 需为 1-64 字符");
+      if (result === "exists") throw new HttpError(409, "该用户已在屏蔽名单");
+      reply.code(201);
+      return store.listBlockedUsers();
+    }
+  );
+
+  server.delete<{ Params: { id: string } }>("/api/blockedusers/:id", async (request) => {
+    const removed = await store.removeBlockedUser(request.params.id);
+    if (!removed) throw new HttpError(404, "该用户不在屏蔽名单");
+    return store.listBlockedUsers();
   });
 
   server.get<{

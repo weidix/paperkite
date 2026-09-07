@@ -688,7 +688,13 @@ test("archive console service boots over http and stops on abort", async () => {
   const base = `http://127.0.0.1:${port}`;
   await waitForHttp(base + "/api/state");
   const state = await (await fetch(base + "/api/state")).json();
-  assert.deepEqual(state, { backend: "sqlite", session: null, mediaRoot: null, blockwords: { version: 0, count: 0 } });
+  assert.deepEqual(state, {
+    backend: "sqlite",
+    session: null,
+    mediaRoot: null,
+    blockwords: { version: 0, count: 0 },
+    blockedUsers: { version: 0, count: 0 }
+  });
   const page = await (await fetch(base + "/")).text();
   assert.match(page, /归档台/);
 
@@ -824,6 +830,52 @@ test("archive console blockwords drop album members and block their media", asyn
   }
 });
 
+test("archive console album with blocked first member lists the earliest visible member", async () => {
+  const h = await harness();
+  try {
+    await h.store.saveBatch(
+      [
+        {
+          messageId: 21, chatId: "100", chatTitle: "测试群", groupedId: "album-b", date: "2025-03-07T10:00:00.000Z",
+          text: "相册首图含可疑词", messageType: "photo", hasMedia: true, mediaType: "photo"
+        },
+        {
+          messageId: 22, chatId: "100", chatTitle: "测试群", groupedId: "album-b", date: "2025-03-07T10:00:01.000Z",
+          text: "相册次图", messageType: "photo", hasMedia: true, mediaType: "photo"
+        },
+        {
+          messageId: 23, chatId: "100", chatTitle: "测试群", groupedId: "album-b", date: "2025-03-07T10:00:02.000Z",
+          text: "相册第三图", messageType: "photo", hasMedia: true, mediaType: "photo"
+        }
+      ],
+      [
+        { messageId: 21, chatId: "100", mediaType: "photo", fileName: "b1.jpg", filePath: "/tmp/b1.jpg" },
+        { messageId: 22, chatId: "100", mediaType: "photo", fileName: "b2.jpg", filePath: "/tmp/b2.jpg" },
+        { messageId: 23, chatId: "100", mediaType: "photo", fileName: "b3.jpg", filePath: "/tmp/b3.jpg" }
+      ]
+    );
+    let res = await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "可疑词" } });
+    assert.equal(res.statusCode, 201);
+
+    res = await h.server.inject({ method: "GET", url: "/api/search" });
+    const album = res.json().items.find((item: { kind: string }) => item.kind === "album");
+    assert.ok(album !== undefined);
+    const memberIds = (album.rows as { rowId: string }[]).map((row) => row.rowId);
+    assert.ok(!memberIds.includes("6"), "blocked first member must not be listed");
+    assert.ok(memberIds.includes("7") && memberIds.includes("8"), "visible members still listed");
+
+    const listed = await h.server.inject({ method: "GET", url: `/api/messages/${album.rowId}/context?before=2&after=2` });
+    assert.equal(listed.statusCode, 200);
+    assert.equal(listed.json().anchor.kind, "album");
+    assert.equal(listed.json().anchor.rows.length, 2);
+
+    const blockedFirst = await h.server.inject({ method: "GET", url: "/api/messages/6" });
+    assert.equal(blockedFirst.statusCode, 404);
+  } finally {
+    await h.close();
+  }
+});
+
 test("archive console blockwords are case-insensitive and cover new writes", async () => {
   const h = await harness();
   try {
@@ -947,6 +999,101 @@ test("archive console streaming live media reports 410 when the message is gone"
     const res = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live" });
     assert.equal(res.statusCode, 410);
     assert.equal(res.json().error, "消息已从 Telegram 删除或会话无法访问");
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console blocked users hide messages from that sender", async () => {
+  const h = await harness();
+  try {
+    let res = await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "7" } });
+    assert.equal(res.statusCode, 201);
+    let body = res.json();
+    assert.deepEqual(body.users, [{ userId: "7" }]);
+    assert.equal(body.version, 1);
+
+    res = await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "7" } });
+    assert.equal(res.statusCode, 409);
+    res = await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "   " } });
+    assert.equal(res.statusCode, 400);
+    res = await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "x".repeat(65) } });
+    assert.equal(res.statusCode, 400);
+    res = await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: 7 } });
+    assert.equal(res.statusCode, 400);
+
+    const all = await h.server.inject({ method: "GET", url: "/api/search" });
+    body = all.json();
+    assert.equal(body.total, 3);
+    assert.equal(body.totalMessages, 3);
+
+    res = await h.server.inject({ method: "GET", url: "/api/messages/1" });
+    assert.equal(res.statusCode, 404);
+    res = await h.server.inject({ method: "GET", url: "/api/messages/1/context" });
+    assert.equal(res.statusCode, 404);
+
+    const chats = await h.server.inject({ method: "GET", url: "/api/chats" });
+    const ledger = chats.json().chats as { chatId: string; count: number; lastText?: string }[];
+    assert.equal(ledger.find((item) => item.chatId === "100")?.count, 2);
+    assert.equal(ledger.find((item) => item.chatId === "100")?.lastText, "维护");
+
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockedusers/7" });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().version, 2);
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockedusers/7" });
+    assert.equal(res.statusCode, 404);
+
+    const restored = await h.server.inject({ method: "GET", url: "/api/search" });
+    assert.equal(restored.json().total, 5);
+    const state = await h.server.inject({ method: "GET", url: "/api/state" });
+    assert.equal(state.json().blockedUsers.count, 0);
+    assert.equal(state.json().blockedUsers.version, 2);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console blocked users and blockwords keep each other's rows blocked", async () => {
+  const h = await harness();
+  try {
+    await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "7", name: "测", username: "tester" } });
+    let res = await h.server.inject({ method: "GET", url: "/api/blockedusers" });
+    assert.deepEqual(res.json().users, [{ userId: "7", name: "测", username: "tester" }]);
+
+    await h.server.inject({ method: "POST", url: "/api/blockwords", payload: { word: "维护" } });
+    res = await h.server.inject({ method: "GET", url: "/api/search" });
+    assert.equal(res.json().total, 1);
+    assert.equal(res.json().items[0].record.text, "好的收到");
+
+    // 删用户不影响词命中的行
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockedusers/7" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/search" });
+    assert.equal(res.json().total, 3);
+    const visible = res.json().items.map((item: { record: { text: string } }) => item.record.text).sort();
+    assert.deepEqual(visible, ["你好，今天天气不错", "好的收到", "附上截图看看效果"]);
+
+    // 删词不影响用户命中的行
+    await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "7" } });
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockwords/%E7%BB%B4%E6%8A%A4" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/search" });
+    assert.equal(res.json().total, 3);
+    const stillHidden = res.json().items.map((item: { record: { text: string } }) => item.record.text).sort();
+    assert.deepEqual(stillHidden, ["好的收到", "维护", "维护通告"]);
+
+    // 新落库行按当前名单即时判定
+    await h.store.saveBatch(
+      [{ messageId: 11, chatId: "100", chatTitle: "测试群", date: "2025-03-06T09:00:00.000Z", text: "新消息", messageType: "text", hasMedia: false, senderId: "7" }],
+      []
+    );
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=%E6%96%B0%E6%B6%88%E6%81%AF" });
+    assert.equal(res.json().total, 0);
+
+    res = await h.server.inject({ method: "DELETE", url: "/api/blockedusers/7" });
+    assert.equal(res.statusCode, 200);
+    res = await h.server.inject({ method: "GET", url: "/api/search?q=%E6%96%B0%E6%B6%88%E6%81%AF" });
+    assert.equal(res.json().total, 1);
   } finally {
     await h.close();
   }

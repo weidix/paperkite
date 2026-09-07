@@ -1,7 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { X } from "lucide-svelte";
-  import BlockwordsDialog from "$lib/components/blockwords-dialog.svelte";
+  import BlockDialog from "$lib/components/block-dialog.svelte";
   import ChatsRail from "$lib/components/chats-rail.svelte";
   import Lightbox from "$lib/components/lightbox.svelte";
   import Topbar from "$lib/components/topbar.svelte";
@@ -9,15 +9,16 @@
   import SearchView from "$lib/views/search-view.svelte";
   import {
     backToSearch,
-    blockwordsOpen,
+    blocksOpen,
     chats,
-    closeBlockwords,
+    closeBlocks,
     closeLightbox,
     initRouter,
     lightbox,
     navigate,
     requestSearchFocus,
     themeStore,
+    toast,
     viewStore
   } from "$lib/state.svelte";
   import { fmtCount } from "$lib/format";
@@ -44,8 +45,8 @@
         requestSearchFocus();
       }
       if (event.key === "Escape") {
-        if (blockwordsOpen.open) {
-          closeBlockwords();
+        if (blocksOpen.open) {
+          closeBlocks();
         } else if (lightbox.open) {
           closeLightbox();
         } else if (viewStore.current.kind === "message") {
@@ -131,8 +132,16 @@
   {/if}
 </div>
 
+{#if toast.text}
+    <div class="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex justify-center animate-fade-in">
+      <p class="rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground shadow-sm">
+        {toast.text}
+      </p>
+    </div>
+  {/if}
+
 <Lightbox />
 
-{#if blockwordsOpen.open}
-  <BlockwordsDialog />
+{#if blocksOpen.open}
+  <BlockDialog />
 {/if}

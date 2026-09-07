@@ -3,7 +3,7 @@
   import { Archive, ChevronRight, Clock, Database, MessagesSquare, RefreshCw, Search, X } from "lucide-svelte";
   import { searchMessages, type SearchQuery } from "$lib/api";
   import { chatLabel, dayLabel, fmtCount, fmtTs, kindLabel, shortPeer, truncate } from "$lib/format";
-  import { chats, isEmptySearch, loadChats, navigate, pendingSearchFocus, searchCache, searchScroll, viewStore } from "$lib/state.svelte";
+  import { chats, blockBump, isEmptySearch, loadChats, navigate, pendingSearchFocus, searchCache, searchScroll, viewStore } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
   import DatePicker from "$lib/components/date-picker.svelte";
@@ -35,7 +35,14 @@
     mode = viewStore.current.mode;
   });
 
+  let lastChatBump = $state(-1);
+
   $effect(() => {
+    if (blockBump.value !== lastChatBump) {
+      lastChatBump = blockBump.value;
+      loadChats(true);
+      return;
+    }
     loadChats();
   });
 
@@ -51,13 +58,16 @@
   /** 显式提交（按钮/回车/筛选器）强制重新取回，即使条件未变。 */
   let refreshSeq = $state(0);
   let lastRefresh = $state(0);
+  /** 屏蔽名单变更信号：即使条件未变也重新取回。 */
+  let lastBump = $state(-1);
 
   $effect(() => {
     if (viewStore.current.kind !== "search") return;
     const key = isEmptySearch(viewStore.current) ? "" : queryKey();
-    if (key === lastKey && refreshSeq === lastRefresh) return;
+    if (key === lastKey && refreshSeq === lastRefresh && blockBump.value === lastBump) return;
     lastKey = key;
     lastRefresh = refreshSeq;
+    lastBump = blockBump.value;
     load();
   });
 

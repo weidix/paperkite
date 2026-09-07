@@ -3,6 +3,7 @@
   import { fmtTs, highlightSegments, senderName } from "$lib/format";
   import { fileThumbOf, openMessageLightbox } from "$lib/media";
   import { navigate } from "$lib/state.svelte";
+  import MessageMenu from "$lib/components/message-menu.svelte";
   import type { MessageRecord } from "$lib/model";
 
   let {
@@ -127,6 +128,9 @@
       </button>
     </div>
   {/if}
+  <div class="flex items-center pr-2">
+    <MessageMenu {record} />
+  </div>
   </div>
   {#if canExpandBase && (expanded || clipped)}
     <div class="flex self-start pb-2 pl-[130px]">

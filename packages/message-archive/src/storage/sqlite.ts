@@ -8,6 +8,10 @@ import {
   type ArchiveSearchResult,
   type ArchiveStore,
   type BatchResult,
+  type BlockedUserAddResult,
+  type BlockedUserInfo,
+  type BlockedUserInput,
+  type BlockedUserState,
   type BlockwordAddResult,
   type BlockwordState,
   type ChatLedgerRow,
@@ -27,6 +31,7 @@ import {
   normalizeOffset,
   normalizeRowId,
   normalizeTimeMode,
+  normalizeUserId,
   splitTerms,
   toIsoDate,
   uniqueGroupKeys
@@ -50,6 +55,7 @@ const GROUP_FIRST_CONDITION = `(
   OR NOT EXISTS (
     SELECT 1 FROM messages g
      WHERE g.chat_id = m.chat_id AND g.grouped_id = m.grouped_id
+       AND g.blocked = 0
        AND (g.date < m.date OR (g.date = m.date AND g.id < m.id))
   )
 )`;
@@ -59,6 +65,9 @@ export class SqliteArchiveStore implements ArchiveStore {
   /** 屏蔽词内存缓存（小写归一）；读路径条件固定为 blocked = 0，与词数无关。 */
   private blockwords: readonly string[] = [];
   private blockwordsVersion = 0;
+  /** 屏蔽用户内存缓存（sender_id 精确匹配）。 */
+  private blockedUsers: readonly BlockedUserInfo[] = [];
+  private blockedUsersVersion = 0;
 
   constructor(readonly file: string) {
     mkdirSync(dirname(resolve(file)), { recursive: true });
@@ -134,12 +143,23 @@ export class SqliteArchiveStore implements ArchiveStore {
         word TEXT PRIMARY KEY,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS blocked_users (
+        user_id TEXT PRIMARY KEY,
+        name TEXT,
+        username TEXT,
+        created_at TEXT NOT NULL
+      );
     `);
     this.ensureBlockedColumn();
+    this.ensureBlockedIndexes();
     this.blockwords = (this.database
       .prepare("SELECT word FROM blockwords ORDER BY word")
       .all() as readonly Record<string, unknown>[])
       .map((row) => String(row.word));
+    this.blockedUsers = (this.database
+      .prepare("SELECT user_id, name, username FROM blocked_users ORDER BY user_id")
+      .all() as readonly Record<string, unknown>[])
+      .map(toBlockedUserInfo);
   }
 
   /** 老库迁移：messages 补 blocked 标志列。 */
@@ -148,6 +168,14 @@ export class SqliteArchiveStore implements ArchiveStore {
     if (!columns.some((column) => String(column.name) === "blocked")) {
       this.database.exec("ALTER TABLE messages ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
     }
+  }
+
+  /** blocked 标志维护的部分索引：置位只扫未屏蔽行，解锁只扫已屏蔽行。 */
+  private ensureBlockedIndexes(): void {
+    this.database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_blocked_zero ON messages(blocked) WHERE blocked = 0;
+      CREATE INDEX IF NOT EXISTS idx_messages_blocked_one ON messages(blocked) WHERE blocked = 1;
+    `);
   }
 
   async close(): Promise<void> {
@@ -269,7 +297,7 @@ export class SqliteArchiveStore implements ArchiveStore {
           row.mediaType ?? null,
           row.mediaPath ?? null,
           now,
-          matchesBlockword(row.text, this.blockwords) ? 1 : 0
+          blockedOf(row, this.blockwords, this.blockedUsers) ? 1 : 0
         );
         inserted += Number(result.changes);
       }
@@ -309,7 +337,7 @@ export class SqliteArchiveStore implements ArchiveStore {
         this.database.exec("ROLLBACK");
         return "exists";
       }
-      this.markBlockedMatches(normalized);
+      this.markBlockwordMatches(normalized);
       this.blockwords = [...this.blockwords, normalized];
       this.blockwordsVersion += 1;
       this.database.exec("COMMIT");
@@ -331,7 +359,7 @@ export class SqliteArchiveStore implements ArchiveStore {
         return false;
       }
       const next = this.blockwords.filter((item) => item !== normalized);
-      this.rebuildBlocked(next);
+      this.unmarkBlockwordMatches(normalized, next);
       this.blockwords = next;
       this.blockwordsVersion += 1;
       this.database.exec("COMMIT");
@@ -342,19 +370,96 @@ export class SqliteArchiveStore implements ArchiveStore {
     }
   }
 
-  /** 增量置位：只扫新词的命中，成本与词数无关。 */
-  private markBlockedMatches(word: string): void {
-    this.database.prepare(
-      "UPDATE messages SET blocked = 1 WHERE blocked = 0 AND instr(lower(text), ?) > 0"
-    ).run(word);
+  async listBlockedUsers(): Promise<BlockedUserState> {
+    return { users: [...this.blockedUsers], version: this.blockedUsersVersion };
   }
 
-  /** 删词后全量重算：清零后按剩余词表逐词置位（一次性成本，事务内调用）。 */
-  private rebuildBlocked(words: readonly string[]): void {
-    this.database.exec("UPDATE messages SET blocked = 0");
-    if (!words.length) return;
-    const condition = words.map(() => "instr(lower(text), ?) > 0").join(" OR ");
-    this.database.prepare(`UPDATE messages SET blocked = 1 WHERE ${condition}`).run(...words);
+  async addBlockedUser(input: BlockedUserInput): Promise<BlockedUserAddResult> {
+    const userId = normalizeUserId(input.userId);
+    if (userId === undefined) return "invalid";
+    this.database.exec("BEGIN");
+    try {
+      const result = this.database.prepare(`
+        INSERT OR IGNORE INTO blocked_users (user_id, name, username, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(userId, input.name?.trim() || null, input.username?.trim() || null, new Date().toISOString());
+      if (Number(result.changes) === 0) {
+        this.database.exec("ROLLBACK");
+        return "exists";
+      }
+      this.markBlockedUserMatches(userId);
+      this.blockedUsers = [...this.blockedUsers, toBlockedUserInfo({
+        user_id: userId,
+        name: input.name?.trim() || null,
+        username: input.username?.trim() || null
+      })];
+      this.blockedUsersVersion += 1;
+      this.database.exec("COMMIT");
+      return "added";
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async removeBlockedUser(userId: string): Promise<boolean> {
+    const normalized = normalizeUserId(userId);
+    if (normalized === undefined) return false;
+    this.database.exec("BEGIN");
+    try {
+      const result = this.database.prepare("DELETE FROM blocked_users WHERE user_id = ?").run(normalized);
+      if (Number(result.changes) === 0) {
+        this.database.exec("ROLLBACK");
+        return false;
+      }
+      const next = this.blockedUsers.filter((user) => user.userId !== normalized);
+      this.unmarkBlockedUserMatches(normalized, next);
+      this.blockedUsers = next;
+      this.blockedUsersVersion += 1;
+      this.database.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** 增量置位：只置未屏蔽行中命中新词的行的标志。 */
+  private markBlockwordMatches(word: string): void {
+    this.database.prepare(`
+      UPDATE messages SET blocked = 1
+       WHERE id IN (SELECT id FROM messages WHERE blocked = 0 AND instr(lower(coalesce(text, '')), ?) > 0)
+    `).run(word);
+  }
+
+  /** 增量解锁：只重算已屏蔽且命中被删词的行，其余行不受影响。 */
+  private unmarkBlockwordMatches(word: string, remaining: readonly string[]): void {
+    const holds = [
+      ...remaining.map((item) => `instr(lower(coalesce(text, '')), ?) > 0`),
+      ...this.blockedUsers.map(() => `coalesce(sender_id, '') = ?`)
+    ];
+    const values = [...remaining, ...this.blockedUsers.map((user) => user.userId)];
+    const sql = unblockSql(`instr(lower(coalesce(text, '')), ?) > 0`, word, holds, values);
+    this.database.prepare(sql.sql).run(...sql.values);
+  }
+
+  /** 增量置位：只置未屏蔽行中发送者为新用户的行的标志。 */
+  private markBlockedUserMatches(userId: string): void {
+    this.database.prepare(`
+      UPDATE messages SET blocked = 1
+       WHERE id IN (SELECT id FROM messages WHERE blocked = 0 AND coalesce(sender_id, '') = ?)
+    `).run(userId);
+  }
+
+  /** 增量解锁：只重算已屏蔽且发送者为被删用户的行。 */
+  private unmarkBlockedUserMatches(userId: string, remaining: readonly BlockedUserInfo[]): void {
+    const holds = [
+      ...remaining.map((user) => `coalesce(sender_id, '') = ?`),
+      ...this.blockwords.map((word) => `instr(lower(coalesce(text, '')), ?) > 0`)
+    ];
+    const values = [...remaining.map((user) => user.userId), ...this.blockwords];
+    const sql = unblockSql("coalesce(sender_id, '') = ?", userId, holds, values);
+    this.database.prepare(sql.sql).run(...sql.values);
   }
 
   async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
@@ -708,7 +813,7 @@ function buildSearchWhere(
     : "";
   const matches = row ? ` AND (${row}${member})` : "";
   return {
-    where: `WHERE ${GROUP_FIRST_CONDITION}${matches}`,
+    where: `WHERE ${GROUP_FIRST_CONDITION} AND m.blocked = 0${matches}`,
     values: [...rowValues, ...memberValues]
   };
 }
@@ -778,6 +883,39 @@ function matchesBlockword(text: string | undefined, words: readonly string[]): b
   if (text === undefined || text === "") return false;
   const lower = text.toLowerCase();
   return words.some((word) => lower.includes(word));
+}
+
+/** 新落库消息是否屏蔽：命中任一屏蔽词，或发送者在屏蔽用户名单内。 */
+function blockedOf(row: MessageRow, words: readonly string[], users: readonly BlockedUserInfo[]): boolean {
+  if (matchesBlockword(row.text, words)) return true;
+  return row.senderId !== undefined && users.some((user) => user.userId === row.senderId);
+}
+
+/**
+ * 增量解锁语句：已屏蔽且命中被删实体（match/matchValue）的行，
+ * 在剩余规则（holds/values，全不命中）时解锁。
+ * 命中行先经子查询物化，避免 UPDATE 边扫部分索引边改 blocked 时漏行。
+ */
+function unblockSql(
+  match: string,
+  matchValue: string,
+  holds: readonly string[],
+  holdValues: readonly (string | number)[]
+): { sql: string; values: (string | number)[] } {
+  const not = holds.length ? ` AND NOT (${holds.join(" OR ")})` : "";
+  return {
+    sql: `UPDATE messages SET blocked = 0
+       WHERE id IN (SELECT id FROM messages WHERE blocked = 1 AND ${match}${not})`,
+    values: [matchValue, ...holdValues]
+  };
+}
+
+function toBlockedUserInfo(row: Record<string, unknown>): BlockedUserInfo {
+  return {
+    userId: String(row.user_id),
+    name: optionalString(row.name),
+    username: optionalString(row.username)
+  };
 }
 
 function optionalString(value: unknown): string | undefined {

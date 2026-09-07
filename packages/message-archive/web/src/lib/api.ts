@@ -16,11 +16,27 @@ export interface ArchiveState {
     readonly version: number;
     readonly count: number;
   };
+  readonly blockedUsers: {
+    readonly version: number;
+    readonly count: number;
+  };
 }
 
 /** 屏蔽词列表快照（服务端内存缓存，读路径不触表）。 */
 export interface BlockwordState {
   readonly words: readonly string[];
+  readonly version: number;
+}
+
+/** 屏蔽用户名单快照（带展示信息，供管理界面使用）。 */
+export interface BlockedUserInfo {
+  readonly userId: string;
+  readonly name?: string;
+  readonly username?: string;
+}
+
+export interface BlockedUserState {
+  readonly users: readonly BlockedUserInfo[];
   readonly version: number;
 }
 
@@ -134,6 +150,22 @@ export async function addBlockword(word: string): Promise<BlockwordState> {
 
 export async function removeBlockword(word: string): Promise<BlockwordState> {
   return request(`/api/blockwords/${encodeURIComponent(word)}`, { method: "DELETE" });
+}
+
+export async function fetchBlockedUsers(): Promise<BlockedUserState> {
+  return request("/api/blockedusers");
+}
+
+export async function addBlockedUser(input: BlockedUserInfo): Promise<BlockedUserState> {
+  return request("/api/blockedusers", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function removeBlockedUser(userId: string): Promise<BlockedUserState> {
+  return request(`/api/blockedusers/${encodeURIComponent(userId)}`, { method: "DELETE" });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

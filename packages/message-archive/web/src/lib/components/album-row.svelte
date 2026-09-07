@@ -3,6 +3,7 @@
   import { fmtTs, highlightSegments, senderName } from "$lib/format";
   import { fileThumbOf, openAlbumLightbox } from "$lib/media";
   import { navigate } from "$lib/state.svelte";
+  import MessageMenu from "$lib/components/message-menu.svelte";
   import type { AlbumContextEntry, MessageRecord } from "$lib/model";
 
   let {
@@ -121,6 +122,15 @@
         {#if extraMedia > 0}
           <span class="shrink-0 font-mono text-[10px] text-muted-foreground">+{extraMedia}</span>
         {/if}
+      </div>
+    {/if}
+    {#if first}
+      <div class="flex items-center pr-2">
+        <MessageMenu
+          record={first}
+          keywordSource={entry.captionText}
+          navRowId={anchor ? (entry.focusRowId ?? entry.rowId) : null}
+        />
       </div>
     {/if}
   </div>
