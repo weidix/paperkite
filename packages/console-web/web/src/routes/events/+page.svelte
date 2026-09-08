@@ -39,10 +39,10 @@
   function eventPayload(event: RuntimeEvent): unknown {
     switch (event.type) {
       case "action.started":
-        return event.payload === undefined ? undefined : { payload: event.payload };
+        return event.config === undefined ? undefined : { config: event.config };
       case "action.finished":
-        return event.error !== undefined || event.effectivePayload !== undefined
-          ? { error: event.error, effectivePayload: event.effectivePayload, skipped: event.skipped }
+        return event.error !== undefined || event.effectiveConfig !== undefined
+          ? { error: event.error, effectiveConfig: event.effectiveConfig, skipped: event.skipped }
           : undefined;
       case "service.stopped":
         return { reason: event.reason, error: event.error };
@@ -105,7 +105,7 @@
       <div class="p-0">
         {#each visible.slice().reverse() as entry (entry.seq)}
           {@const view = describeEvent(entry.event)}
-          {@const payload = eventPayload(entry.event)}
+          {@const config = eventPayload(entry.event)}
           <div class="border-b px-4 py-3 last:border-b-0">
             <button
               type="button"
@@ -144,8 +144,8 @@
                     </span>
                   {/if}
                 </div>
-                {#if payload !== undefined}
-                  <CollapsibleJson value={payload} label="详情" />
+                {#if config !== undefined}
+                  <CollapsibleJson value={config} label="详情" />
                 {/if}
               </div>
             {/if}

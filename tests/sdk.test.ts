@@ -4,17 +4,17 @@ import { Action, type ActionContext, type RuntimeLogger, Trigger, type TriggerCo
 
 const logger: RuntimeLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return logger; } };
 
-test("action hooks can transform or skip a run and payload state is isolated", async () => {
+test("action hooks can transform or skip a run and config state is isolated", async () => {
   const seen: unknown[] = [];
   class CaptureAction extends Action<Record<string, unknown>> {
     protected async run(): Promise<void> {
-      seen.push(structuredClone(this.payload));
-      this.payload.value = "changed";
+      seen.push(structuredClone(this.config));
+      this.config.value = "changed";
     }
   }
   const context: ActionContext<Record<string, unknown>> = {
     id: "capture",
-    payload: { value: "before" },
+    config: { value: "before" },
     signal: new AbortController().signal,
     logger,
     emission: undefined,
@@ -23,8 +23,8 @@ test("action hooks can transform or skip a run and payload state is isolated", a
   };
   await new CaptureAction(context).execute();
   assert.deepEqual(seen, [{ value: "after" }]);
-  assert.deepEqual(context.outcome, { skipped: false, effectivePayload: { value: "after" } });
-  assert.deepEqual(context.payload, { value: "before" });
+  assert.deepEqual(context.outcome, { skipped: false, effectiveConfig: { value: "after" } });
+  assert.deepEqual(context.config, { value: "before" });
 });
 
 test("trigger emission honours maxRuns before invoking downstream work", async () => {
@@ -38,7 +38,7 @@ test("trigger emission honours maxRuns before invoking downstream work", async (
   const context: TriggerContext<Record<string, unknown>> = {
     id: "emit",
     capability: "test.emit",
-    payload: {},
+    config: {},
     signal: new AbortController().signal,
     logger,
     maxRuns: 1,

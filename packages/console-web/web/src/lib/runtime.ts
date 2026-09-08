@@ -129,7 +129,7 @@ export interface ActionStartedEvent {
   readonly session?: string;
   readonly flow?: FlowRef;
   readonly hook?: string;
-  readonly payload?: unknown;
+  readonly config?: unknown;
   readonly at: string;
 }
 
@@ -143,7 +143,7 @@ export interface ActionFinishedEvent {
   readonly skipped: boolean;
   readonly durationMs: number;
   readonly error?: string;
-  readonly effectivePayload?: unknown;
+  readonly effectiveConfig?: unknown;
   readonly at: string;
 }
 

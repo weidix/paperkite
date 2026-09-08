@@ -511,7 +511,7 @@ export class Runtime {
     const context: TriggerContext = {
       id: definition.id,
       capability: definition.capability,
-      payload: definition.config,
+      config: definition.config,
       session: definition.session,
       signal: controller.signal,
       sessions: this.options.sessions.access(definition.session),
@@ -571,7 +571,7 @@ export class Runtime {
     const context: ServiceContext = {
       id: definition.id,
       capability: definition.capability,
-      payload: definition.config,
+      config: definition.config,
       session: definition.session,
       signal: controller.signal,
       sessions: this.options.sessions.access(definition.session),
@@ -615,7 +615,7 @@ export class Runtime {
     const hook = await loadHook(specification.hook, this.catalog.path);
     const context: ActionContext = {
       id,
-      payload: specification.config,
+      config: specification.config,
       session,
       signal,
       sessions: this.options.sessions.access(session),
@@ -635,7 +635,7 @@ export class Runtime {
       session,
       flow,
       hook: specification.hook,
-      payload: exportable(specification.config)
+      config: exportable(specification.config)
     });
     let failure: unknown;
     try {
@@ -655,7 +655,7 @@ export class Runtime {
         skipped: context.outcome?.skipped === true,
         durationMs: Date.now() - startedAt,
         error: failure instanceof Error ? failure.message : failure === undefined ? undefined : String(failure),
-        effectivePayload: exportable(context.outcome?.effectivePayload)
+        effectiveConfig: exportable(context.outcome?.effectiveConfig)
       });
     }
     return { skipped: false };

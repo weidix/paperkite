@@ -18,12 +18,12 @@ export class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
     const server = createRuntimeConsoleServer(this.control, { logger: this.context.logger });
     try {
       await server.register(fastifyStatic, {
-        root: await publicDirectory(this.payload?.publicDir),
+        root: await publicDirectory(this.config?.publicDir),
         index: "index.html"
       });
       server.setNotFoundHandler(spaFallback);
-      const host = this.payload?.host ?? "127.0.0.1";
-      const port = normalizePort(this.payload?.port);
+      const host = this.config?.host ?? "127.0.0.1";
+      const port = normalizePort(this.config?.port);
       await listenRetrying(server, host, port, this.context.logger);
       this.context.logger.info("runtime web console listening", { host, port });
       await waitForAbort(this.signal);

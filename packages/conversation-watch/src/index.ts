@@ -25,19 +25,19 @@ interface EventClient {
 
 class LiveConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
-    const chats = listChats(this.payload);
+    const chats = listChats(this.config);
     if (!this.sessions || !this.session) throw new Error("watch.group needs a session");
-    const matcher = makePattern(this.payload);
+    const matcher = makePattern(this.config);
     const registrations: Array<{ client: EventClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
     try {
       await this.sessions.run(async (rawClient) => {
         const client = rawClient as EventClient;
         const builder = new NewMessage({
           chats: chats as never[],
-          fromUsers: this.payload.fromUsers as never[] | undefined,
-          incoming: this.payload.incoming,
-          outgoing: this.payload.outgoing,
-          forwards: this.payload.forwards,
+          fromUsers: this.config.fromUsers as never[] | undefined,
+          incoming: this.config.incoming,
+          outgoing: this.config.outgoing,
+          forwards: this.config.forwards,
           pattern: matcher ? new RegExp(matcher.source, matcher.flags) : undefined
         });
         const handler = (input: unknown): void => {
@@ -54,7 +54,7 @@ class LiveConversationTrigger extends Trigger<WatchConfig> {
 
   private async handleEvent(input: unknown, matcher: RegExp | undefined): Promise<void> {
     const event = toTriggerEvent(getEventMessage(input));
-    if (matches(event, this.payload, matcher)) await this.emit(event);
+    if (matches(event, this.config, matcher)) await this.emit(event);
   }
 
   private contextError(error: unknown): void {
@@ -64,13 +64,13 @@ class LiveConversationTrigger extends Trigger<WatchConfig> {
 
 class PollConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
-    const chats = listChats(this.payload);
+    const chats = listChats(this.config);
     if (!this.sessions || !this.session) throw new Error("watch.poll needs a session");
-    const interval = normalizeSeconds(this.payload.pollSeconds ?? this.payload.intervalSeconds, 30);
-    const limit = normalizeLimit(this.payload.limit);
-    const matcher = makePattern(this.payload);
+    const interval = normalizeSeconds(this.config.pollSeconds ?? this.config.intervalSeconds, 30);
+    const limit = normalizeLimit(this.config.limit);
+    const matcher = makePattern(this.config);
     const cursors = new Map<string, number>();
-    for (const chat of chats) cursors.set(cursorKey(chat), this.payload.startAfterId ?? 0);
+    for (const chat of chats) cursors.set(cursorKey(chat), this.config.startAfterId ?? 0);
 
     while (!this.signal.aborted) {
       for (const chat of chats) {
@@ -89,7 +89,7 @@ class PollConversationTrigger extends Trigger<WatchConfig> {
                 if (event.id && event.id > (cursors.get(cursorKey(chat)) ?? 0)) {
                   cursors.set(cursorKey(chat), event.id);
                 }
-                if (matches(event, this.payload, matcher)) await this.emit(event);
+                if (matches(event, this.config, matcher)) await this.emit(event);
               }
             }),
             this.signal

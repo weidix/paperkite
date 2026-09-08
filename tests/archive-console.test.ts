@@ -745,7 +745,7 @@ test("archive console service boots over http and stops on abort", async () => {
   const context: ServiceContext<Record<string, unknown>> = {
     id: "archive-console",
     capability: "archive.console_web",
-    payload: { file: join(tmp, "archive.db"), host: "127.0.0.1", port, publicDir },
+    config: { file: join(tmp, "archive.db"), host: "127.0.0.1", port, publicDir },
     signal: controller.signal,
     logger
   };

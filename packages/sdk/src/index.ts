@@ -50,12 +50,12 @@ export interface SessionAccess {
 
 export interface ActionOutcome {
   readonly skipped: boolean;
-  readonly effectivePayload?: unknown;
+  readonly effectiveConfig?: unknown;
 }
 
 export interface ActionContext<P = unknown> {
   readonly id: string;
-  payload: P;
+  config: P;
   readonly session?: string;
   readonly signal: AbortSignal;
   readonly sessions?: SessionAccess;
@@ -68,12 +68,12 @@ export interface ActionContext<P = unknown> {
 }
 
 export interface ActionHookResult {
-  payload?: unknown;
+  config?: unknown;
   skip?: boolean;
 }
 
 export type ActionHook = (input: {
-  payload: unknown;
+  config: unknown;
   emission: TriggerEmission | undefined;
   signal: AbortSignal;
 }) => ActionHookResult | unknown | Promise<ActionHookResult | unknown>;
@@ -85,12 +85,12 @@ export abstract class Action<P = unknown> {
     return this.context.id;
   }
 
-  get payload(): P {
-    return this.context.payload;
+  get config(): P {
+    return this.context.config;
   }
 
-  set payload(value: P) {
-    this.context.payload = value;
+  set config(value: P) {
+    this.context.config = value;
   }
 
   get session(): string | undefined {
@@ -114,22 +114,22 @@ export abstract class Action<P = unknown> {
   }
 
   async execute(): Promise<void> {
-    const baseline = cloneValue(this.context.payload) as P;
+    const baseline = cloneValue(this.context.config) as P;
     try {
       if (this.context.hook) {
         const result = await this.context.hook({
-          payload: this.context.payload,
+          config: this.context.config,
           emission: this.context.emission,
           signal: this.context.signal
         });
-        const decision = normalizeHookResult(result, this.context.payload);
-        this.context.payload = decision.payload as P;
-        this.context.outcome = { skipped: decision.skip, effectivePayload: cloneValue(decision.payload) };
+        const decision = normalizeHookResult(result, this.context.config);
+        this.context.config = decision.config as P;
+        this.context.outcome = { skipped: decision.skip, effectiveConfig: cloneValue(decision.config) };
         if (decision.skip) return;
       }
       await this.run();
     } finally {
-      this.context.payload = baseline;
+      this.context.config = baseline;
     }
   }
 
@@ -145,8 +145,8 @@ export abstract class Trigger<P = unknown> {
     return this.context.id;
   }
 
-  get payload(): P {
-    return this.context.payload;
+  get config(): P {
+    return this.context.config;
   }
 
   get session(): string | undefined {
@@ -186,7 +186,7 @@ export abstract class Trigger<P = unknown> {
 export interface TriggerContext<P = unknown> {
   readonly id: string;
   readonly capability: string;
-  readonly payload: P;
+  readonly config: P;
   readonly session?: string;
   readonly signal: AbortSignal;
   readonly sessions?: SessionAccess;
@@ -203,8 +203,8 @@ export abstract class Service<P = unknown> {
     return this.context.id;
   }
 
-  get payload(): P {
-    return this.context.payload;
+  get config(): P {
+    return this.context.config;
   }
 
   get session(): string | undefined {
@@ -229,7 +229,7 @@ export abstract class Service<P = unknown> {
 export interface ServiceContext<P = unknown> {
   readonly id: string;
   readonly capability: string;
-  readonly payload: P;
+  readonly config: P;
   readonly session?: string;
   readonly signal: AbortSignal;
   readonly sessions?: SessionAccess;
@@ -339,7 +339,7 @@ export interface ActionStartedEvent {
   readonly session?: string;
   readonly flow?: FlowRef;
   readonly hook?: string;
-  readonly payload?: unknown;
+  readonly config?: unknown;
   readonly at: string;
 }
 
@@ -353,7 +353,7 @@ export interface ActionFinishedEvent {
   readonly skipped: boolean;
   readonly durationMs: number;
   readonly error?: string;
-  readonly effectivePayload?: unknown;
+  readonly effectiveConfig?: unknown;
   readonly at: string;
 }
 
@@ -535,21 +535,21 @@ export function definePlugin(module: PluginModule): PluginModule {
   return module;
 }
 
-function normalizeHookResult(result: unknown, current: unknown): { payload: unknown; skip: boolean } {
+function normalizeHookResult(result: unknown, current: unknown): { config: unknown; skip: boolean } {
   if (isHookResult(result)) {
     return {
-      payload: result.payload === undefined ? current : mergePayload(current, result.payload),
+      config: result.config === undefined ? current : mergeConfig(current, result.config),
       skip: result.skip === true
     };
   }
-  return { payload: result === undefined ? current : mergePayload(current, result), skip: false };
+  return { config: result === undefined ? current : mergeConfig(current, result), skip: false };
 }
 
 function isHookResult(value: unknown): value is ActionHookResult {
-  return typeof value === "object" && value !== null && ("payload" in value || "skip" in value);
+  return typeof value === "object" && value !== null && ("config" in value || "skip" in value);
 }
 
-function mergePayload(current: unknown, next: unknown): unknown {
+function mergeConfig(current: unknown, next: unknown): unknown {
   if (isRecord(current) && isRecord(next)) return { ...current, ...next };
   return next;
 }

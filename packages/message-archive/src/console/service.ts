@@ -22,17 +22,17 @@ export interface ArchiveConsoleWebConfig {
 
 export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
   async run(): Promise<void> {
-    const payload = this.payload ?? {};
+    const config = this.config ?? {};
     const store = createArchiveStore({
-      backend: payload.backend,
-      file: payload.file ?? payload.dbPath,
-      url: payload.url,
-      schema: payload.schema
+      backend: config.backend,
+      file: config.file ?? config.dbPath,
+      url: config.url,
+      schema: config.schema
     });
     const server = createArchiveConsoleServer({
       store,
-      backend: String(payload.backend ?? "sqlite").toLowerCase(),
-      mediaRoot: payload.mediaRoot,
+      backend: String(config.backend ?? "sqlite").toLowerCase(),
+      mediaRoot: config.mediaRoot,
       session: this.session,
       sessions: this.sessions,
       logger: this.context.logger
@@ -40,11 +40,11 @@ export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
     try {
       await store.init();
       await server.register(fastifyStatic, {
-        root: await publicDirectory(payload.publicDir),
+        root: await publicDirectory(config.publicDir),
         index: "index.html"
       });
-      const host = payload.host ?? "127.0.0.1";
-      const port = normalizeConsolePort(payload.port);
+      const host = config.host ?? "127.0.0.1";
+      const port = normalizeConsolePort(config.port);
       await listenRetrying(server, host, port, this.context.logger);
       this.context.logger.info("archive console listening", { host, port });
       await waitForAbort(this.signal);

@@ -21,15 +21,15 @@ interface BarkConfig {
 
 class BarkAction extends Action<BarkConfig> {
   protected async run(): Promise<void> {
-    const server = this.payload.server?.trim() || "https://api.day.app";
-    const key = this.payload.key?.trim();
+    const server = this.config.server?.trim() || "https://api.day.app";
+    const key = this.config.key?.trim();
     if (!key) throw new Error("notifications.bark needs key");
-    const title = render(this.payload.title ?? "Paperkite", this.emission);
-    const body = render(this.payload.body ?? this.payload.message ?? "", this.emission);
-    const method = (this.payload.method ?? "post").toUpperCase() as "GET" | "POST";
+    const title = render(this.config.title ?? "Paperkite", this.emission);
+    const body = render(this.config.body ?? this.config.message ?? "", this.emission);
+    const method = (this.config.method ?? "post").toUpperCase() as "GET" | "POST";
     if (method === "POST" && !body) throw new Error("notifications.bark needs body or message");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), normalizeTimeout(this.payload.timeoutMs));
+    const timer = setTimeout(() => controller.abort(), normalizeTimeout(this.config.timeoutMs));
     const onAbort = (): void => controller.abort();
     this.signal.addEventListener("abort", onAbort, { once: true });
     try {
@@ -39,11 +39,11 @@ class BarkAction extends Action<BarkConfig> {
           : buildBarkUrl(server, key, {
               title,
               body,
-              group: this.payload.group,
-              level: this.payload.level,
-              icon: this.payload.icon,
-              click: this.payload.click,
-              copy: this.payload.copy
+              group: this.config.group,
+              level: this.config.level,
+              icon: this.config.icon,
+              click: this.config.click,
+              copy: this.config.copy
             }),
         {
           method,
@@ -53,11 +53,11 @@ class BarkAction extends Action<BarkConfig> {
                 body: JSON.stringify({
                   title,
                   body,
-                  group: this.payload.group,
-                  level: this.payload.level,
-                  icon: this.payload.icon,
-                  url: this.payload.click,
-                  copy: this.payload.copy
+                  group: this.config.group,
+                  level: this.config.level,
+                  icon: this.config.icon,
+                  url: this.config.click,
+                  copy: this.config.copy
                 })
               }
             : {}),
