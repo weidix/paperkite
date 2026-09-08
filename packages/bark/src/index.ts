@@ -1,4 +1,4 @@
-import { Action, definePlugin, type PluginContext, type TriggerEmission } from "@paperkite/sdk";
+import { Action, type TriggerEmission } from "@paperkite/sdk";
 
 interface BarkConfig {
   /** Bark 服务入口；缺省用官方 api.day.app，自建部署时如 https://bark.example:444。 */
@@ -19,15 +19,15 @@ interface BarkConfig {
   readonly method?: "get" | "post";
 }
 
-class BarkAction extends Action<BarkConfig> {
+export class BarkAction extends Action<BarkConfig> {
   protected async run(): Promise<void> {
     const server = this.config.server?.trim() || "https://api.day.app";
     const key = this.config.key?.trim();
-    if (!key) throw new Error("notifications.bark needs key");
+    if (!key) throw new Error("push needs key");
     const title = render(this.config.title ?? "Paperkite", this.emission);
     const body = render(this.config.body ?? this.config.message ?? "", this.emission);
     const method = (this.config.method ?? "post").toUpperCase() as "GET" | "POST";
-    if (method === "POST" && !body) throw new Error("notifications.bark needs body or message");
+    if (method === "POST" && !body) throw new Error("push needs body or message");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), normalizeTimeout(this.config.timeoutMs));
     const onAbort = (): void => controller.abort();
@@ -71,18 +71,6 @@ class BarkAction extends Action<BarkConfig> {
     }
   }
 }
-
-export const manifest = {
-  name: "@paperkite/plugin-bark",
-  version: "0.1.0",
-  capabilities: [{ kind: "action" as const, name: "notifications.bark" }]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerAction("notifications.bark", BarkAction);
-}
-
-export default definePlugin({ manifest, register });
 
 export interface BarkMessage {
   readonly title: string;

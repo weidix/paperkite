@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { Action, definePlugin, type PluginContext } from "@paperkite/sdk";
+import { Action } from "@paperkite/sdk";
 
 interface CommandConfig {
   readonly program?: string;
@@ -13,7 +13,7 @@ interface CommandConfig {
   readonly maxOutputBytes?: number;
 }
 
-class ProcessCommandAction extends Action<CommandConfig> {
+export class ProcessCommandAction extends Action<CommandConfig> {
   protected async run(): Promise<void> {
     const [program, args] = commandParts(this.config);
     const shell = this.config.shell === true;
@@ -58,24 +58,12 @@ class ProcessCommandAction extends Action<CommandConfig> {
   }
 }
 
-export const manifest = {
-  name: "@paperkite/plugin-process-command",
-  version: "0.1.0",
-  capabilities: [{ kind: "action" as const, name: "system.command" }]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerAction("system.command", ProcessCommandAction);
-}
-
-export default definePlugin({ manifest, register });
-
 function commandParts(config: CommandConfig): [string, string[]] {
   if (config.program?.trim()) return [config.program.trim(), [...(config.args ?? [])].map(String)];
-  if (!config.command?.trim()) throw new Error("system.command needs program or command");
+  if (!config.command?.trim()) throw new Error("process run needs program or command");
   const parts = tokenize(config.command);
   const program = parts.shift();
-  if (!program) throw new Error("system.command command cannot be empty");
+  if (!program) throw new Error("process run command cannot be empty");
   return [program, parts];
 }
 
@@ -105,7 +93,7 @@ function tokenize(value: string): string[] {
     }
   }
   if (escaping) current += "\\";
-  if (quote) throw new Error("system.command has an unterminated quote");
+  if (quote) throw new Error("process run has an unterminated quote");
   if (current) parts.push(current);
   return parts;
 }

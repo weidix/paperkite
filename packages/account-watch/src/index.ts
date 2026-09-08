@@ -1,12 +1,12 @@
-import { definePlugin, Trigger, type PluginContext, type SessionState } from "@paperkite/sdk";
+import { Trigger, type SessionState } from "@paperkite/sdk";
 
 interface HealthConfig {
   readonly notifyOnRecovery?: boolean;
 }
 
-class SessionHealthTrigger extends Trigger<HealthConfig> {
+export class SessionHealthTrigger extends Trigger<HealthConfig> {
   async run(): Promise<void> {
-    if (!this.control) throw new Error("watch.session needs the runtime control contract");
+    if (!this.control) throw new Error("session health watcher needs the runtime control contract");
     const notifyRecovery = this.config.notifyOnRecovery === true;
     const notify = (name: string, state: SessionState, reason: string | undefined): Promise<void> => {
       return this.emit({ session: name, state, reason });
@@ -21,7 +21,7 @@ class SessionHealthTrigger extends Trigger<HealthConfig> {
       if (event.type !== "session.state" || event.state === "starting") return;
       if (event.state === "connected" && !notifyRecovery) return;
       void notify(event.name, event.state, event.reason).catch((error: unknown) => {
-        this.context.logger.error("watch.session notification failed", error);
+        this.context.logger.error("session health watcher notification failed", error);
       });
     });
     try {
@@ -31,18 +31,6 @@ class SessionHealthTrigger extends Trigger<HealthConfig> {
     }
   }
 }
-
-export const manifest = {
-  name: "@paperkite/plugin-account-watch",
-  version: "0.1.0",
-  capabilities: [{ kind: "trigger" as const, name: "watch.session" }]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerTrigger("watch.session", SessionHealthTrigger, { control: true });
-}
-
-export default definePlugin({ manifest, register });
 
 async function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;

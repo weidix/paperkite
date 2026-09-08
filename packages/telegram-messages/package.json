@@ -16,7 +16,7 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "action", "name": "messages.send" }
+        { "kind": "action", "name": "messages.send", "handler": "SendMessageAction" }
       ]
     }
   }

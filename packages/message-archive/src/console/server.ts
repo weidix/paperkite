@@ -233,7 +233,7 @@ function registerRoutes(
     "/api/messages/:id/live-text",
     async (request, reply) => {
       try {
-        if (!session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+        if (!session || !sessions) throw new HttpError(503, "archive console needs a Telegram session");
         const rowId = rowIdOr(request.params.id);
         const cached = liveTextCacheGet(rowId, liveTextCache);
         if (cached !== undefined) return { text: cached.text, entities: cached.entities };
@@ -266,7 +266,7 @@ function registerRoutes(
     "/api/messages/:id/thumb",
     async (request, reply) => {
       try {
-        if (!session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+        if (!session || !sessions) throw new HttpError(503, "archive console needs a Telegram session");
         const rowId = rowIdOr(request.params.id);
         const record = await store.getMessageByRowId(rowId);
         if (!record) throw new HttpError(404, "消息不存在");
@@ -280,7 +280,7 @@ function registerRoutes(
           mimeType: record.mimeType
         };
         if (request.query.size === "full") {
-          if (live === undefined) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+          if (live === undefined) throw new HttpError(503, "archive console needs a Telegram session");
           if (isPhotoLike(file)) {
             return sendLiveFull(reply, file, sessions, store, logger, request.query.download === "1");
           }
@@ -336,7 +336,7 @@ function registerRoutes(
     "/api/mediafiles/:id/live",
     async (request, reply) => {
       try {
-        if (live === undefined || !session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+        if (live === undefined || !session || !sessions) throw new HttpError(503, "archive console needs a Telegram session");
         const file = await store.getMediaFileById(rowIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
         if (isPhotoLike(file)) {

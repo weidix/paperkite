@@ -3,7 +3,19 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { PluginCapability, PluginInfo, PluginManifest, PluginModule, RuntimeLogger } from "@paperkite/sdk";
+import {
+  Action,
+  Service,
+  Trigger,
+  type ActionConstructor,
+  type CapabilityKind,
+  type PluginCapability,
+  type PluginInfo,
+  type PluginModule,
+  type RuntimeLogger,
+  type ServiceConstructor,
+  type TriggerConstructor
+} from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
 import { profileDirectory, readProfile } from "./profile.js";
 
@@ -67,8 +79,12 @@ export async function loadExtensions(
   for (const candidate of [...selected.values()].sort((left, right) => left.name.localeCompare(right.name))) {
     const module = await importPlugin(candidate);
     const scopedLogger = options.logger.child(candidate.name);
-    await module.register(registry.context(scopedLogger, candidate.name));
-    assertManifestMatches(candidate, module.manifest);
+    for (const capability of candidate.capabilities) {
+      bindCapability(registry, candidate, module, capability, candidate.name);
+    }
+    if (typeof module.register === "function") {
+      await module.register(registry.context(scopedLogger, candidate.name));
+    }
   }
   const installed: PluginInfo[] = [...candidates]
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -79,6 +95,41 @@ export async function loadExtensions(
       loaded: selected.has(candidate.name)
     }));
   return { registry, packages: [...selected.keys()], installed };
+}
+
+function bindCapability(
+  registry: CapabilityRegistry,
+  candidate: PluginCandidate,
+  module: PluginModule,
+  capability: PluginCapability,
+  scope: string
+): void {
+  if (!capability.handler) {
+    throw new Error("plugin " + candidate.name + " capability " + capability.name + " has no handler symbol");
+  }
+  const constructor = module[capability.handler];
+  assertConstructorKind(constructor, capability.kind, candidate.name, capability.name);
+  registry.register(
+    capability.kind,
+    capability.name,
+    constructor as ActionConstructor | TriggerConstructor | ServiceConstructor,
+    scope,
+    { control: capability.control }
+  );
+}
+
+function assertConstructorKind(
+  constructor: unknown,
+  kind: CapabilityKind,
+  pluginName: string,
+  capabilityName: string
+): void {
+  const base = kind === "action" ? Action : kind === "trigger" ? Trigger : Service;
+  if (typeof constructor !== "function" || !(constructor.prototype instanceof base)) {
+    throw new Error(
+      "plugin " + pluginName + " handler for capability " + capabilityName + " must extend " + kind
+    );
+  }
 }
 
 interface PluginCandidate {
@@ -110,36 +161,12 @@ async function inspectPlugin(name: string, profile: string): Promise<PluginCandi
 
 async function importPlugin(candidate: PluginCandidate): Promise<PluginModule> {
   const modulePath = resolve(candidate.packageDirectory, candidate.entry);
-  const loaded = (await import(pathToFileURL(modulePath).href)) as Partial<PluginModule> & {
+  const loaded = (await import(pathToFileURL(modulePath).href)) as PluginModule & {
     default?: Partial<PluginModule>;
   };
-  const module = loaded.register && loaded.manifest ? loaded : loaded.default;
-  if (!module?.register || !module.manifest) throw new Error("invalid paperkite plugin: " + candidate.name);
+  const module = loaded.register ? loaded : loaded.default;
+  if (!module) throw new Error("invalid paperkite plugin: " + candidate.name);
   return module as PluginModule;
-}
-
-function assertManifestMatches(candidate: PluginCandidate, manifest: PluginManifest): void {
-  if (manifest.name !== candidate.name) {
-    throw new Error("plugin " + candidate.name + " exports manifest " + manifest.name);
-  }
-  if (!Array.isArray(manifest.capabilities)) {
-    throw new Error("plugin " + candidate.name + " has invalid capabilities");
-  }
-  const declared = new Set(candidate.capabilities.map((item) => item.kind + ":" + item.name));
-  const exported = new Set(manifest.capabilities.map((item) => item.kind + ":" + item.name));
-  if (declared.size !== exported.size) {
-    throw new Error("plugin " + candidate.name + " manifest does not match package metadata");
-  }
-  for (const capability of manifest.capabilities) {
-    if (!declared.has(capability.kind + ":" + capability.name)) {
-      throw new Error("plugin " + candidate.name + " exports undeclared capability " + capability.name);
-    }
-  }
-  for (const capability of candidate.capabilities) {
-    if (!exported.has(capability.kind + ":" + capability.name)) {
-      throw new Error("plugin " + candidate.name + " package metadata declares missing capability " + capability.name);
-    }
-  }
 }
 
 function resolvePackageJson(name: string, profile: string): string | undefined {

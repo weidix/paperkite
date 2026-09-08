@@ -1,4 +1,4 @@
-import { Action, definePlugin, type PluginContext } from "@paperkite/sdk";
+import { Action } from "@paperkite/sdk";
 import { utils } from "telegram";
 import { MessageArchiver, type ArchiveClient } from "./archiver.js";
 import { buildTargets, coerceBool, coerceInt, type ArchiveConfig } from "./config.js";
@@ -7,14 +7,14 @@ import { createArchiveStore } from "./storage/index.js";
 
 type PeerLike = Parameters<typeof utils.getPeerId>[0];
 
-class ArchiveSyncAction extends Action<ArchiveConfig> {
+export class ArchiveSyncAction extends Action<ArchiveConfig> {
   protected async run(): Promise<void> {
     if (!this.config || typeof this.config !== "object") {
       throw new Error("archive config must be a mapping with chats");
     }
     const targets = buildTargets(this.config);
     if (!targets.length) throw new Error("archive config must include chats");
-    if (!this.sessions || !this.session) throw new Error("archive.sync needs a session");
+    if (!this.sessions || !this.session) throw new Error("archive sync needs a session");
 
     const store = createArchiveStore({
       backend: this.config.backend,
@@ -64,19 +64,3 @@ class ArchiveSyncAction extends Action<ArchiveConfig> {
     }
   }
 }
-
-export const manifest = {
-  name: "@paperkite/plugin-message-archive",
-  version: "0.1.0",
-  capabilities: [
-    { kind: "action" as const, name: "archive.sync" },
-    { kind: "service" as const, name: "archive.console_web" }
-  ]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerAction("archive.sync", ArchiveSyncAction);
-  context.registerService("archive.console_web", ArchiveConsoleWebService);
-}
-
-export default definePlugin({ manifest, register });

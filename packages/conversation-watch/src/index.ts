@@ -1,5 +1,5 @@
 import { NewMessage } from "telegram/events/index.js";
-import { Trigger, definePlugin, type PluginContext, type TriggerEvent } from "@paperkite/sdk";
+import { Trigger, type TriggerEvent } from "@paperkite/sdk";
 
 interface WatchConfig {
   readonly chat?: string | number;
@@ -23,10 +23,10 @@ interface EventClient {
   getMessages(chat: string | number, options: Record<string, unknown>): Promise<readonly unknown[]>;
 }
 
-class LiveConversationTrigger extends Trigger<WatchConfig> {
+export class LiveConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
     const chats = listChats(this.config);
-    if (!this.sessions || !this.session) throw new Error("watch.group needs a session");
+    if (!this.sessions || !this.session) throw new Error("live conversation watcher needs a session");
     const matcher = makePattern(this.config);
     const registrations: Array<{ client: EventClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
     try {
@@ -62,10 +62,10 @@ class LiveConversationTrigger extends Trigger<WatchConfig> {
   }
 }
 
-class PollConversationTrigger extends Trigger<WatchConfig> {
+export class PollConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
     const chats = listChats(this.config);
-    if (!this.sessions || !this.session) throw new Error("watch.poll needs a session");
+    if (!this.sessions || !this.session) throw new Error("poll conversation watcher needs a session");
     const interval = normalizeSeconds(this.config.pollSeconds ?? this.config.intervalSeconds, 30);
     const limit = normalizeLimit(this.config.limit);
     const matcher = makePattern(this.config);
@@ -103,22 +103,6 @@ class PollConversationTrigger extends Trigger<WatchConfig> {
     }
   }
 }
-
-export const manifest = {
-  name: "@paperkite/plugin-conversation-watch",
-  version: "0.1.0",
-  capabilities: [
-    { kind: "trigger" as const, name: "watch.group" },
-    { kind: "trigger" as const, name: "watch.poll" }
-  ]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerTrigger("watch.group", LiveConversationTrigger);
-  context.registerTrigger("watch.poll", PollConversationTrigger);
-}
-
-export default definePlugin({ manifest, register });
 
 function listChats(config: WatchConfig): Array<string | number> {
   const values = [...(config.chats ?? [])];

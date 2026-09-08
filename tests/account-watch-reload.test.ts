@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Action, type TriggerEmission } from "@paperkite/sdk";
-import { register as registerAccountWatch } from "../packages/account-watch/src/index.js";
+import { SessionHealthTrigger } from "../packages/account-watch/src/index.js";
 import { fromMapping } from "../src/config/loader.js";
 import { CapabilityRegistry } from "../src/extensions/registry.js";
 import { AppLogger } from "../src/engine/logger.js";
@@ -65,7 +65,9 @@ async function makeWatcherRuntime(
   const directory = await mkdtemp(join(tmpdir(), "paperkite-account-watch-"));
   const logger = new AppLogger("info", join(directory, "logs"));
   const registry = new CapabilityRegistry();
-  await registerAccountWatch(registry.context(logger, "@paperkite/plugin-account-watch"));
+  registry.register("trigger", "watch.session", SessionHealthTrigger, "@paperkite/plugin-account-watch", {
+    control: true
+  });
   registry.register("action", "demo.capture", CaptureAction, "plugin-demo");
   const sessions = new FakeSessionPool({ "acct-1": "isolated", "acct-2": "connected" });
   const catalog = fromMapping({

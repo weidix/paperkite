@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { Service, definePlugin, type PluginContext, type RuntimeLogger } from "@paperkite/sdk";
+import { Service, type RuntimeLogger } from "@paperkite/sdk";
 import { createRuntimeConsoleServer } from "./console/server.js";
 
 interface ConsoleWebConfig {
@@ -14,7 +14,7 @@ interface ConsoleWebConfig {
 
 export class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
   async run(): Promise<void> {
-    if (!this.control) throw new Error("runtime.console_web needs the runtime control contract");
+    if (!this.control) throw new Error("runtime console needs the runtime control contract");
     const server = createRuntimeConsoleServer(this.control, { logger: this.context.logger });
     try {
       await server.register(fastifyStatic, {
@@ -33,22 +33,10 @@ export class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
   }
 }
 
-export const manifest = {
-  name: "@paperkite/plugin-console-web",
-  version: "0.1.0",
-  capabilities: [{ kind: "service" as const, name: "runtime.console_web" }]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerService("runtime.console_web", RuntimeConsoleWebService, { control: true });
-}
-
-export default definePlugin({ manifest, register });
-
 function normalizePort(value: number | undefined): number {
   const port = Number(value ?? 3378);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("runtime.console_web port must be an integer between 1 and 65535");
+    throw new Error("runtime console port must be an integer between 1 and 65535");
   }
   return port;
 }
