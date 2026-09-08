@@ -19,7 +19,7 @@
     anchor?: boolean;
     /** 检索列表内联缩略图：带媒体行直接预览，不进详情。 */
     inlineThumb?: boolean;
-    /** 无会话筛选时标注来源会话名。 */
+    /** 检索跨多个会话时标注来源会话名（单会话筛选下省略）。 */
     showChat?: boolean;
     highlights?: readonly string[];
   } = $props();
