@@ -578,13 +578,14 @@ export class PostgresArchiveStore implements ArchiveStore {
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
     const row = rowWhere.replace(/^WHERE\s+/, "");
+    const shifted = row.replace(/\$(\d+)/g, (_match, index: string) => `$${rowValues.length + Number(index)}`);
     const [entryCount, messageCount] = await Promise.all([
       this.pool.query(
         `SELECT (
            (SELECT COUNT(*)::int FROM ${this.table("messages")} m
              WHERE m.grouped_id IS NULL AND ${row})
            + (SELECT COUNT(DISTINCT m.grouped_id)::int FROM ${this.table("messages")} m
-             WHERE m.grouped_id IS NOT NULL AND ${row})
+             WHERE m.grouped_id IS NOT NULL AND ${shifted})
          )::int AS count`,
         [...rowValues, ...rowValues]
       ),
