@@ -73,7 +73,7 @@ test("reload completes and the console restarts while its own SSE stream is open
 
     const restarted = await waitFor(() => runtime.snapshot.activeServices.includes("console"), 3_000);
     assert.ok(restarted, "console service must be running again after reload");
-    assert.equal(events.some((event) => event.type === "config.reloaded" && event.ok), true);
+    assert.equal(events.some((event) => event.type === "flows.reloaded" && event.ok), true);
 
     sse.destroy();
     await runtime.stop();

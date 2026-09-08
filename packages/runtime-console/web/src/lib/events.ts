@@ -46,9 +46,9 @@ export function describeEvent(event: RuntimeEvent): EventPresentation {
         title: "定时触发",
         detail: `#${event.id}${event.cron ? ` · ${event.cron}` : event.intervalSeconds ? ` · 每 ${event.intervalSeconds}s` : ""}`
       };
-    case "config.reloading":
+    case "flows.reloading":
       return { tone: "warn", title: "配置重载中", detail: "读取 flows.yml 并重建流" };
-    case "config.reloaded":
+    case "flows.reloaded":
       return { tone: event.ok ? "ok" : "bad", title: "配置重载完成", detail: event.error ?? "已生效" };
     case "session.state":
       return {

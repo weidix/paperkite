@@ -76,7 +76,7 @@ export class FlowCatalog {
     return this.definitions(kind).filter((item) => item.kind === "command" || item.enabled);
   }
 
-  atomRefs(): Set<string> {
+  capabilityRefs(): Set<string> {
     const refs = new Set<string>();
     for (const item of this.enabled()) {
       if ("capability" in item && item.capability) refs.add(item.capability);

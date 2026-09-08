@@ -81,7 +81,7 @@ test("runFlow executes a schedule action once and reload swaps the catalog", asy
   await runtime.reload();
   const snapshot = runtime.snapshot as RuntimeSnapshot;
   assert.deepEqual(snapshot.flows, []);
-  assert.equal(events.some((event) => event.type === "config.reloaded" && event.ok), true);
+  assert.equal(events.some((event) => event.type === "flows.reloaded" && event.ok), true);
   await runtime.stop();
 });
 

@@ -85,7 +85,7 @@ export async function updateFlowItem(
 function parseTriggers(value: unknown, strict: boolean): TriggerDefinition[] {
   return list(value, "triggers", strict).map((item, index) => {
     const capability = text(item.capability, "trigger capability");
-    const actions = list(item.actions, "trigger actions", strict).map((action) => parseAction(action, undefined, strict));
+    const actions = list(item.actions, "trigger actions", strict).map((action) => parseAction(action, strict));
     return {
       kind: "trigger",
       id: makeId(capability, item.id, index),
@@ -105,7 +105,7 @@ function parseTriggers(value: unknown, strict: boolean): TriggerDefinition[] {
 function parseCommands(value: unknown, strict: boolean): CommandDefinition[] {
   return list(value, "commands", strict).map((item, index) => {
     if (strict && "enabled" in item) throw new Error("commands do not support enabled; remove the entry to hide it");
-    const action = parseAction(item.run ?? item.action, item.config, strict);
+    const action = parseAction(item.run, strict);
     const id = makeId(action.capability, item.id, index);
     return {
       kind: "command",
@@ -121,9 +121,9 @@ function parseCommands(value: unknown, strict: boolean): CommandDefinition[] {
 
 function parseSchedules(value: unknown, strict: boolean): ScheduleDefinition[] {
   return list(value, "schedules", strict).map((item, index) => {
-    const action = parseAction(item.run ?? item.action, item.config, strict);
+    const action = parseAction(item.run, strict);
     const cron = text(item.cron, "schedule cron", false) || undefined;
-    const intervalSeconds = normalizePositiveInt(item.intervalSeconds ?? item.everySeconds, "intervalSeconds");
+    const intervalSeconds = normalizePositiveInt(item.intervalSeconds, "intervalSeconds");
     if ((cron ? 1 : 0) + (intervalSeconds ? 1 : 0) !== 1) {
       throw new Error(`schedule ${item.id ?? index + 1} needs exactly one of cron or intervalSeconds`);
     }
@@ -145,9 +145,6 @@ function parseSchedules(value: unknown, strict: boolean): ScheduleDefinition[] {
 function parseServices(value: unknown, strict: boolean): ServiceDefinition[] {
   return list(value, "services", strict).map((item, index) => {
     const capability = text(item.capability, "service capability");
-    if (strict && ("endpoint" in item || "processMode" in item)) {
-      throw new Error(`service ${item.id ?? index + 1} does not accept endpoint or processMode`);
-    }
     return {
       kind: "service",
       id: makeId(capability, item.id, index),
@@ -163,8 +160,8 @@ function parseServices(value: unknown, strict: boolean): ServiceDefinition[] {
   });
 }
 
-function parseAction(value: unknown, fallbackConfig: unknown, strict: boolean): ActionSpec {
-  if (typeof value === "string") return { capability: value.trim(), config: fallbackConfig ?? {} };
+function parseAction(value: unknown, strict: boolean): ActionSpec {
+  if (typeof value === "string") return { capability: value.trim(), config: {} };
   if (!isRecord(value)) throw new Error("action requires a capability string or mapping");
   const capability = text(value.capability, "action capability");
   if (strict && "enabled" in value) throw new Error("inline actions do not support enabled");
@@ -172,7 +169,7 @@ function parseAction(value: unknown, fallbackConfig: unknown, strict: boolean): 
   return {
     capability,
     session: normalizeSession(value.session),
-    config: value.config ?? fallbackConfig ?? {},
+    config: value.config ?? {},
     hook
   };
 }
