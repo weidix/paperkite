@@ -33,8 +33,6 @@ test("local control socket dispatches runtime, flow, session, and action operati
     async stopService(id) { calls.push("stop:" + id); },
     async reload() { calls.push("reload"); },
     async reconnectSession(id) { calls.push("reconnect:" + id); },
-    async beginSessionLogin(id) { calls.push("login:" + id); return { status: "prompt", kind: "phone" }; },
-    async submitSessionLogin(id, value) { calls.push(`login:${id}:${value}`); return { status: "ok" }; },
     listPlugins() {
       calls.push("plugins");
       return [
@@ -56,13 +54,6 @@ test("local control socket dispatches runtime, flow, session, and action operati
   assert.equal(await requestControl({ action: "flow.run", id: "archive-daily" }, path), true);
   assert.equal(await requestControl({ action: "action.run", spec: { capability: "notify.bark" } }, path), true);
   assert.equal(await requestControl({ action: "session.reconnect", id: "primary" }, path), true);
-  assert.deepEqual(await requestControl({ action: "session.login.begin", id: "primary" }, path), {
-    status: "prompt",
-    kind: "phone"
-  });
-  assert.deepEqual(await requestControl({ action: "session.login.input", id: "primary", value: "13900000000" }, path), {
-    status: "ok"
-  });
   assert.deepEqual(await requestControl({ action: "plugins" }, path), [
     {
       name: "@paperkite/plugin-notify-bark",
@@ -78,8 +69,6 @@ test("local control socket dispatches runtime, flow, session, and action operati
     "flow:archive-daily",
     "action:notify.bark",
     "reconnect:primary",
-    "login:primary",
-    "login:primary:13900000000",
     "plugins"
   ]);
   await server.close();

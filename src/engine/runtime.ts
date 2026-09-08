@@ -15,7 +15,6 @@ import type {
   ServiceContext,
   SessionSnapshot,
   SessionState,
-  SessionLoginReply,
   TriggerContext,
   TriggerEmission,
   Unsubscribe
@@ -114,6 +113,13 @@ export class Runtime {
       this.started = true;
       this.startedAt = Date.now();
       this.startFlows();
+      for (const info of this.options.sessions.states()) {
+        if (info.state === "waiting-auth") {
+          this.options.logger.warn(
+            "session " + info.name + " is waiting for login; run `paperkite session login " + info.name + "` to log in"
+          );
+        }
+      }
     } catch (error) {
       this.started = false;
       this.lifecycle.abort();
@@ -227,14 +233,6 @@ export class Runtime {
 
   async reconnectSession(name: string): Promise<void> {
     await this.options.sessions.reconnectSession(name);
-  }
-
-  async beginSessionLogin(name: string): Promise<SessionLoginReply> {
-    return this.options.sessions.beginSessionLogin(name);
-  }
-
-  async submitSessionLogin(name: string, value: string): Promise<SessionLoginReply> {
-    return this.options.sessions.submitSessionLogin(name, value);
   }
 
   async stopService(identifier: string): Promise<void> {

@@ -4,7 +4,8 @@ import { loadSettings, type AppSettings } from "./config/settings.js";
 import { AppLogger } from "./engine/logger.js";
 import { Runtime } from "./engine/runtime.js";
 import { loadExtensions } from "./extensions/loader.js";
-import { SessionPool, configureTelegramClientFactory } from "./telegram/pool.js";
+import { configureTelegramClientFactory } from "./telegram/client.js";
+import { SessionPool } from "./telegram/pool.js";
 
 export interface CreateAppOptions {
   readonly profile?: string;

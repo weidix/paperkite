@@ -62,7 +62,7 @@
             <tr class="border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted">
               <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0">会话</th>
               <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0">状态</th>
-              <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden md:table-cell">原因</th>
+              <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden md:table-cell">说明</th>
               <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden md:table-cell">受影响流程</th>
               <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-32"></th>
             </tr>
@@ -82,12 +82,7 @@
                   </Badge>
                 </td>
                 <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden max-w-72 md:table-cell">
-                  <span class="text-xs text-muted-foreground">
-                    {session.reason ?? "-"}
-                    {#if session.state === "waiting-auth"}
-                      <span class="block">用 `paperkite session login {session.name}` 完成登录</span>
-                    {/if}
-                  </span>
+                  <span class="text-xs text-muted-foreground">{session.reason ?? "-"}</span>
                 </td>
                 <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden md:table-cell">
                   {#if session.flows.length === 0}

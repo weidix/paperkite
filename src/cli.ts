@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import { access, copyFile } from "node:fs/promises";
-import type { SessionLoginReply } from "@paperkite/sdk";
 import { loadCatalog } from "./config/loader.js";
 import { ensureProfile } from "./extensions/profile.js";
 import { managePlugins } from "./extensions/manager.js";
 import { createApp, defaultLockFile, type PaperkiteApp } from "./app.js";
 import { acquireProcessLock } from "./control/process-lock.js";
-import { controlPath, requestControl, startControlServer, type ControlServer } from "./control/socket.js";
+import { requestControl, startControlServer, type ControlServer } from "./control/socket.js";
+import { loginSession } from "./telegram/login.js";
 
 const program = new Command()
   .name("paperkite")
@@ -174,23 +172,12 @@ session
 
 session
   .command("login <id>")
-  .description("interactively log in a session")
-  .action(async (id: string) => {
-    if (!input.isTTY) throw new Error("session login needs an interactive terminal");
-    const readline = createInterface({ input, output });
-    let reply = await requestControl<SessionLoginReply>({ action: "session.login.begin", id }, controlPath(), 60_000);
-    while (reply.status === "prompt") {
-      const label = reply.kind === "phone" ? "Phone number: " : reply.kind === "code" ? "Login code: " : "Two-factor password: ";
-      const value = await readline.question(label);
-      reply = await requestControl<SessionLoginReply>({ action: "session.login.input", id, value }, controlPath(), 60_000);
-    }
-    readline.close();
-    if (reply.status === "ok") {
-      process.stdout.write("session login ok: " + id + "\n");
-      return;
-    }
-    process.stderr.write("session login failed: " + (reply.status === "error" ? reply.message : "unexpected reply") + "\n");
-    process.exitCode = 1;
+  .description("log in a session without a running process")
+  .option("--settings <file>", "settings file", "data/settings.yml")
+  .action(async (id: string, options: { settings: string }) => {
+    await loginSession(id, options.settings);
+    process.stdout.write("session login ok: " + id + "\n");
+    await requestControl({ action: "session.reconnect", id }).catch(() => undefined);
   });
 
 program

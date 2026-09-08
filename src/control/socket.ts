@@ -12,7 +12,6 @@ interface ControlRequest {
   readonly id?: string;
   readonly spec?: ActionSpecInput;
   readonly patch?: FlowPatch;
-  readonly value?: string;
 }
 
 export interface ControlServer {
@@ -127,12 +126,6 @@ async function dispatch(runtime: RuntimeControl, request: ControlRequest): Promi
   if (action === "session.reconnect") {
     await runtime.reconnectSession(request.id);
     return true;
-  }
-  if (action === "session.login.begin") {
-    return runtime.beginSessionLogin(request.id);
-  }
-  if (action === "session.login.input") {
-    return runtime.submitSessionLogin(request.id, String(request.value ?? ""));
   }
   throw new Error("unknown control action: " + action);
 }

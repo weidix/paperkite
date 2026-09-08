@@ -64,15 +64,6 @@ export interface LogScopeInfo {
   readonly path: string;
 }
 
-export type SessionLoginReply =
-  | { readonly status: "ok" }
-  | {
-      readonly status: "prompt";
-      readonly kind: "phone" | "code" | "password";
-      readonly message?: string;
-    }
-  | { readonly status: "error"; readonly message: string };
-
 export interface RuntimeSnapshot {
   readonly running: boolean;
   readonly pid: number;

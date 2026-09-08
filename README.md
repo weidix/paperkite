@@ -13,7 +13,7 @@ pnpm start init
 pnpm start run
 ```
 
-第一次使用某个 Telegram 会话时，运行时会在终端请求登录信息，并把会话保存到 `telegram.sessionsDir`。凭据、会话、日志和数据库都已加入忽略规则，不应提交到仓库。
+登录与启动完全分离：启动流程从不执行交互登录。`paperkite session login <会话名>` 在 CLI 进程内独立完成登录——读取 `settings.yml`、在当前终端交互输入（电话号 → 验证码 → 两步验证）、把会话保存到 `telegram.sessionsDir`，不需要常驻进程在运行，因此可以在 flows 引用之前把会话备好；若常驻进程恰好在运行，登录成功后会触发该会话重连，等待登录的会话立即接上。某个会话还没有已保存的凭据时，启动会把它按会话问题处理：会话进入「等待登录」状态、绑定它的流程暂停，进程控制台、日志与运行控制台同步提示需要执行的登录命令；登录成功后会话自动连接、被挂起的流程自动恢复。凭据、会话、日志和数据库都已加入忽略规则，不应提交到仓库。
 
 ## 插件边界
 
@@ -117,13 +117,13 @@ services:
 
 核心提供前端无关的运行控制契约（`RuntimeControl`），托盘、Web 控制台、CLI 等任何可视化前端都通过同一套接口取数与操作，具体渲染由前端自行实现。
 
-- **快照**：`snapshot` 返回当前状态（`running`、`pid`、`uptimeSeconds`）、按类别的流 id 列表、`activeServices`、`activeActions`（正在执行的动作：`id`/`capability`/`session`/`flow`/`startedAt`）、`flows` 处理后的完整配置视图（每条流的 `kind`/`id`/`capability`/`title`/`symbol`/`enabled`/`active`/`session`/`autoStart`/`cron`/`intervalSeconds`/`maxRuns`/`config`/`actions`/`hook`/`logFile`/`startedAt`）以及 `logs` 日志文件索引。
+- **快照**：`snapshot` 返回当前状态（`running`、`pid`、`uptimeSeconds`）、按类别的流 id 列表、`activeServices`、`activeActions`（正在执行的动作：`id`/`capability`/`session`/`flow`/`startedAt`）、`flows` 处理后的完整配置视图（每条流的 `kind`/`id`/`capability`/`title`/`symbol`/`enabled`/`active`/`session`/`autoStart`/`cron`/`intervalSeconds`/`maxRuns`/`config`/`actions`/`hook`/`logFile`/`startedAt`）、`sessions`（每个会话的 `name`/`state`/`since`/`reason`/`attempts`/`flows`，等待登录时 `reason` 携带登录命令）以及 `logs` 日志文件索引。
 - **操作**：`executeAction({ capability, config?, session?, hook?, label? })` 是执行原语，可临时执行任意 action；`runFlow(id)` 按 id 引用 flows 中已配置的 command/schedule action 执行一次，session 解析与定时触发一致（action 未声明时回落到 schedule 的 session）；`updateFlow(id, patch)` 按字段白名单修改并持久化写回 flows.yml（整条复检后生效，返回是否变更）；`reloadFlow(id)` 单独重载一条 flow（command 确认定义就绪、trigger/service/schedule 停止旧实例并按最新定义重启），组合即「改配置 + 立即生效」；`startService`/`stopService`、`listPlugins()`（已安装插件的 `name`/`version`/`capabilities`/`loaded` 全量清单）不变。
 - **热重载**：`reload()` 停止现有流、重读 flows.yml 并按新配置重新启动，进程与会话池不退出；仅支持 flows 配置，settings.yml 仍需重启生效。
 - **事件流**：`subscribe(listener)` 订阅任务流事件（`action.started`/`action.finished`、`service.started`/`service.stopped`、`flow.updated`、`flow.reloaded`、`flow.finished`、`schedule.fired`、`flows.reloading`/`flows.reloaded`），全部携带 `at` 时间戳；`action` 事件带 `flow`/`hook`/`ok`/`skipped`/`durationMs`/`effectiveConfig`，`service` 事件带 `capability`/`session`/`reason`/`durationMs`，`flow.finished` 带 `kind`/`id`/`capability`/`ok`/`durationMs`；退订返回函数；事件只在进程内分发，传输层由消费方自备。日志不入事件，直接读取日志文件。
 - **插件日志隔离**：每个插件注入以插件包短名（如 `messages-watch`）命名的子日志器，写入 `data/logs/<短名>.log`，互不混用；快照的 `logs` 是外部读取这些文件的索引。
 
-Unix 域套接字协议（`data/.paperkite/control.sock`）同步暴露上述契约：`snapshot`、`plugins`、`flow.run`、`action.run`、`flow.update`、`flow.reload`、`service.start|stop`、`runtime.reload`。
+Unix 域套接字协议（`data/.paperkite/control.sock`）同步暴露上述契约：`snapshot`、`plugins`、`flow.run`、`action.run`、`flow.update`、`flow.reload`、`service.start|stop`、`runtime.reload`、`session.reconnect`。
 
 ## 开发
 
