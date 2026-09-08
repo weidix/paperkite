@@ -29,6 +29,8 @@
   let generation = 0;
 
   let q = $state("");
+  /** 已提交的关键词条件（输入框在提交后清空，滚动恢复键以条件为准）。 */
+  let conditionQ = $state("");
   let selectedChats = $state<string[]>([]);
   let from = $state("");
   let to = $state("");
@@ -43,7 +45,7 @@
 
   $effect(() => {
     if (viewStore.current.kind !== "search") return;
-    q = viewStore.current.q;
+    conditionQ = viewStore.current.q;
     selectedChats = [...viewStore.current.chats];
     from = viewStore.current.from;
     to = viewStore.current.to;
@@ -150,13 +152,12 @@
     }
   }
 
-  /** 录入条件（查询框/会话/日期）：仅导航，键变化经 effect 自动重查。 */
+  /** 录入条件（会话/日期）：仅导航，键变化经 effect 自动重查。关键词条件不受影响。 */
   function commit(): void {
     const current = view;
     if (current === null) return;
     navigate({
       ...current,
-      q: q.trim(),
       chats: [...selectedChats],
       from,
       to,
@@ -164,9 +165,20 @@
     });
   }
 
-  /** 显式提交：条件未变也强制重查。 */
+  /** 添加入口：输入框按空格拆词，去重后并入关键词条件并清空；空输入时仅强制重查。 */
   function submit(): void {
-    commit();
+    const current = view;
+    if (current === null) return;
+    const words = q.trim().split(/\s+/).filter(Boolean);
+    q = "";
+    candidates = [];
+    candIndex = -1;
+    if (words.length === 0) {
+      refreshSeq += 1;
+      return;
+    }
+    const merged = [...new Set([...terms, ...words])];
+    navigate({ ...current, q: merged.join(" ") });
     refreshSeq += 1;
   }
 
@@ -224,7 +236,7 @@
   /** 卸载瞬间的检索条件标识（此时 URL 可能已切走，取本地同步值）。 */
   function localKey(): string {
     return JSON.stringify([
-      q.trim(),
+      conditionQ,
       selectedChats.join(","),
       isoDate(from, false) ?? "",
       isoDate(to, true) ?? "",
@@ -485,9 +497,9 @@
         <input
           id="global-search"
           bind:value={q}
-          placeholder="检索归档消息 · 空格分隔多个关键词"
+          placeholder="输入关键词，回车添加 · 空格分隔多个关键词"
           class="h-9 w-full rounded-md border border-input bg-background pl-9 pr-8 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="检索归档消息"
+          aria-label="添加关键词"
           onkeydown={onInputKeydown}
           onfocus={onInputFocus}
           onblur={onInputBlur}
