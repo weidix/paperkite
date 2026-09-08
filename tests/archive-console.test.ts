@@ -144,7 +144,7 @@ async function harness(options: {
   const server = createArchiveConsoleServer({
     store,
     backend: "sqlite",
-    mediaRoot: mediaDir,
+    mediaDir: mediaDir,
     session: options.session ? "primary" : undefined,
     sessions: session,
     logger
@@ -180,7 +180,7 @@ async function seed(store: SqliteArchiveStore, mediaDir: string, video = false):
     {
       messageId: 3, chatId: "100", chatTitle: "测试群", date: "2025-03-02T12:00:00.000Z",
       text: "附上截图看看效果", messageType: "photo", hasMedia: true, mediaType: "photo",
-      replyToMsgId: 1, senderId: "7", senderUsername: "tester"
+      replyToMessageId: 1, senderId: "7", senderUsername: "tester"
     },
     {
       messageId: 4, chatId: "100", chatTitle: "测试群", date: "2025-03-02T13:00:00.000Z",
@@ -758,7 +758,7 @@ test("archive console service boots over http and stops on abort", async () => {
   assert.deepEqual(state, {
     backend: "sqlite",
     session: null,
-    mediaRoot: null,
+    mediaDir: null,
     blockwords: { version: 0, count: 0 },
     blockedUsers: { version: 0, count: 0 }
   });
@@ -1260,7 +1260,7 @@ test("archive console reply chain resolves parent and children from replies", as
     assert.equal(root.statusCode, 200);
     const rootBody = root.json();
     assert.equal(rootBody.parent, undefined);
-    assert.equal(rootBody.replyToMsgId, undefined);
+    assert.equal(rootBody.replyToMessageId, undefined);
     assert.equal(rootBody.children.length, 1);
     assert.equal(rootBody.children[0].kind, "message");
     assert.equal(rootBody.children[0].record.messageId, 3);
@@ -1268,7 +1268,7 @@ test("archive console reply chain resolves parent and children from replies", as
     const reply = await h.server.inject({ method: "GET", url: "/api/messages/3/replies" });
     assert.equal(reply.statusCode, 200);
     const replyBody = reply.json();
-    assert.equal(replyBody.replyToMsgId, 1);
+    assert.equal(replyBody.replyToMessageId, 1);
     assert.equal(replyBody.parent.kind, "message");
     assert.equal(replyBody.parent.record.messageId, 1);
     assert.equal(replyBody.children.length, 0);
@@ -1278,7 +1278,7 @@ test("archive console reply chain resolves parent and children from replies", as
       (item: { kind: string; record?: { messageId: number } }) =>
         item.kind === "message" && item.record?.messageId === 3
     )?.record;
-    assert.equal(m3?.replyToMsgId, 1);
+    assert.equal(m3?.replyToMessageId, 1);
     assert.equal(m3?.replyToText, "你好，今天天气不错");
 
     const missing = await h.server.inject({ method: "GET", url: "/api/messages/999/replies" });

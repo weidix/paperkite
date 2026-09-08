@@ -11,10 +11,9 @@ interface WatchConfig {
   readonly incoming?: boolean;
   readonly outgoing?: boolean;
   readonly forwards?: boolean;
-  readonly pollSeconds?: number;
   readonly intervalSeconds?: number;
-  readonly limit?: number;
-  readonly startAfterId?: number;
+  readonly maxMessages?: number;
+  readonly afterMessageId?: number;
 }
 
 interface EventClient {
@@ -66,11 +65,11 @@ export class PollConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
     const chats = listChats(this.config);
     if (!this.sessions || !this.session) throw new Error("poll conversation watcher needs a session");
-    const interval = normalizeSeconds(this.config.pollSeconds ?? this.config.intervalSeconds, 30);
-    const limit = normalizeLimit(this.config.limit);
+    const interval = normalizeSeconds(this.config.intervalSeconds, 30);
+    const limit = normalizeLimit(this.config.maxMessages);
     const matcher = makePattern(this.config);
     const cursors = new Map<string, number>();
-    for (const chat of chats) cursors.set(cursorKey(chat), this.config.startAfterId ?? 0);
+    for (const chat of chats) cursors.set(cursorKey(chat), this.config.afterMessageId ?? 0);
 
     while (!this.signal.aborted) {
       for (const chat of chats) {

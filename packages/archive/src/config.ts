@@ -7,25 +7,21 @@ export interface ArchiveTarget {
 }
 
 export interface ArchiveConfig {
-  readonly backend?: string;
-  readonly file?: string;
-  readonly dbPath?: string;
   readonly url?: string;
   readonly schema?: string;
   readonly chats?: unknown;
   readonly chat?: string | number;
   readonly daysBack?: number;
   readonly maxMessages?: number;
-  readonly limit?: number;
   readonly downloadMedia?: boolean;
   readonly resume?: boolean;
   readonly batchSize?: number;
-  readonly mediaPath?: string;
+  readonly mediaDir?: string;
 }
 
 export function buildTargets(config: ArchiveConfig): ArchiveTarget[] {
   const defaultDaysBack = coerceInt(config.daysBack, 30);
-  const defaultMaxMessages = coerceInt(config.maxMessages ?? config.limit, 1_000);
+  const defaultMaxMessages = coerceInt(config.maxMessages, 1_000);
   const defaultDownloadMedia = coerceBool(config.downloadMedia, true);
   const defaultResume = coerceBool(config.resume, true);
 
@@ -45,7 +41,7 @@ export function buildTargets(config: ArchiveConfig): ArchiveTarget[] {
     targets.push({
       chat: identifier,
       daysBack: coerceInt(overrides?.daysBack, defaultDaysBack),
-      maxMessages: coerceInt(overrides?.maxMessages ?? overrides?.limit, defaultMaxMessages),
+      maxMessages: coerceInt(overrides?.maxMessages, defaultMaxMessages),
       downloadMedia: coerceBool(overrides?.downloadMedia, defaultDownloadMedia),
       resume: coerceBool(overrides?.resume, defaultResume)
     });

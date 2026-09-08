@@ -53,10 +53,9 @@ schedules:
     run:
       capability: archive.sync
       config:
-        backend: sqlite
-        file: data/archive.sqlite
+        url: sqlite:data/archive.sqlite
         chats: ["@example"]
-        limit: 500
+        maxMessages: 500
 
 services:
   - id: runtime-console

@@ -140,7 +140,7 @@ async function harness(options: {
   };
   result.archiver = new MessageArchiver({
     store,
-    mediaPath: join(tmp, "downloads"),
+    mediaDir: join(tmp, "downloads"),
     downloadMedia: options.downloadMedia ?? false,
     batchSize: options.batchSize ?? 50,
     shouldStop: () => result.stopAfterBatch && store.inserted >= 50,

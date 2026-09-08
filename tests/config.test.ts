@@ -24,7 +24,6 @@ test("expands YAML merge keys before normalizing flow configuration", async () =
     file,
     [
       "_storage: &storage",
-      "  backend: postgres",
       "  url: postgresql://localhost/archive",
       "services:",
       "  - id: console",
@@ -41,7 +40,6 @@ test("expands YAML merge keys before normalizing flow configuration", async () =
   assert.equal(service?.kind, "service");
   if (service?.kind !== "service") throw new Error("service was not loaded");
   assert.deepEqual(service.config, {
-    backend: "postgres",
     url: "postgresql://localhost/archive",
     port: 18080
   });

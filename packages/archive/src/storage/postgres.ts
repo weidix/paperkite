@@ -306,12 +306,12 @@ export class PostgresArchiveStore implements ArchiveStore {
           row.text,
           entitiesJson(row.entities),
           row.messageType ?? "text",
-          row.replyToMsgId ?? null,
+          row.replyToMessageId ?? null,
           row.forwardFromId ?? null,
           row.forwardFromName ?? null,
           row.hasMedia,
           row.mediaType ?? null,
-          row.mediaPath ?? null,
+          row.mediaFilePath ?? null,
           new Date().toISOString(),
           blockedOf(row, this.blockwords, this.blockedUsers)
         );
@@ -755,12 +755,12 @@ export class PostgresArchiveStore implements ArchiveStore {
     const anchor = await this.getMessageByRowId(rowId);
     if (!anchor) return undefined;
     let parent: ReplyChainResult["parent"];
-    if (anchor.replyToMsgId !== undefined) {
+    if (anchor.replyToMessageId !== undefined) {
       const result = await this.pool.query(
         `${messageSelect(this.table("messages"), this.table("media_files"))}
          WHERE m.chat_id = $1 AND m.message_id = $2::bigint AND m.blocked = FALSE
          LIMIT 1`,
-        [anchor.chatId, anchor.replyToMsgId]
+        [anchor.chatId, anchor.replyToMessageId]
       );
       if (result.rows.length > 0) {
         const records = await this.attachMedia(result.rows);
@@ -791,7 +791,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     return {
       parent,
       children,
-      replyToMsgId: anchor.replyToMsgId
+      replyToMessageId: anchor.replyToMessageId
     };
   }
 
@@ -1202,7 +1202,7 @@ function toMessageRecord(
     mediaType: optionalString(row.media_type),
     messageType: optionalString(row.message_type) ?? "text",
     mimeType: optionalString(row.mime_type),
-    replyToMsgId: row.reply_to_msg_id === null || row.reply_to_msg_id === undefined ? undefined : Number(row.reply_to_msg_id),
+    replyToMessageId: row.reply_to_msg_id === null || row.reply_to_msg_id === undefined ? undefined : Number(row.reply_to_msg_id),
     replyToText: optionalString(row.reply_to_text),
     forwardFromId: optionalString(row.forward_from_id),
     forwardFromName: optionalString(row.forward_from_name),

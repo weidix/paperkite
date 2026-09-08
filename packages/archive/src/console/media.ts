@@ -52,11 +52,11 @@ const EXT_MIME: Record<string, string> = {
   ".rar": "application/vnd.rar"
 };
 
-/** 落盘路径解析：配置 mediaRoot 时限定其内，否则相对进程工作目录解析。 */
-export function resolveMediaPath(raw: string | undefined, mediaRoot: string | undefined): string | undefined {
+/** 落盘路径解析：配置 mediaDir 时限定其内，否则相对进程工作目录解析。 */
+export function resolveMediaPath(raw: string | undefined, mediaDir: string | undefined): string | undefined {
   const text = raw?.trim();
   if (!text) return undefined;
-  const root = mediaRoot?.trim() ? resolve(mediaRoot) : undefined;
+  const root = mediaDir?.trim() ? resolve(mediaDir) : undefined;
   const path = root ? resolve(root, text) : resolve(process.cwd(), text);
   if (root && path !== root && !path.startsWith(root + sep)) return undefined;
   return path;
@@ -390,9 +390,9 @@ export interface DiskMediaInfo {
 
 export async function diskMediaInfo(
   file: StoredMediaFile,
-  mediaRoot: string | undefined
+  mediaDir: string | undefined
 ): Promise<DiskMediaInfo | undefined> {
-  const path = resolveMediaPath(file.filePath, mediaRoot);
+  const path = resolveMediaPath(file.filePath, mediaDir);
   if (!path) return undefined;
   try {
     const info = await stat(path);

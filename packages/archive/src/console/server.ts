@@ -11,7 +11,7 @@ import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf,
 export interface ArchiveConsoleServerOptions {
   readonly store: ArchiveStore;
   readonly backend?: string;
-  readonly mediaRoot?: string;
+  readonly mediaDir?: string;
   readonly session?: string;
   readonly sessions?: SessionAccess;
   readonly logger: RuntimeLogger;
@@ -62,7 +62,7 @@ function registerRoutes(
   liveTextCache: Map<string, LiveTextCacheEntry>,
   live: LiveMediaStreamer | undefined
 ): void {
-  const { store, mediaRoot, session, sessions, logger } = options;
+  const { store, mediaDir, session, sessions, logger } = options;
 
   server.get("/api/state", async () => {
     const blockwords = await store.listBlockwords();
@@ -70,7 +70,7 @@ function registerRoutes(
     return {
       backend: options.backend ?? "sqlite",
       session: session ?? null,
-      mediaRoot: mediaRoot ?? null,
+      mediaDir: mediaDir ?? null,
       blockwords: { version: blockwords.version, count: blockwords.words.length },
       blockedUsers: { version: blockedUsers.version, count: blockedUsers.users.length }
     };
@@ -256,7 +256,7 @@ function registerRoutes(
     try {
       const file = await store.getMediaFileById(rowIdOr(request.params.id));
       if (!file) throw new HttpError(404, "媒体记录不存在");
-      return { file, onDisk: (await diskMediaInfo(file, mediaRoot)) !== undefined };
+      return { file, onDisk: (await diskMediaInfo(file, mediaDir)) !== undefined };
     } catch (error) {
       return sendError(reply, error, logger);
     }
@@ -323,7 +323,7 @@ function registerRoutes(
       try {
         const file = await store.getMediaFileById(rowIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
-        const info = await diskMediaInfo(file, mediaRoot);
+        const info = await diskMediaInfo(file, mediaDir);
         if (!info) throw new HttpError(404, "媒体文件未落盘");
         return sendMediaStream(request, reply, file, info.path, info.size, file.mimeType);
       } catch (error) {

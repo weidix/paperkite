@@ -5,15 +5,12 @@ import { Action, type TriggerEmission } from "@paperkite/sdk";
 interface SendConfig {
   readonly mode?: "user" | "bot" | "personal";
   readonly peer?: string | number;
-  readonly to?: string | number;
-  readonly chat?: string | number;
   readonly chatId?: string | number;
   readonly botToken?: string;
   readonly text?: string;
-  readonly message?: string;
   readonly file?: string;
   readonly caption?: string;
-  readonly reply?: boolean;
+  readonly replyToEvent?: boolean;
   readonly replyTo?: number;
   readonly silent?: boolean;
   readonly parseMode?: string;
@@ -29,8 +26,8 @@ interface TelegramClientLike {
 
 export class SendMessageAction extends Action<SendConfig> {
   protected async run(): Promise<void> {
-    const peer = this.config.peer ?? this.config.to ?? this.config.chat;
-    const message = render(this.config.text ?? this.config.message ?? "", this.emission);
+    const peer = this.config.peer;
+    const message = render(this.config.text ?? "", this.emission);
     await waitForSendTime(this.config.sendAt, this.config.delaySeconds, this.signal);
     if (this.signal.aborted) return;
     if (this.config.mode === "bot") {
@@ -45,7 +42,7 @@ export class SendMessageAction extends Action<SendConfig> {
         await telegram.sendFile(peer, {
           file: this.config.file,
           caption: render(this.config.caption ?? message, this.emission),
-          replyTo: this.config.replyTo ?? (this.config.reply ? replyId(this.emission) : undefined),
+          replyTo: this.config.replyTo ?? (this.config.replyToEvent ? replyId(this.emission) : undefined),
           silent: this.config.silent,
           parseMode: this.config.parseMode,
           forceDocument: false
@@ -55,7 +52,7 @@ export class SendMessageAction extends Action<SendConfig> {
       if (!message) throw new Error("send needs text or file");
       await telegram.sendMessage(peer, {
         message,
-        replyTo: this.config.replyTo ?? (this.config.reply ? replyId(this.emission) : undefined),
+        replyTo: this.config.replyTo ?? (this.config.replyToEvent ? replyId(this.emission) : undefined),
         silent: this.config.silent,
         parseMode: this.config.parseMode,
         linkPreview: this.config.linkPreview
@@ -127,7 +124,7 @@ async function sendWithBot(
   parentSignal: AbortSignal
 ): Promise<void> {
   const token = config.botToken;
-  const chatId = config.chatId ?? config.chat;
+  const chatId = config.chatId;
   if (!token || chatId === undefined || chatId === "") throw new Error("bot mode needs botToken and chatId");
   if (!config.file && !message) throw new Error("send needs text or file");
   const controller = new AbortController();
@@ -142,7 +139,7 @@ async function sendWithBot(
       form.set("chat_id", String(chatId));
       form.set("document", new Blob([await readFile(config.file)]), config.file.split(/[\\/]/).pop() ?? "file");
       form.set("caption", render(config.caption ?? message, emission));
-      const replyTo = config.replyTo ?? (config.reply ? replyId(emission) : undefined);
+      const replyTo = config.replyTo ?? (config.replyToEvent ? replyId(emission) : undefined);
       if (replyTo) form.set("reply_to_message_id", String(replyTo));
       if (config.silent !== undefined) form.set("disable_notification", String(config.silent));
       body = form;
@@ -150,7 +147,7 @@ async function sendWithBot(
       body = JSON.stringify({
         chat_id: chatId,
         text: message,
-        reply_to_message_id: config.replyTo ?? (config.reply ? replyId(emission) : undefined),
+        reply_to_message_id: config.replyTo ?? (config.replyToEvent ? replyId(emission) : undefined),
         disable_notification: config.silent,
         parse_mode: config.parseMode,
         link_preview_options: config.linkPreview === false ? { is_disabled: true } : undefined
