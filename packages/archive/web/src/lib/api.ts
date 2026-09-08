@@ -160,6 +160,18 @@ export async function fetchReplyChain(recordId: string): Promise<ReplyChainResul
   return request(`/api/messages/${recordId}/replies`);
 }
 
+/** 按聊天引用解析消息：chat、username 或私有频道 code 之一定位聊天，返回存档行 ID；不存在抛 404。 */
+export async function resolveMessageRef(
+  ref: { chatId?: string; username?: string; code?: string; messageId: number }
+): Promise<{ recordId: string }> {
+  const params = new URLSearchParams();
+  if (ref.chatId) params.set("chat", ref.chatId);
+  if (ref.username) params.set("username", ref.username);
+  if (ref.code) params.set("code", ref.code);
+  params.set("msg", String(ref.messageId));
+  return request(`/api/messages/resolve?${params}`);
+}
+
 /** 在线说明：从 Telegram 实时取回原始文本与实体（归档缺实体时用于补显）。 */
 export async function fetchLiveText(recordId: string): Promise<{ text: string; entities?: readonly MessageEntity[] }> {
   return request(`/api/messages/${recordId}/live-text`);

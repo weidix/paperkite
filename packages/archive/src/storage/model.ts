@@ -325,6 +325,8 @@ export interface ArchiveStore {
   getSenderSummary(senderId: string, chatId?: string): Promise<SenderSummary | undefined>;
   /** 回复链：锚点不存在（含被屏蔽）返回 undefined，路由映射 404。 */
   getReplyChain(recordId: string): Promise<ReplyChainResult | undefined>;
+  /** 按聊天引用解析消息：chatId、username 或私有频道 code 之一定位聊天，返回存档行 ID；不存在返回 undefined。 */
+  resolveMessageRef(ref: { chatId?: string; username?: string; code?: string; messageId: number }): Promise<string | undefined>;
   getMediaFileById(id: string): Promise<StoredMediaFile | undefined>;
   /** 屏蔽词内存缓存快照，读路径不触表。 */
   listBlockwords(): Promise<BlockwordState>;

@@ -96,6 +96,7 @@ class CountingStore implements ArchiveStore {
     return result;
   }
   searchStructured(query: Parameters<ArchiveStore["searchStructured"]>[0]) { return this.inner.searchStructured(query); }
+  resolveMessageRef(ref: Parameters<ArchiveStore["resolveMessageRef"]>[0]) { return this.inner.resolveMessageRef(ref); }
   listChatLedger(limit: number) { return this.inner.listChatLedger(limit); }
   getMessageContext(recordId: string, beforeN: number, afterN: number) { return this.inner.getMessageContext(recordId, beforeN, afterN); }
   getMessageByRecordId(recordId: string) { return this.inner.getMessageByRecordId(recordId); }

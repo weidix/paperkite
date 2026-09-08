@@ -229,6 +229,26 @@ function registerRoutes(
     }
   );
 
+  server.get<{ Querystring: { chat?: string; username?: string; code?: string; msg?: string } }>(
+    "/api/messages/resolve",
+    async (request, reply) => {
+      try {
+        const messageId = intOr(request.query.msg) ?? 0;
+        if (!Number.isInteger(messageId) || messageId <= 0) throw new HttpError(400, "msg 须为正整数");
+        const recordId = await store.resolveMessageRef({
+          chatId: text(request.query.chat),
+          username: text(request.query.username),
+          code: text(request.query.code),
+          messageId
+        });
+        if (!recordId) throw new HttpError(404, "存档中无此消息");
+        return { recordId };
+      } catch (error) {
+        return sendError(reply, error, logger);
+      }
+    }
+  );
+
   server.get<{ Params: { id: string } }>(
     "/api/messages/:id/live-text",
     async (request, reply) => {
