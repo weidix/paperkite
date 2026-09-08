@@ -103,6 +103,12 @@ export class PostgresArchiveStore implements ArchiveStore {
           ON ${this.table("messages")} (date, id);
         CREATE INDEX IF NOT EXISTS idx_messages_sender
           ON ${this.table("messages")} (sender_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_chat
+          ON ${this.table("messages")} (chat_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_chat_blocked
+          ON ${this.table("messages")} (chat_id, blocked);
+        CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped_blocked
+          ON ${this.table("messages")} (chat_id, grouped_id, blocked);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_reply
           ON ${this.table("messages")} (chat_id, reply_to_msg_id);
         CREATE INDEX IF NOT EXISTS idx_messages_forward_from
@@ -571,14 +577,22 @@ export class PostgresArchiveStore implements ArchiveStore {
     const entry = buildSearchWhere(this.table("messages"), rowWhere, rowValues, memberWhere, memberValues);
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
-    const entryCount = await this.pool.query(
-      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")} m ${entry.where}`,
-      entry.values
-    );
-    const messageCount = await this.pool.query(
-      `SELECT COUNT(*)::int AS count FROM ${this.table("messages")} m ${rowWhere}`,
-      rowValues
-    );
+    const row = rowWhere.replace(/^WHERE\s+/, "");
+    const [entryCount, messageCount] = await Promise.all([
+      this.pool.query(
+        `SELECT (
+           (SELECT COUNT(*)::int FROM ${this.table("messages")} m
+             WHERE m.grouped_id IS NULL AND ${row})
+           + (SELECT COUNT(DISTINCT m.grouped_id)::int FROM ${this.table("messages")} m
+             WHERE m.grouped_id IS NOT NULL AND ${row})
+         )::int AS count`,
+        [...rowValues, ...rowValues]
+      ),
+      this.pool.query(
+        `SELECT COUNT(*)::int AS count FROM ${this.table("messages")} m ${rowWhere}`,
+        rowValues
+      )
+    ]);
     const rows = await this.pool.query(
       `${messageSelect(this.table("messages"), this.table("media_files"))}
        ${entry.where}
