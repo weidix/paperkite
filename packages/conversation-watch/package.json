@@ -15,8 +15,8 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "trigger", "name": "watch.group", "handler": "LiveConversationTrigger" },
-        { "kind": "trigger", "name": "watch.poll", "handler": "PollConversationTrigger" }
+        { "kind": "trigger", "name": "messages.watch", "handler": "LiveConversationTrigger" },
+        { "kind": "trigger", "name": "messages.poll", "handler": "PollConversationTrigger" }
       ]
     }
   }

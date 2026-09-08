@@ -88,7 +88,7 @@
       </span>
       <span class="flex flex-col leading-tight">
         <span class="font-display text-sm font-semibold tracking-tight">归档台</span>
-        <span class="font-mono text-[11px] text-muted-foreground">archive.console_web</span>
+        <span class="font-mono text-[11px] text-muted-foreground">archive.console</span>
       </span>
     </button>
 

@@ -22,7 +22,7 @@ const PLUGINS = [
   {
     name: "@paperkite/plugin-console-web",
     version: "0.1.0",
-    capabilities: [{ kind: "service" as const, name: "runtime.console_web" }],
+    capabilities: [{ kind: "service" as const, name: "runtime.console" }],
     loaded: true
   }
 ];
@@ -40,7 +40,7 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       running: true,
       pid: process.pid,
       uptimeSeconds: 12,
-      triggers: ["watch.group"],
+      triggers: ["messages.watch"],
       services: ["console"],
       schedules: [],
       activeServices: ["console"],
@@ -49,14 +49,14 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       flows: [
         {
           kind: "trigger",
-          id: "watch.group",
-          capability: "watch.group",
+          id: "messages.watch",
+          capability: "messages.watch",
           enabled: true,
           active: true,
           session: "primary",
           logFile: false,
           config: { intervalSeconds: 60 },
-          actions: [{ capability: "notifications.bark" }]
+          actions: [{ capability: "notify.bark" }]
         }
       ],
       logs
@@ -140,7 +140,7 @@ test("runtime console exposes snapshot, plugins, and control operations", async 
     const run = await server.inject({
       method: "POST",
       url: "/api/action/run",
-      payload: { spec: { capability: "notifications.bark" } }
+      payload: { spec: { capability: "notify.bark" } }
     });
     assert.equal(run.statusCode, 200);
 
@@ -149,13 +149,13 @@ test("runtime console exposes snapshot, plugins, and control operations", async 
 
     const patch = await server.inject({
       method: "PATCH",
-      url: "/api/flows/watch.group",
+      url: "/api/flows/messages.watch",
       payload: { enabled: false }
     });
     assert.equal(patch.statusCode, 200);
     assert.deepEqual(patch.json(), { ok: true, changed: true });
 
-    const reload = await server.inject({ method: "POST", url: "/api/flows/watch.group/reload" });
+    const reload = await server.inject({ method: "POST", url: "/api/flows/messages.watch/reload" });
     assert.equal(reload.statusCode, 200);
 
     const start = await server.inject({ method: "POST", url: "/api/services/console/start" });
@@ -175,10 +175,10 @@ test("runtime console exposes snapshot, plugins, and control operations", async 
     assert.equal((unknown.json() as { error: string }).error, "unknown flow: nope");
 
     assert.deepEqual(calls, [
-      "action:notifications.bark",
+      "action:notify.bark",
       "flow:archive-daily",
-      "update:watch.group:false",
-      "reload:watch.group",
+      "update:messages.watch:false",
+      "reload:messages.watch",
       "start:console",
       "stop:console",
       "reload-runtime",
@@ -258,8 +258,8 @@ test("runtime console streams runtime events over SSE and unsubscribes on discon
     assert.ok(reader);
     const event: RuntimeEvent = {
       type: "action.finished",
-      id: "action:notifications.bark",
-      capability: "notifications.bark",
+      id: "action:notify.bark",
+      capability: "notify.bark",
       ok: true,
       skipped: false,
       durationMs: 42,
@@ -276,7 +276,7 @@ test("runtime console streams runtime events over SSE and unsubscribes on discon
       if (buffer.includes('"action.finished"')) break;
     }
     assert.ok(buffer.includes('"action.finished"'), buffer);
-    assert.ok(buffer.includes('"notifications.bark"'), buffer);
+    assert.ok(buffer.includes('"notify.bark"'), buffer);
   } finally {
     controller.abort();
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
@@ -348,7 +348,7 @@ test("runtime console serves the SPA shell for direct deep links", async () => {
   const controller = new AbortController();
   const context: ServiceContext<Record<string, unknown>> = {
     id: "console-web",
-    capability: "runtime.console_web",
+    capability: "runtime.console",
     config: { host: "127.0.0.1", port, publicDir },
     signal: controller.signal,
     control: stubRuntime().runtime,

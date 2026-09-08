@@ -41,7 +41,7 @@ test("local control socket dispatches runtime, flow, session, and action operati
         {
           name: "@paperkite/plugin-bark",
           version: "1.0.0",
-          capabilities: [{ kind: "action", name: "notifications.bark" }],
+          capabilities: [{ kind: "action", name: "notify.bark" }],
           loaded: true
         }
       ];
@@ -54,7 +54,7 @@ test("local control socket dispatches runtime, flow, session, and action operati
   assert.equal(await requestControl({ action: "flow.reload", id: "console" }, path), true);
   assert.equal(await requestControl({ action: "runtime.reload" }, path), true);
   assert.equal(await requestControl({ action: "flow.run", id: "archive-daily" }, path), true);
-  assert.equal(await requestControl({ action: "action.run", spec: { capability: "notifications.bark" } }, path), true);
+  assert.equal(await requestControl({ action: "action.run", spec: { capability: "notify.bark" } }, path), true);
   assert.equal(await requestControl({ action: "session.reconnect", id: "primary" }, path), true);
   assert.deepEqual(await requestControl({ action: "session.login.begin", id: "primary" }, path), {
     status: "prompt",
@@ -67,7 +67,7 @@ test("local control socket dispatches runtime, flow, session, and action operati
     {
       name: "@paperkite/plugin-bark",
       version: "1.0.0",
-      capabilities: [{ kind: "action", name: "notifications.bark" }],
+      capabilities: [{ kind: "action", name: "notify.bark" }],
       loaded: true
     }
   ]);
@@ -76,7 +76,7 @@ test("local control socket dispatches runtime, flow, session, and action operati
     "reload:console",
     "reload",
     "flow:archive-daily",
-    "action:notifications.bark",
+    "action:notify.bark",
     "reconnect:primary",
     "login:primary",
     "login:primary:13900000000",

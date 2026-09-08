@@ -43,11 +43,11 @@ test("reload completes and the console restarts while its own SSE stream is open
   const directory = await mkdtemp(join(tmpdir(), "paperkite-console-reload-"));
   const logger = new AppLogger("info", join(directory, "logs"));
   const registry = new CapabilityRegistry();
-  registry.register("service", "runtime.console_web", RuntimeConsoleWebService, "@paperkite/plugin-console-web", {
+  registry.register("service", "runtime.console", RuntimeConsoleWebService, "@paperkite/plugin-console-web", {
     control: true
   });
   const catalog = fromMapping({
-    services: [{ id: "console", capability: "runtime.console_web", config: { host: "127.0.0.1", port } }]
+    services: [{ id: "console", capability: "runtime.console", config: { host: "127.0.0.1", port } }]
   });
   const runtime = new Runtime({
     catalog,
