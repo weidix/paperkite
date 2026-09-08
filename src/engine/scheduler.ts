@@ -47,6 +47,10 @@ export class RuntimeScheduler {
     arm();
   }
 
+  has(id: string): boolean {
+    return this.stops.has(id);
+  }
+
   remove(id: string): void {
     this.stops.get(id)?.();
   }

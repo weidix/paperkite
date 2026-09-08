@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { SessionUnavailableError } from "@paperkite/sdk";
 import { SessionPool, createGramLogger, type SessionClient } from "../src/telegram/pool.js";
 import type { AppSettings } from "../src/config/settings.js";
 import type { RuntimeLogger } from "@paperkite/sdk";
@@ -70,4 +71,133 @@ test("gramJS logs route through the app logger with the unified format", () => {
     { level: "error", message: "unexpected data center" },
     { level: "debug", message: "visible at debug level" }
   ]);
+});
+
+function makeLogger(): RuntimeLogger {
+  const logger: RuntimeLogger = {
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
+    child() {
+      return logger;
+    }
+  };
+  return logger;
+}
+
+function workingClient(): SessionClient {
+  return {
+    connected: true,
+    async start() {},
+    async connect() {},
+    async disconnect() {},
+    async getMe() {},
+    session: { save: () => "saved" }
+  };
+}
+
+function accountFailure(): Error {
+  return Object.assign(new Error("500: INTERNAL"), { errorMessage: "INTERNAL", code: 500 });
+}
+
+test("session faults isolate the session and automatic reconnects recover it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-guard-"));
+  const settings: AppSettings = {
+    telegram: {
+      apiId: 1,
+      apiHash: "hash",
+      sessionsDir: directory,
+      sessionGuard: { windowMs: 200, threshold: 2, backoffMinMs: 30, backoffMaxMs: 200 }
+    },
+    logging: { level: "error", directory }
+  };
+  const logger = makeLogger();
+  const pool = new SessionPool(settings, logger, () => workingClient());
+  await pool.ensure(["primary"]);
+  const states: string[] = [];
+  pool.subscribe((change) => states.push(change.state));
+
+  const failing = async (): Promise<number> => {
+    throw accountFailure();
+  };
+  await assert.rejects(pool.run("primary", failing));
+  await assert.rejects(pool.run("primary", failing));
+  await assert.rejects(pool.run("primary", async () => 1), (error: unknown) => {
+    assert.ok(error instanceof SessionUnavailableError);
+    assert.equal((error as SessionUnavailableError).session, "primary");
+    return true;
+  });
+  assert.ok(states.includes("isolated"), "session must isolate after the fault threshold: " + states.join(","));
+
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  assert.equal(await pool.run("primary", async () => 42), 42);
+  assert.ok(states.includes("connected"), "session must reconnect by itself: " + states.join(","));
+  await pool.closeAll();
+});
+
+test("auth-class failures move the session to waiting-auth with a typed error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-auth-"));
+  const settings: AppSettings = {
+    telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
+    logging: { level: "error", directory }
+  };
+  const logger = makeLogger();
+  const pool = new SessionPool(settings, logger, () => workingClient());
+  await pool.ensure(["primary"]);
+  const authError = Object.assign(new Error("401: AUTH_KEY_UNREGISTERED"), {
+    errorMessage: "AUTH_KEY_UNREGISTERED",
+    code: 401
+  });
+  await assert.rejects(pool.run("primary", async () => {
+    throw authError;
+  }));
+  assert.equal(pool.state("primary"), "waiting-auth");
+  await assert.rejects(pool.run("primary", async () => 1), (error: unknown) => {
+    assert.ok(error instanceof SessionUnavailableError);
+    return true;
+  });
+  await pool.closeAll();
+});
+
+test("action-class failures do not count toward session isolation", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-action-"));
+  const settings: AppSettings = {
+    telegram: {
+      apiId: 1,
+      apiHash: "hash",
+      sessionsDir: directory,
+      sessionGuard: { windowMs: 200, threshold: 2, backoffMinMs: 30, backoffMaxMs: 200 }
+    },
+    logging: { level: "error", directory }
+  };
+  const logger = makeLogger();
+  const pool = new SessionPool(settings, logger, () => workingClient());
+  await pool.ensure(["primary"]);
+  const peerError = Object.assign(new Error("400: PEER_ID_INVALID"), { errorMessage: "PEER_ID_INVALID", code: 400 });
+  for (let index = 0; index < 3; index += 1) {
+    await assert.rejects(
+      pool.run("primary", async () => {
+        throw peerError;
+      })
+    );
+  }
+  assert.equal(pool.state("primary"), "connected");
+  await pool.closeAll();
+});
+
+test("access hands out an implicit single-session handle only for a declared session", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-access-"));
+  const settings: AppSettings = {
+    telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
+    logging: { level: "error", directory }
+  };
+  const logger = makeLogger();
+  const pool = new SessionPool(settings, logger, () => workingClient());
+  await pool.ensure(["primary"]);
+  const access = pool.access("primary");
+  assert.ok(access, "a declared session gets a session handle");
+  assert.equal(await access!.run(async () => 42), 42);
+  assert.equal(pool.access(undefined), undefined, "plugins without a declared session see no handle");
+  await pool.closeAll();
 });

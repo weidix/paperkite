@@ -45,6 +45,7 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       schedules: [],
       activeServices: ["console"],
       activeActions: [],
+      sessions: [],
       flows: [
         {
           kind: "trigger",
@@ -83,6 +84,17 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
     },
     async reload() {
       calls.push("reload-runtime");
+    },
+    async reconnectSession(id) {
+      calls.push("reconnect:" + id);
+    },
+    async beginSessionLogin(id) {
+      calls.push("login:" + id);
+      return { status: "error" as const, message: "not supported" };
+    },
+    async submitSessionLogin(id) {
+      calls.push("login:" + id);
+      return { status: "error" as const, message: "not supported" };
     },
     listPlugins() {
       return PLUGINS;
@@ -154,6 +166,10 @@ test("runtime console exposes snapshot, plugins, and control operations", async 
     const runtimeReload = await server.inject({ method: "POST", url: "/api/runtime/reload" });
     assert.equal(runtimeReload.statusCode, 200);
 
+    const reconnect = await server.inject({ method: "POST", url: "/api/sessions/primary/reconnect" });
+    assert.equal(reconnect.statusCode, 200);
+    assert.deepEqual(reconnect.json(), { ok: true });
+
     const unknown = await server.inject({ method: "POST", url: "/api/flows/nope/run" });
     assert.equal(unknown.statusCode, 500);
     assert.equal((unknown.json() as { error: string }).error, "unknown flow: nope");
@@ -165,7 +181,8 @@ test("runtime console exposes snapshot, plugins, and control operations", async 
       "reload:watch.group",
       "start:console",
       "stop:console",
-      "reload-runtime"
+      "reload-runtime",
+      "reconnect:primary"
     ]);
   } finally {
     await server.close();

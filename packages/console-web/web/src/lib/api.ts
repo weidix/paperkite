@@ -57,6 +57,10 @@ export const api = {
     return request(`/api/services/${encodeURIComponent(id)}/stop`, { method: "POST" });
   },
 
+  reconnectSession(id: string): Promise<{ ok: boolean }> {
+    return request(`/api/sessions/${encodeURIComponent(id)}/reconnect`, { method: "POST" });
+  },
+
   reloadRuntime(): Promise<{ ok: boolean }> {
     return request("/api/runtime/reload", { method: "POST" });
   }

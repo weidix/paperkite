@@ -14,7 +14,7 @@ import type { RuntimeEvent } from "@paperkite/sdk";
 
 const fakeSessions = {
   ensure: async () => undefined,
-  access: () => ({ get: () => undefined, run: async (_name: string, op: (client: unknown) => unknown) => op(undefined) }),
+  access: () => ({ run: async (operation: (client: unknown) => unknown) => operation(undefined) }),
   closeAll: async () => undefined
 } as unknown as SessionPool;
 

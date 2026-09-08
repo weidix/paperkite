@@ -127,6 +127,15 @@ function registerRoutes(
     }
   });
 
+  server.post<{ Params: { id: string } }>("/api/sessions/:id/reconnect", async (request, reply) => {
+    try {
+      await control.reconnectSession(flowId(request));
+      return { ok: true };
+    } catch (error) {
+      return sendError(reply, error, logger);
+    }
+  });
+
   server.post("/api/runtime/reload", async (request, reply) => {
     reply.send({ ok: true });
     try {

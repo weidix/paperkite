@@ -15,7 +15,6 @@ interface WatchConfig {
   readonly intervalSeconds?: number;
   readonly limit?: number;
   readonly startAfterId?: number;
-  readonly sessions?: readonly string[];
 }
 
 interface EventClient {
@@ -27,32 +26,29 @@ interface EventClient {
 class LiveConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
     const chats = listChats(this.payload);
-    const sessions = sessionNames(this.payload, this.session);
-    if (!this.sessions) throw new Error("conversation watcher needs session access");
+    if (!this.sessions || !this.session) throw new Error("watch.group needs a session");
     const matcher = makePattern(this.payload);
-    const handlers: Array<{ client: EventClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
+    const registrations: Array<{ client: EventClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
     try {
-      for (const session of sessions) {
-        await this.sessions.run(session, async (rawClient) => {
-          const client = rawClient as EventClient;
-          const builder = new NewMessage({
-            chats: chats as never[],
-            fromUsers: this.payload.fromUsers as never[] | undefined,
-            incoming: this.payload.incoming,
-            outgoing: this.payload.outgoing,
-            forwards: this.payload.forwards,
-            pattern: matcher ? new RegExp(matcher.source, matcher.flags) : undefined
-          });
-          const handler = (input: unknown): void => {
-            void this.handleEvent(input, matcher).catch((error) => this.contextError(error));
-          };
-          client.addEventHandler(handler, builder);
-          handlers.push({ client, handler, builder });
+      await this.sessions.run(async (rawClient) => {
+        const client = rawClient as EventClient;
+        const builder = new NewMessage({
+          chats: chats as never[],
+          fromUsers: this.payload.fromUsers as never[] | undefined,
+          incoming: this.payload.incoming,
+          outgoing: this.payload.outgoing,
+          forwards: this.payload.forwards,
+          pattern: matcher ? new RegExp(matcher.source, matcher.flags) : undefined
         });
-      }
+        const handler = (input: unknown): void => {
+          void this.handleEvent(input, matcher).catch((error) => this.contextError(error));
+        };
+        client.addEventHandler(handler, builder);
+        registrations.push({ client, handler, builder });
+      });
       await waitForAbort(this.signal);
     } finally {
-      for (const { client, handler, builder } of handlers) client.removeEventHandler(handler, builder);
+      for (const { client, handler, builder } of registrations) client.removeEventHandler(handler, builder);
     }
   }
 
@@ -69,43 +65,38 @@ class LiveConversationTrigger extends Trigger<WatchConfig> {
 class PollConversationTrigger extends Trigger<WatchConfig> {
   async run(): Promise<void> {
     const chats = listChats(this.payload);
-    const sessions = sessionNames(this.payload, this.session);
+    if (!this.sessions || !this.session) throw new Error("watch.poll needs a session");
     const interval = normalizeSeconds(this.payload.pollSeconds ?? this.payload.intervalSeconds, 30);
     const limit = normalizeLimit(this.payload.limit);
-    if (!this.sessions) throw new Error("conversation watcher needs session access");
     const matcher = makePattern(this.payload);
     const cursors = new Map<string, number>();
-    for (const session of sessions) {
-      for (const chat of chats) cursors.set(cursorKey(session, chat), this.payload.startAfterId ?? 0);
-    }
+    for (const chat of chats) cursors.set(cursorKey(chat), this.payload.startAfterId ?? 0);
 
     while (!this.signal.aborted) {
-      for (const session of sessions) {
-        for (const chat of chats) {
-          if (this.signal.aborted) break;
-          try {
-            await runUntilAborted(
-              this.sessions.run(session, async (rawClient) => {
-                const client = rawClient as EventClient;
-                const messages = await client.getMessages(chat, {
-                  limit,
-                  minId: cursors.get(cursorKey(session, chat)) ?? 0,
-                  reverse: true
-                });
-                for (const raw of messages) {
-                  const event = toTriggerEvent(raw);
-                  if (event.id && event.id > (cursors.get(cursorKey(session, chat)) ?? 0)) {
-                    cursors.set(cursorKey(session, chat), event.id);
-                  }
-                  if (matches(event, this.payload, matcher)) await this.emit(event);
+      for (const chat of chats) {
+        if (this.signal.aborted) break;
+        try {
+          await runUntilAborted(
+            this.sessions.run(async (rawClient) => {
+              const client = rawClient as EventClient;
+              const messages = await client.getMessages(chat, {
+                limit,
+                minId: cursors.get(cursorKey(chat)) ?? 0,
+                reverse: true
+              });
+              for (const raw of messages) {
+                const event = toTriggerEvent(raw);
+                if (event.id && event.id > (cursors.get(cursorKey(chat)) ?? 0)) {
+                  cursors.set(cursorKey(chat), event.id);
                 }
-              }),
-              this.signal
-            );
-          } catch (error) {
-            if (this.signal.aborted) break;
-            this.context.logger.warn("conversation polling failed", { session, chat, error });
-          }
+                if (matches(event, this.payload, matcher)) await this.emit(event);
+              }
+            }),
+            this.signal
+          );
+        } catch (error) {
+          if (this.signal.aborted) break;
+          this.context.logger.warn("conversation polling failed", { chat, error });
         }
       }
       await waitForSeconds(interval, this.signal);
@@ -134,14 +125,6 @@ function listChats(config: WatchConfig): Array<string | number> {
   if (config.chat !== undefined) values.unshift(config.chat);
   const result = [...new Map(values.map((value) => [String(value), value])).values()];
   if (!result.length) throw new Error("conversation watcher needs chat or chats");
-  return result;
-}
-
-function sessionNames(config: WatchConfig, parent: string | undefined): string[] {
-  const values = [...(config.sessions ?? [])];
-  if (parent) values.unshift(parent);
-  const result = [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
-  if (!result.length) throw new Error("conversation watcher needs session");
   return result;
 }
 
@@ -239,8 +222,8 @@ function normalizeLimit(value: number | undefined): number {
   return Math.min(1_000, Math.trunc(number));
 }
 
-function cursorKey(session: string, chat: string | number): string {
-  return session + "\u0000" + String(chat);
+function cursorKey(chat: string | number): string {
+  return String(chat);
 }
 
 async function waitForSeconds(seconds: number, signal: AbortSignal): Promise<void> {

@@ -28,9 +28,24 @@ export interface TriggerEmission {
   readonly event: TriggerEvent | Record<string, unknown>;
 }
 
+export type SessionState = "starting" | "connected" | "isolated" | "waiting-auth";
+
+export class SessionUnavailableError extends Error {
+  constructor(
+    readonly session: string,
+    readonly state: SessionState,
+    reason?: string
+  ) {
+    super("session " + session + " is " + state + (reason ? ": " + reason : ""));
+  }
+}
+
+export function isSessionUnavailable(error: unknown): error is SessionUnavailableError {
+  return error instanceof SessionUnavailableError;
+}
+
 export interface SessionAccess {
-  get(name: string): unknown;
-  run<T>(name: string, operation: (client: unknown) => T | Promise<T>): Promise<T>;
+  run<T>(operation: (client: unknown) => T | Promise<T>): Promise<T>;
 }
 
 export interface ActionOutcome {
@@ -44,6 +59,7 @@ export interface ActionContext<P = unknown> {
   readonly session?: string;
   readonly signal: AbortSignal;
   readonly sessions?: SessionAccess;
+  readonly control?: RuntimeControl;
   readonly logger: RuntimeLogger;
   emission: TriggerEmission | undefined;
   readonly hook?: ActionHook;
@@ -87,6 +103,10 @@ export abstract class Action<P = unknown> {
 
   get sessions(): SessionAccess | undefined {
     return this.context.sessions;
+  }
+
+  get control(): RuntimeControl | undefined {
+    return this.context.control;
   }
 
   get emission(): TriggerEmission | undefined {
@@ -141,6 +161,10 @@ export abstract class Trigger<P = unknown> {
     return this.context.sessions;
   }
 
+  get control(): RuntimeControl | undefined {
+    return this.context.control;
+  }
+
   protected async emit(event: TriggerEvent | Record<string, unknown>): Promise<void> {
     if (!this.context.emit || !this.canRun()) return;
     this.recordRun();
@@ -166,6 +190,7 @@ export interface TriggerContext<P = unknown> {
   readonly session?: string;
   readonly signal: AbortSignal;
   readonly sessions?: SessionAccess;
+  readonly control?: RuntimeControl;
   readonly logger: RuntimeLogger;
   readonly maxRuns?: number;
   readonly emit?: (event: TriggerEvent | Record<string, unknown>) => Promise<void>;
@@ -244,11 +269,28 @@ export interface FlowSnapshot {
   readonly hook?: string;
   readonly logFile: boolean;
   readonly startedAt?: string;
+  readonly suspended?: FlowSuspension;
+}
+
+export interface FlowSuspension {
+  readonly since: string;
+  readonly reason: string;
+  readonly session?: string;
+  readonly error?: string;
 }
 
 export interface LogScopeInfo {
   readonly scope: string;
   readonly path: string;
+}
+
+export interface SessionSnapshot {
+  readonly name: string;
+  readonly state: SessionState;
+  readonly since: string;
+  readonly reason?: string;
+  readonly attempts: number;
+  readonly flows: readonly FlowRef[];
 }
 
 export interface ActiveActionView {
@@ -268,9 +310,19 @@ export interface RuntimeSnapshot {
   readonly schedules: readonly string[];
   readonly activeServices: readonly string[];
   readonly activeActions: readonly ActiveActionView[];
+  readonly sessions: readonly SessionSnapshot[];
   readonly flows: readonly FlowSnapshot[];
   readonly logs: readonly LogScopeInfo[];
 }
+
+export type SessionLoginReply =
+  | { readonly status: "ok" }
+  | {
+      readonly status: "prompt";
+      readonly kind: "phone" | "code" | "password";
+      readonly message?: string;
+    }
+  | { readonly status: "error"; readonly message: string };
 
 export interface ActionSpecInput {
   readonly capability: string;
@@ -368,6 +420,32 @@ export interface ConfigReloadedEvent {
   readonly at: string;
 }
 
+export interface SessionStateEvent {
+  readonly type: "session.state";
+  readonly name: string;
+  readonly state: SessionState;
+  readonly reason?: string;
+  readonly since: string;
+  readonly at: string;
+}
+
+export interface FlowSuspendedEvent {
+  readonly type: "flow.suspended";
+  readonly id: string;
+  readonly kind: FlowKind;
+  readonly session: string;
+  readonly error?: string;
+  readonly at: string;
+}
+
+export interface FlowResumedEvent {
+  readonly type: "flow.resumed";
+  readonly id: string;
+  readonly kind: FlowKind;
+  readonly session: string;
+  readonly at: string;
+}
+
 export type RuntimeEvent =
   | ActionStartedEvent
   | ActionFinishedEvent
@@ -378,7 +456,10 @@ export type RuntimeEvent =
   | FlowFinishedEvent
   | ScheduleFiredEvent
   | ConfigReloadingEvent
-  | ConfigReloadedEvent;
+  | ConfigReloadedEvent
+  | SessionStateEvent
+  | FlowSuspendedEvent
+  | FlowResumedEvent;
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
 
@@ -408,15 +489,22 @@ export interface RuntimeControl {
   startService(identifier: string): Promise<void>;
   stopService(identifier: string): Promise<void>;
   reload(): Promise<void>;
+  reconnectSession(name: string): Promise<void>;
+  beginSessionLogin(name: string): Promise<SessionLoginReply>;
+  submitSessionLogin(name: string, value: string): Promise<SessionLoginReply>;
   listPlugins(): readonly PluginInfo[];
   subscribe(listener: RuntimeEventListener): Unsubscribe;
 }
 
+export interface CapabilityOptions {
+  readonly control?: boolean;
+}
+
 export interface PluginContext {
   readonly logger: RuntimeLogger;
-  registerAction(name: string, constructor: ActionConstructor): void;
-  registerTrigger(name: string, constructor: TriggerConstructor): void;
-  registerService(name: string, constructor: ServiceConstructor): void;
+  registerAction(name: string, constructor: ActionConstructor, options?: CapabilityOptions): void;
+  registerTrigger(name: string, constructor: TriggerConstructor, options?: CapabilityOptions): void;
+  registerService(name: string, constructor: ServiceConstructor, options?: CapabilityOptions): void;
 }
 
 export type ActionConstructor = new (context: ActionContext<any>) => Action<any>;

@@ -10,6 +10,7 @@
   } from "lucide-svelte";
   import { DropdownMenu } from "bits-ui";
   import { toast } from "$lib/toast-store.svelte";
+  import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Status from "$lib/components/ui/status.svelte";
   import Switch from "$lib/components/ui/switch.svelte";
@@ -163,7 +164,9 @@
                 {@const busy = pending === flow.id}
                 <tr class="border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted cursor-pointer" onclick={() => openDialog(flow)}>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
-                    {#if flow.active}
+                    {#if flow.suspended}
+                      <Status tone="bad"></Status>
+                    {:else if flow.active}
                       <Status tone="ok" pulse></Status>
                     {:else if flow.enabled || flow.kind === "command"}
                       <Status tone="ok"></Status>
@@ -190,6 +193,9 @@
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden md:table-cell">
                     {#if flow.session}
                       <span class="font-mono tracking-tight text-xs text-muted-foreground">{flow.session}</span>
+                      {#if flow.suspended}
+                        <Badge variant="destructive" class="ml-1">会话隔离</Badge>
+                      {/if}
                     {:else}
                       <span class="text-xs text-muted-foreground/60">-</span>
                     {/if}

@@ -39,7 +39,7 @@ class SendMessageAction extends Action<SendConfig> {
     }
     if (peer === undefined || peer === "") throw new Error("messages.send needs peer");
     if (!this.sessions || !this.session) throw new Error("messages.send needs a session");
-    await this.sessions.run(this.session, async (client) => {
+    await this.sessions.run(async (client) => {
       const telegram = client as TelegramClientLike;
       if (this.payload.file) {
         await telegram.sendFile(peer, {

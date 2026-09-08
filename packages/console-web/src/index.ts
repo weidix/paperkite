@@ -40,7 +40,7 @@ export const manifest = {
 };
 
 export async function register(context: PluginContext): Promise<void> {
-  context.registerService("runtime.console_web", RuntimeConsoleWebService);
+  context.registerService("runtime.console_web", RuntimeConsoleWebService, { control: true });
 }
 
 export default definePlugin({ manifest, register });

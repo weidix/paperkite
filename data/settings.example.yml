@@ -2,6 +2,11 @@ telegram:
   apiId: 123456
   apiHash: replace-with-your-api-hash
   sessionsDir: data/accounts
+  sessionGuard:
+    windowMs: 60000
+    threshold: 5
+    backoffMinMs: 30000
+    backoffMaxMs: 1800000
 
 logging:
   level: info

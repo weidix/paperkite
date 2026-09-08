@@ -35,7 +35,6 @@ export function createArchiveConsoleServer(options: ArchiveConsoleServerOptions)
   const live = options.session && options.sessions
     ? new LiveMediaStreamer({
         sessions: options.sessions,
-        session: options.session,
         logger: options.logger
       })
     : undefined;
@@ -240,7 +239,7 @@ function registerRoutes(
         if (cached !== undefined) return { text: cached.text, entities: cached.entities };
         const record = await store.getMessageByRowId(rowId);
         if (!record) throw new HttpError(404, "消息不存在");
-        const caption = await fetchLiveCaptionText(sessions, session, store, logger, record);
+        const caption = await fetchLiveCaptionText(sessions, store, logger, record);
         if (caption === undefined) {
           liveTextCacheNeg(rowId, liveTextCache);
           throw new HttpError(410, "消息已从 Telegram 删除或会话无法访问");
@@ -283,7 +282,7 @@ function registerRoutes(
         if (request.query.size === "full") {
           if (live === undefined) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
           if (isPhotoLike(file)) {
-            return sendLiveFull(reply, file, sessions, session, store, logger, request.query.download === "1");
+            return sendLiveFull(reply, file, sessions, store, logger, request.query.download === "1");
           }
           return serveLiveStream(request, reply, live, file, await store.getChatUsername(file.chatId), request.query.download === "1");
         }
@@ -294,7 +293,7 @@ function registerRoutes(
         }
         const negative = negativeCacheGet(rowId, negativeCache);
         if (negative) throw new HttpError(negative.status, negative.message);
-        const result = await fetchLiveThumb(file, sessions, session, {
+        const result = await fetchLiveThumb(file, sessions, {
           chatUsername: await store.getChatUsername(file.chatId),
           logger
         });
@@ -341,7 +340,7 @@ function registerRoutes(
         const file = await store.getMediaFileById(rowIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
         if (isPhotoLike(file)) {
-          return sendLiveFull(reply, file, sessions, session, store, logger, request.query.download === "1");
+          return sendLiveFull(reply, file, sessions, store, logger, request.query.download === "1");
         }
         return serveLiveStream(request, reply, live, file, await store.getChatUsername(file.chatId), request.query.download === "1");
       } catch (error) {
@@ -423,12 +422,11 @@ async function sendLiveFull(
   reply: FastifyReply,
   file: StoredMediaFile,
   sessions: SessionAccess,
-  session: string,
   store: ArchiveStore,
   logger: RuntimeLogger,
   download: boolean
 ): Promise<FastifyReply> {
-  const result = await fetchLiveMedia(file, sessions, session, {
+  const result = await fetchLiveMedia(file, sessions, {
     chatUsername: await store.getChatUsername(file.chatId),
     logger
   });
@@ -530,7 +528,6 @@ function liveTextCacheNeg(rowId: string, cache: Map<string, LiveTextCacheEntry>)
 /** 在线说明：从 Telegram 实时取回消息原始文本与实体（相册取全部成员的最长文本），原样返回。 */
 async function fetchLiveCaptionText(
   sessions: SessionAccess,
-  session: string,
   store: ArchiveStore,
   logger: RuntimeLogger,
   record: MessageRecord
@@ -538,7 +535,7 @@ async function fetchLiveCaptionText(
   const targets = albumTargetsOf(record);
   try {
     const chatUsername = await store.getChatUsername(record.chatId);
-    return await sessions.run(session, async (client) => {
+    return await sessions.run(async (client) => {
       const host = client as unknown as import("../archiver.js").ArchiveClient;
       const entity = await resolveChatEntity(host, record.chatId, chatUsername);
       if (entity === undefined) return undefined;

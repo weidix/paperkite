@@ -109,12 +109,11 @@ export function parseRange(header: string, size: number): { start: number; end: 
 export async function fetchLiveMedia(
   file: StoredMediaFile,
   sessions: SessionAccess,
-  session: string,
   options: LiveMediaOptions
 ): Promise<LiveMediaOutcome> {
   const { chatUsername, logger } = options;
   try {
-    const result = await sessions.run(session, async (client) => {
+    const result = await sessions.run(async (client) => {
       const host = client as ArchiveClient;
       const message = await fetchMessage(host, file, chatUsername);
       if (!message) return { state: "missing" as const };
@@ -154,12 +153,11 @@ const PHOTO_THUMB_TYPES = ["s", "m"] as const;
 export async function fetchLiveThumb(
   file: StoredMediaFile,
   sessions: SessionAccess,
-  session: string,
   options: LiveMediaOptions
 ): Promise<LiveThumbOutcome> {
   const { chatUsername, logger } = options;
   try {
-    const result = await sessions.run(session, async (client) => {
+    const result = await sessions.run(async (client) => {
       const host = client as ArchiveClient;
       const message = await fetchMessage(host, file, chatUsername);
       if (!message) return { state: "missing" as const };

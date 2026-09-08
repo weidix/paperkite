@@ -50,5 +50,23 @@ export function describeEvent(event: RuntimeEvent): EventPresentation {
       return { tone: "warn", title: "配置重载中", detail: "读取 flows.yml 并重建流" };
     case "config.reloaded":
       return { tone: event.ok ? "ok" : "bad", title: "配置重载完成", detail: event.error ?? "已生效" };
+    case "session.state":
+      return {
+        tone: event.state === "connected" ? "ok" : event.state === "waiting-auth" ? "bad" : "warn",
+        title: `会话 ${event.state}`,
+        detail: `#${event.name}${event.reason ? ` · ${event.reason}` : ""}`
+      };
+    case "flow.suspended":
+      return {
+        tone: "bad",
+        title: "流程已隔离",
+        detail: `${event.kind}:${event.id} · ${event.session}${event.error ? ` · ${event.error}` : ""}`
+      };
+    case "flow.resumed":
+      return {
+        tone: "ok",
+        title: "流程已恢复",
+        detail: `${event.kind}:${event.id} · ${event.session}`
+      };
   }
 }

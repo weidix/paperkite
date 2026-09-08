@@ -6,16 +6,21 @@ import type {
   FlowPatch,
   FlowRef,
   FlowSnapshot,
+  FlowSuspension,
   PluginInfo,
   RuntimeEvent,
   RuntimeEventListener,
   RuntimeLogger,
   RuntimeSnapshot,
   ServiceContext,
+  SessionSnapshot,
+  SessionState,
+  SessionLoginReply,
   TriggerContext,
   TriggerEmission,
   Unsubscribe
 } from "@paperkite/sdk";
+import { SessionUnavailableError } from "@paperkite/sdk";
 import { basename, join } from "node:path";
 import type {
   ActionSpec,
@@ -30,7 +35,7 @@ import { AppLogger } from "./logger.js";
 import { loadHook } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
 import { CapabilityRegistry } from "../extensions/registry.js";
-import type { SessionPool } from "../telegram/pool.js";
+import type { SessionPool, SessionStateChange, SessionStateInfo } from "../telegram/pool.js";
 
 export interface RuntimeOptions {
   readonly catalog: FlowCatalog;
@@ -51,6 +56,7 @@ export class Runtime {
   private readonly listeners = new Set<RuntimeEventListener>();
   private readonly serviceStartedAt = new Map<string, number>();
   private readonly activeActionEntries = new Map<string, ActiveActionEntry>();
+  private readonly suspended = new Map<string, Suspension>();
   private catalog: FlowCatalog;
   private lifecycle = new AbortController();
   private started = false;
@@ -60,7 +66,13 @@ export class Runtime {
 
   constructor(private readonly options: RuntimeOptions) {
     this.catalog = options.catalog;
+    const pool = options.sessions as unknown as { subscribe?: (listener: (change: SessionStateChange) => void) => Unsubscribe };
+    if (typeof pool.subscribe === "function") {
+      this.sessionUnsub = pool.subscribe((change) => this.handleSessionChange(change));
+    }
   }
+
+  private sessionUnsub: Unsubscribe | undefined;
 
   get snapshot(): RuntimeSnapshot {
     return {
@@ -81,6 +93,7 @@ export class Runtime {
         startedAt: new Date(entry.startedAt).toISOString()
       })),
       flows: this.catalog.definitions().map((item) => this.flowSnapshot(item)),
+      sessions: this.sessionSnapshots(),
       logs: this.logScopes()
     };
   }
@@ -185,7 +198,7 @@ export class Runtime {
     kind: FlowKind,
     id: string,
     capability: string,
-    operation: () => Promise<void>
+    operation: () => Promise<unknown>
   ): Promise<void> {
     const startedAt = Date.now();
     try {
@@ -204,11 +217,33 @@ export class Runtime {
     if (!definition || definition.kind !== "service") throw new Error("unknown service: " + identifier);
     if (!definition.enabled) throw new Error("service is disabled: " + definition.id);
     if (this.controllers.has(`service:${definition.id}`)) return;
+    const gate = this.boundSession(definition);
+    const state = this.sessionState(gate);
+    if (gate && state !== undefined && state !== "connected") {
+      throw new SessionUnavailableError(gate, state, this.sessionReason(gate));
+    }
     const sessions = new Set<string>();
     if (definition.session) sessions.add(definition.session);
-    collectConfigSessions(definition.config, sessions);
     if (sessions.size) await this.options.sessions.ensure(sessions);
     this.launchService(definition);
+  }
+
+  async reconnectSession(name: string): Promise<void> {
+    const pool = this.options.sessions as unknown as { reconnectSession?: (value: string) => Promise<void> };
+    if (typeof pool.reconnectSession !== "function") throw new Error("session control is not available");
+    await pool.reconnectSession(name);
+  }
+
+  async beginSessionLogin(name: string): Promise<SessionLoginReply> {
+    const pool = this.options.sessions as unknown as { beginSessionLogin?: (value: string) => Promise<SessionLoginReply> };
+    if (typeof pool.beginSessionLogin !== "function") throw new Error("session control is not available");
+    return pool.beginSessionLogin(name);
+  }
+
+  async submitSessionLogin(name: string, value: string): Promise<SessionLoginReply> {
+    const pool = this.options.sessions as unknown as { submitSessionLogin?: (value: string, input: string) => Promise<SessionLoginReply> };
+    if (typeof pool.submitSessionLogin !== "function") throw new Error("session control is not available");
+    return pool.submitSessionLogin(name, value);
   }
 
   async stopService(identifier: string): Promise<void> {
@@ -268,6 +303,7 @@ export class Runtime {
     const running = [...this.runs.entries()];
     for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear();
+    this.suspended.clear();
     const tasks = [...this.tasks];
     if (tasks.length) {
       const graceMs = this.stopGraceMs();
@@ -286,6 +322,7 @@ export class Runtime {
   private async stopFlow(key: string): Promise<void> {
     const controller = this.controllers.get(key);
     const run = this.runs.get(key);
+    this.clearSuspension(key);
     if (!controller && !run) return;
     controller?.abort();
     if (run) await settleWithin([run], this.stopGraceMs());
@@ -298,16 +335,94 @@ export class Runtime {
   private startFlows(): void {
     for (const definition of this.catalog.enabled("trigger")) {
       if (definition.kind !== "trigger") continue;
+      if (this.flowBlocked(definition)) continue;
       this.startTrigger(definition);
     }
     for (const definition of this.catalog.enabled("service")) {
       if (definition.kind !== "service") continue;
-      if (definition.autoStart) this.launchService(definition);
+      if (!definition.autoStart) continue;
+      if (this.flowBlocked(definition)) continue;
+      this.launchService(definition);
     }
     for (const definition of this.catalog.enabled("schedule")) {
       if (definition.kind !== "schedule") continue;
+      if (this.flowBlocked(definition)) continue;
       this.startSchedule(definition);
     }
+  }
+
+  private flowBlocked(definition: FlowDefinition): boolean {
+    const session = this.boundSession(definition);
+    const state = this.sessionState(session);
+    if (!session || state === undefined || state === "connected") return false;
+    this.recordSuspension(definition, session, this.sessionReason(session));
+    return true;
+  }
+
+  private async handleSessionChange(change: SessionStateChange): Promise<void> {
+    this.emit({
+      type: "session.state",
+      name: change.name,
+      state: change.state,
+      reason: change.reason,
+      since: new Date().toISOString()
+    });
+    if (!this.started) return;
+    if (change.state === "connected") {
+      this.resumeForSession(change.name);
+      return;
+    }
+    this.suspendForSession(change.name, change.reason);
+  }
+
+  private suspendForSession(name: string, error: string | undefined): void {
+    for (const definition of this.catalog.definitions()) {
+      if (definition.kind === "command") continue;
+      const session = this.boundSession(definition);
+      if (session !== name) continue;
+      const key = `${definition.kind}:${definition.id}`;
+      if (this.suspended.has(key)) continue;
+      if (definition.kind === "schedule") {
+        if (!this.scheduler.has(definition.id)) continue;
+        this.scheduler.remove(definition.id);
+      } else {
+        const controller = this.controllers.get(key);
+        if (!controller) continue;
+        controller.abort();
+      }
+      this.recordSuspension(definition, name, error);
+      this.emit({ type: "flow.suspended", id: definition.id, kind: definition.kind, session: name, error });
+    }
+  }
+
+  private resumeForSession(name: string): void {
+    for (const [key, suspension] of [...this.suspended.entries()]) {
+      if (suspension.session !== name) continue;
+      this.suspended.delete(key);
+      const separator = key.indexOf(":");
+      const kind = key.slice(0, separator) as FlowKind;
+      const definition = this.catalog.find(key.slice(separator + 1), kind);
+      if (!definition) continue;
+      if (definition.kind !== "command" && !definition.enabled) continue;
+      if (definition.kind === "schedule") {
+        this.startSchedule(definition as ScheduleDefinition);
+      } else if (definition.kind === "service") {
+        this.launchService(definition as ServiceDefinition);
+      } else if (definition.kind === "trigger") {
+        this.startTrigger(definition as TriggerDefinition);
+      } else {
+        continue;
+      }
+      this.emit({ type: "flow.resumed", id: definition.id, kind: definition.kind, session: name });
+    }
+  }
+
+  private recordSuspension(definition: FlowDefinition, session: string, error: string | undefined): void {
+    this.suspended.set(`${definition.kind}:${definition.id}`, { kind: definition.kind, id: definition.id, session, error, since: Date.now() });
+  }
+
+  private clearSuspension(key: string): void {
+    this.suspended.delete(key);
   }
 
   private startTrigger(definition: TriggerDefinition): void {
@@ -399,7 +514,8 @@ export class Runtime {
       payload: definition.config,
       session: definition.session,
       signal: controller.signal,
-      sessions: this.options.sessions.access(),
+      sessions: this.options.sessions.access(definition.session),
+      control: this.options.registry.grantsControl("trigger", definition.capability) ? this : undefined,
       logger: this.capabilityLogger("trigger", definition.capability),
       maxRuns: definition.maxRuns,
       emit: async (event) => {
@@ -409,17 +525,39 @@ export class Runtime {
           source: { id: definition.id, capability: definition.capability },
           event
         };
-        await this.completeFlow("trigger", definition.id, definition.capability, async () => {
+        const startedAt = Date.now();
+        let ok = true;
+        try {
           for (const [index, action] of definition.actions.entries()) {
-            await this.runAction(
+            const outcome = await this.runAction(
               action,
               `trigger:${definition.id}:${index + 1}`,
               emission,
               action.session ?? definition.session,
               controller.signal,
-              { kind: "trigger", id: definition.id }
+              { kind: "trigger", id: definition.id },
+              true
             );
+            if (outcome.skipped) ok = false;
           }
+        } catch (error) {
+          this.emit({
+            type: "flow.finished",
+            kind: "trigger",
+            id: definition.id,
+            capability: definition.capability,
+            ok: false,
+            durationMs: Date.now() - startedAt
+          });
+          throw error;
+        }
+        this.emit({
+          type: "flow.finished",
+          kind: "trigger",
+          id: definition.id,
+          capability: definition.capability,
+          ok,
+          durationMs: Date.now() - startedAt
         });
         if (definition.maxRuns && emitted >= definition.maxRuns) controller.abort();
       }
@@ -436,8 +574,8 @@ export class Runtime {
       payload: definition.config,
       session: definition.session,
       signal: controller.signal,
-      sessions: this.options.sessions.access(),
-      control: this,
+      sessions: this.options.sessions.access(definition.session),
+      control: this.options.registry.grantsControl("service", definition.capability) ? this : undefined,
       logger: this.capabilityLogger("service", definition.capability)
     };
     await new Constructor(context).run();
@@ -449,17 +587,39 @@ export class Runtime {
     emission: TriggerEmission | undefined,
     parentSession: string | undefined,
     signal: AbortSignal,
-    flow?: FlowRef
-  ): Promise<void> {
+    flow?: FlowRef,
+    soft = false
+  ): Promise<{ skipped: boolean }> {
     const capability = specification.capability;
+    const session = specification.session ?? parentSession;
+    const state = this.sessionState(session);
+    if (session && state !== undefined && state !== "connected") {
+      const error = new SessionUnavailableError(session, state, this.sessionReason(session));
+      if (soft) {
+        this.emit({
+          type: "action.finished",
+          id,
+          capability,
+          session,
+          flow,
+          ok: false,
+          skipped: false,
+          durationMs: 0,
+          error: error.message
+        });
+        return { skipped: true };
+      }
+      throw error;
+    }
     const Constructor = this.options.registry.getAction(capability);
     const hook = await loadHook(specification.hook, this.catalog.path);
     const context: ActionContext = {
       id,
       payload: specification.config,
-      session: specification.session ?? parentSession,
+      session,
       signal,
-      sessions: this.options.sessions.access(),
+      sessions: this.options.sessions.access(session),
+      control: this.options.registry.grantsControl("action", capability) ? this : undefined,
       logger: this.capabilityLogger("action", capability),
       emission,
       hook,
@@ -467,12 +627,12 @@ export class Runtime {
       spawn: (task) => this.track(task.then(() => undefined))
     };
     const startedAt = Date.now();
-    this.activeActionEntries.set(id, { id, capability, session: context.session, flow, startedAt });
+    this.activeActionEntries.set(id, { id, capability, session, flow, startedAt });
     this.emit({
       type: "action.started",
       id,
       capability,
-      session: context.session,
+      session,
       flow,
       hook: specification.hook,
       payload: exportable(specification.config)
@@ -489,7 +649,7 @@ export class Runtime {
         type: "action.finished",
         id,
         capability,
-        session: context.session,
+        session,
         flow,
         ok: failure === undefined,
         skipped: context.outcome?.skipped === true,
@@ -498,6 +658,7 @@ export class Runtime {
         effectivePayload: exportable(context.outcome?.effectivePayload)
       });
     }
+    return { skipped: false };
   }
 
   private capabilityLogger(kind: "action" | "trigger" | "service", capability: string): RuntimeLogger {
@@ -516,7 +677,8 @@ export class Runtime {
           ? this.controllers.has(`${definition.kind}:${definition.id}`)
           : false,
       session: "session" in definition ? definition.session : undefined,
-      logFile: "logFile" in definition ? definition.logFile : false
+      logFile: "logFile" in definition ? definition.logFile : false,
+      suspended: this.suspensionOf(definition)
     };
     if (definition.kind === "trigger") {
       return {
@@ -546,6 +708,51 @@ export class Runtime {
       hook: definition.action.hook,
       config: copyOf(definition.action.config)
     };
+  }
+
+  private suspensionOf(definition: FlowDefinition): FlowSuspension | undefined {
+    const suspension = this.suspended.get(`${definition.kind}:${definition.id}`);
+    if (!suspension) return undefined;
+    return {
+      since: new Date(suspension.since).toISOString(),
+      reason: "session",
+      session: suspension.session,
+      error: suspension.error
+    };
+  }
+
+  private sessionSnapshots(): SessionSnapshot[] {
+    const pool = this.options.sessions as unknown as { states?: () => SessionStateInfo[] };
+    const states = typeof pool.states === "function" ? pool.states() : [];
+    return states.map((info) => ({
+      name: info.name,
+      state: info.state,
+      since: new Date(info.since).toISOString(),
+      reason: info.reason,
+      attempts: info.attempts,
+      flows: [...this.suspended.values()]
+        .filter((item) => item.session === info.name)
+        .map((item) => ({ kind: item.kind, id: item.id }))
+    }));
+  }
+
+  private sessionState(name: string | undefined): SessionState | undefined {
+    if (!name) return undefined;
+    const pool = this.options.sessions as unknown as { state?: (value: string) => SessionState | undefined };
+    if (typeof pool.state !== "function") return undefined;
+    return pool.state(name);
+  }
+
+  private sessionReason(name: string): string | undefined {
+    const pool = this.options.sessions as unknown as { states?: () => SessionStateInfo[] };
+    if (typeof pool.states !== "function") return undefined;
+    return pool.states().find((info) => info.name === name)?.reason;
+  }
+
+  private boundSession(definition: FlowDefinition): string | undefined {
+    if (definition.kind === "command") return definition.action.session;
+    if (definition.kind === "schedule") return definition.action.session ?? definition.session;
+    return definition.session;
   }
 
   private logScopes(): { scope: string; path: string }[] {
@@ -581,11 +788,8 @@ function collectSessions(catalog: FlowCatalog): Set<string> {
     if ("session" in definition && definition.session) names.add(definition.session);
     if (definition.kind === "trigger") {
       for (const action of definition.actions) collectActionSessions(action, names);
-      collectConfigSessions(definition.config, names);
     } else if (definition.kind === "command" || definition.kind === "schedule") {
       collectActionSessions(definition.action, names);
-    } else {
-      collectConfigSessions(definition.config, names);
     }
   }
   return names;
@@ -593,17 +797,7 @@ function collectSessions(catalog: FlowCatalog): Set<string> {
 
 function collectActionSessions(action: ActionSpec, names = new Set<string>()): Set<string> {
   if (action.session) names.add(action.session);
-  collectConfigSessions(action.config, names);
   return names;
-}
-
-function collectConfigSessions(value: unknown, names: Set<string>): void {
-  if (!isRecord(value)) return;
-  const sessions = value.sessions;
-  if (Array.isArray(sessions)) {
-    for (const item of sessions) if (typeof item === "string" && item.trim()) names.add(item.trim());
-  }
-  if (typeof value.session === "string" && value.session.trim()) names.add(value.session.trim());
 }
 
 function messageOf(error: unknown): string {
@@ -649,16 +843,20 @@ async function stillRunning(entries: ReadonlyArray<[string, Promise<unknown>]>):
   return keys;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 interface ActiveActionEntry {
   readonly id: string;
   readonly capability: string;
   readonly session?: string;
   readonly flow?: FlowRef;
   readonly startedAt: number;
+}
+
+interface Suspension {
+  readonly kind: FlowKind;
+  readonly id: string;
+  readonly session: string;
+  readonly error?: string;
+  readonly since: number;
 }
 
 type EventWithoutAt<E extends RuntimeEvent> = E extends RuntimeEvent ? Omit<E, "at"> : never;
