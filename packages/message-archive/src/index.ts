@@ -9,24 +9,24 @@ type PeerLike = Parameters<typeof utils.getPeerId>[0];
 
 class ArchiveSyncAction extends Action<ArchiveConfig> {
   protected async run(): Promise<void> {
-    if (!this.payload || typeof this.payload !== "object") {
-      throw new Error("archive payload must be a mapping with chats");
+    if (!this.config || typeof this.config !== "object") {
+      throw new Error("archive config must be a mapping with chats");
     }
-    const targets = buildTargets(this.payload);
-    if (!targets.length) throw new Error("archive payload must include chats");
+    const targets = buildTargets(this.config);
+    if (!targets.length) throw new Error("archive config must include chats");
     if (!this.sessions || !this.session) throw new Error("archive.sync needs a session");
 
     const store = createArchiveStore({
-      backend: this.payload.backend,
-      file: this.payload.file ?? this.payload.dbPath,
-      url: this.payload.url,
-      schema: this.payload.schema
+      backend: this.config.backend,
+      file: this.config.file ?? this.config.dbPath,
+      url: this.config.url,
+      schema: this.config.schema
     });
-    const batchSize = Math.max(1, coerceInt(this.payload.batchSize, 50));
+    const batchSize = Math.max(1, coerceInt(this.config.batchSize, 50));
     const archiver = new MessageArchiver({
       store,
-      mediaPath: this.payload.mediaPath ?? "data/downloads",
-      downloadMedia: coerceBool(this.payload.downloadMedia, true),
+      mediaPath: this.config.mediaPath ?? "data/downloads",
+      downloadMedia: coerceBool(this.config.downloadMedia, true),
       batchSize,
       shouldStop: () => this.signal.aborted,
       submit: (operation) => this.sessions!.run((client: unknown) => operation(client as ArchiveClient)),
@@ -36,7 +36,7 @@ class ArchiveSyncAction extends Action<ArchiveConfig> {
 
     try {
       await store.init();
-      const backend = String(this.payload.backend ?? "sqlite").toLowerCase();
+      const backend = String(this.config.backend ?? "sqlite").toLowerCase();
       let totalMessages = 0;
       let totalMedia = 0;
       let totalSkipped = 0;
@@ -44,7 +44,7 @@ class ArchiveSyncAction extends Action<ArchiveConfig> {
         this.context.logger.info(
           `archive chat=${target.chat} daysBack=${target.daysBack} maxMessages=${target.maxMessages} ` +
           `downloadMedia=${target.downloadMedia} resume=${target.resume} batchSize=${batchSize} ` +
-          `backend=${backend} media=${this.payload.mediaPath ?? "data/downloads"}`
+          `backend=${backend} media=${this.config.mediaPath ?? "data/downloads"}`
         );
         const result = await archiver.saveChatMessages(target.chat, {
           daysBack: target.daysBack,

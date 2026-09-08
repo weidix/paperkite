@@ -15,20 +15,20 @@ interface CommandConfig {
 
 class ProcessCommandAction extends Action<CommandConfig> {
   protected async run(): Promise<void> {
-    const [program, args] = commandParts(this.payload);
-    const shell = this.payload.shell === true;
-    const timeoutMs = normalizeTimeout(this.payload.timeoutMs);
-    const maxOutputBytes = normalizeOutputLimit(this.payload.maxOutputBytes);
-    const child = shell && this.payload.command
-      ? spawn(this.payload.command, {
-          cwd: this.payload.cwd ? resolve(this.payload.cwd) : process.cwd(),
-          env: { ...process.env, ...this.payload.env },
+    const [program, args] = commandParts(this.config);
+    const shell = this.config.shell === true;
+    const timeoutMs = normalizeTimeout(this.config.timeoutMs);
+    const maxOutputBytes = normalizeOutputLimit(this.config.maxOutputBytes);
+    const child = shell && this.config.command
+      ? spawn(this.config.command, {
+          cwd: this.config.cwd ? resolve(this.config.cwd) : process.cwd(),
+          env: { ...process.env, ...this.config.env },
           shell: true,
           stdio: ["ignore", "pipe", "pipe"]
         })
       : spawn(program, args, {
-          cwd: this.payload.cwd ? resolve(this.payload.cwd) : process.cwd(),
-          env: { ...process.env, ...this.payload.env },
+          cwd: this.config.cwd ? resolve(this.config.cwd) : process.cwd(),
+          env: { ...process.env, ...this.config.env },
           shell,
           stdio: ["ignore", "pipe", "pipe"]
         });

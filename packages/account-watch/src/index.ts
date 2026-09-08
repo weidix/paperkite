@@ -7,7 +7,7 @@ interface HealthConfig {
 class SessionHealthTrigger extends Trigger<HealthConfig> {
   async run(): Promise<void> {
     if (!this.control) throw new Error("watch.session needs the runtime control contract");
-    const notifyRecovery = this.payload.notifyOnRecovery === true;
+    const notifyRecovery = this.config.notifyOnRecovery === true;
     const notify = (name: string, state: SessionState, reason: string | undefined): Promise<void> => {
       return this.emit({ session: name, state, reason });
     };

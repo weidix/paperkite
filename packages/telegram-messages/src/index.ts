@@ -29,25 +29,25 @@ interface TelegramClientLike {
 
 class SendMessageAction extends Action<SendConfig> {
   protected async run(): Promise<void> {
-    const peer = this.payload.peer ?? this.payload.to ?? this.payload.chat;
-    const message = render(this.payload.text ?? this.payload.message ?? "", this.emission);
-    await waitForSendTime(this.payload.sendAt, this.payload.delaySeconds, this.signal);
+    const peer = this.config.peer ?? this.config.to ?? this.config.chat;
+    const message = render(this.config.text ?? this.config.message ?? "", this.emission);
+    await waitForSendTime(this.config.sendAt, this.config.delaySeconds, this.signal);
     if (this.signal.aborted) return;
-    if (this.payload.mode === "bot") {
-      await sendWithBot(this.payload, message, this.emission, this.signal);
+    if (this.config.mode === "bot") {
+      await sendWithBot(this.config, message, this.emission, this.signal);
       return;
     }
     if (peer === undefined || peer === "") throw new Error("messages.send needs peer");
     if (!this.sessions || !this.session) throw new Error("messages.send needs a session");
     await this.sessions.run(async (client) => {
       const telegram = client as TelegramClientLike;
-      if (this.payload.file) {
+      if (this.config.file) {
         await telegram.sendFile(peer, {
-          file: this.payload.file,
-          caption: render(this.payload.caption ?? message, this.emission),
-          replyTo: this.payload.replyTo ?? (this.payload.reply ? replyId(this.emission) : undefined),
-          silent: this.payload.silent,
-          parseMode: this.payload.parseMode,
+          file: this.config.file,
+          caption: render(this.config.caption ?? message, this.emission),
+          replyTo: this.config.replyTo ?? (this.config.reply ? replyId(this.emission) : undefined),
+          silent: this.config.silent,
+          parseMode: this.config.parseMode,
           forceDocument: false
         });
         return;
@@ -55,10 +55,10 @@ class SendMessageAction extends Action<SendConfig> {
       if (!message) throw new Error("messages.send needs text or file");
       await telegram.sendMessage(peer, {
         message,
-        replyTo: this.payload.replyTo ?? (this.payload.reply ? replyId(this.emission) : undefined),
-        silent: this.payload.silent,
-        parseMode: this.payload.parseMode,
-        linkPreview: this.payload.linkPreview
+        replyTo: this.config.replyTo ?? (this.config.reply ? replyId(this.emission) : undefined),
+        silent: this.config.silent,
+        parseMode: this.config.parseMode,
+        linkPreview: this.config.linkPreview
       });
     });
   }

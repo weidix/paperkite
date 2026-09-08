@@ -12,10 +12,10 @@ import { Runtime } from "../src/engine/runtime.js";
 import type { SessionPool } from "../src/telegram/pool.js";
 
 class EchoAction extends Action {
-  static runs: { id: string; payload: unknown }[] = [];
+  static runs: { id: string; config: unknown }[] = [];
 
   async run(): Promise<void> {
-    EchoAction.runs.push({ id: this.id, payload: this.payload });
+    EchoAction.runs.push({ id: this.id, config: this.config });
   }
 }
 
@@ -57,7 +57,7 @@ async function makeRuntime(
 test("executeAction runs an action once and emits start/finish events", async () => {
   const { runtime, events } = await makeRuntime();
   await runtime.executeAction({ capability: "demo.action", config: { mark: 1 }, label: "manual" });
-  assert.deepEqual(EchoAction.runs, [{ id: "manual", payload: { mark: 1 } }]);
+  assert.deepEqual(EchoAction.runs, [{ id: "manual", config: { mark: 1 } }]);
   assert.equal(events.filter((event) => event.type === "action.started").length, 1);
   const finished = events.find((event) => event.type === "action.finished");
   assert.equal(finished?.type, "action.finished");
@@ -71,7 +71,7 @@ test("runFlow executes a schedule action once and reload swaps the catalog", asy
   const { runtime, events } = await makeRuntime({ catalog, reloadCatalog: async () => fromMapping({}) });
   await assert.rejects(runtime.runFlow("unknown"), /unknown flow/);
   await runtime.runFlow("daily");
-  assert.deepEqual(EchoAction.runs, [{ id: "schedule:daily", payload: { mark: 2 } }]);
+  assert.deepEqual(EchoAction.runs, [{ id: "schedule:daily", config: { mark: 2 } }]);
   assert.equal(
     events.some(
       (event) => event.type === "flow.finished" && event.kind === "schedule" && event.id === "daily" && event.ok
