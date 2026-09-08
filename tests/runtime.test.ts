@@ -21,7 +21,7 @@ class EchoAction extends Action {
 
 const fakeSessions = {
   ensure: async () => undefined,
-  access: () => ({ get: () => undefined, run: async (_name: string, op: (client: unknown) => unknown) => op(undefined) }),
+  access: () => ({ run: async (operation: (client: unknown) => unknown) => operation(undefined) }),
   closeAll: async () => undefined
 } as unknown as SessionPool;
 
@@ -31,6 +31,7 @@ async function makeRuntime(
     reloadCatalog?: () => Promise<FlowCatalog>;
     stopGraceMs?: number;
     register?: (registry: CapabilityRegistry) => void;
+    sessions?: SessionPool;
   } = {}
 ): Promise<{ runtime: Runtime; events: RuntimeEvent[] }> {
   EchoAction.runs = [];
@@ -42,7 +43,7 @@ async function makeRuntime(
   const runtime = new Runtime({
     catalog: settings.catalog ?? fromMapping({}),
     registry,
-    sessions: fakeSessions,
+    sessions: settings.sessions ?? fakeSessions,
     logger,
     installed: [],
     reloadCatalog: settings.reloadCatalog,
@@ -141,5 +142,81 @@ test("reload restarts flows within the stop grace even when a service settles la
 
   await new Promise((resolve) => setTimeout(resolve, 1_000));
   assert.deepEqual(runtime.snapshot.activeServices, ["stubborn"], "late zombie cleanup must not drop the new instance");
+  await runtime.stop();
+});
+
+class FakeSessionPool {
+  private readonly statesMap = new Map<string, string>();
+  private readonly listeners = new Set<(change: { name: string; previous: string; state: string; reason?: string }) => void>();
+
+  constructor(initial: Record<string, string>) {
+    for (const [name, state] of Object.entries(initial)) this.statesMap.set(name, state);
+  }
+
+  async ensure(): Promise<void> {}
+  async closeAll(): Promise<void> {}
+
+  state(name: string): string | undefined {
+    return this.statesMap.get(name);
+  }
+
+  states(): { name: string; state: string; since: number; reason?: string; attempts: number }[] {
+    return [...this.statesMap.entries()].map(([name, state]) => ({
+      name,
+      state,
+      since: Date.now(),
+      reason: "test",
+      attempts: 0
+    }));
+  }
+
+  access() {
+    return {
+      run: async (operation: (client: unknown) => unknown) => operation(undefined)
+    };
+  }
+
+  subscribe(listener: (change: { name: string; previous: string; state: string; reason?: string }) => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  emit(change: { name: string; previous: string; state: string; reason?: string }): void {
+    this.statesMap.set(change.name, change.state);
+    for (const listener of [...this.listeners]) listener(change);
+  }
+}
+
+test("flows bound to a session suspend on isolation and resume on recovery", async () => {
+  WaitTrigger.runs = 0;
+  const sessions = new FakeSessionPool({ "acct-1": "connected" });
+  const catalog = fromMapping({
+    triggers: [{ id: "watch", capability: "demo.wait", session: "acct-1" }]
+  });
+  const { runtime, events } = await makeRuntime({
+    catalog,
+    sessions: sessions as unknown as SessionPool,
+    register: (registry) => registry.register("trigger", "demo.wait", WaitTrigger, "plugin-demo")
+  });
+  await runtime.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(WaitTrigger.runs, 1, "trigger runs while the session is connected");
+
+  sessions.emit({ name: "acct-1", previous: "connected", state: "isolated", reason: "boom" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(WaitTrigger.runs, 1, "no new run while the session is isolated");
+
+  const snapshot = runtime.snapshot as RuntimeSnapshot;
+  const flow = snapshot.flows.find((item) => item.id === "watch");
+  assert.ok(flow?.suspended, "flow snapshot must carry the suspension");
+  assert.equal(snapshot.sessions[0]?.name, "acct-1");
+  assert.equal(snapshot.sessions[0]?.flows.length, 1);
+
+  sessions.emit({ name: "acct-1", previous: "isolated", state: "connected" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(WaitTrigger.runs, 2, "trigger restarts after session recovery");
+  assert.ok(events.some((event) => event.type === "session.state"));
+  assert.ok(events.some((event) => event.type === "flow.suspended"));
+  assert.ok(events.some((event) => event.type === "flow.resumed"));
   await runtime.stop();
 });

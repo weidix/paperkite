@@ -24,7 +24,6 @@ export class LiveMediaError extends Error {
 
 export interface LiveMediaStreamOptions {
   readonly sessions: SessionAccess;
-  readonly session: string;
   readonly logger: RuntimeLogger;
 }
 
@@ -83,7 +82,7 @@ export class LiveMediaStreamer {
   }
 
   private async fetchPart(media: unknown, offset: number, length: number): Promise<Buffer | undefined> {
-    return this.deps.sessions.run(this.deps.session, async (client) => {
+    return this.deps.sessions.run(async (client) => {
       const host = client as unknown as ArchiveClient;
       const parts: Buffer[] = [];
       let received = 0;
@@ -103,7 +102,7 @@ export class LiveMediaStreamer {
     readonly mime: string;
   }> {
     try {
-      const result = await this.deps.sessions.run(this.deps.session, async (client) => {
+      const result = await this.deps.sessions.run(async (client) => {
         const host = client as unknown as ArchiveClient;
         const message = await fetchMessage(host, file, chatUsername);
         if (message === undefined) return "missing" as const;

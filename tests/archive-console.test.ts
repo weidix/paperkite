@@ -94,10 +94,9 @@ function chunkIterable(chunks: readonly Buffer[]): AsyncIterable<Buffer> {
   };
 }
 
-function fakeSessions(client: FakeLiveClient): SessionAccess & { get(name: string): unknown } {
+function fakeSessions(client: FakeLiveClient): SessionAccess {
   return {
-    get: () => client,
-    run: async <T>(_name: string, operation: (client: unknown) => T | Promise<T>) => operation(client)
+    run: async <T>(operation: (client: unknown) => T | Promise<T>) => operation(client)
   };
 }
 

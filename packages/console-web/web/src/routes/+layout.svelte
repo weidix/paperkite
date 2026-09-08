@@ -9,6 +9,7 @@
     Puzzle,
     Radio,
     Sun,
+    Users,
     Workflow,
     Zap,
     } from "lucide-svelte";
@@ -31,6 +32,7 @@
     { value: "/flows", label: "流程", icon: Workflow },
     { value: "/events", label: "事件", icon: Radio },
     { value: "/actions", label: "动作", icon: Zap },
+    { value: "/sessions", label: "会话", icon: Users },
     { value: "/logs", label: "日志", icon: FileText },
     { value: "/plugins", label: "插件", icon: Puzzle }
   ];

@@ -29,7 +29,7 @@ class ArchiveSyncAction extends Action<ArchiveConfig> {
       downloadMedia: coerceBool(this.payload.downloadMedia, true),
       batchSize,
       shouldStop: () => this.signal.aborted,
-      submit: (operation) => this.sessions!.run(this.session!, (client: unknown) => operation(client as ArchiveClient)),
+      submit: (operation) => this.sessions!.run((client: unknown) => operation(client as ArchiveClient)),
       chatIdOf: (entity) => String(utils.getPeerId(entity as PeerLike)),
       logger: this.context.logger
     });

@@ -12,6 +12,24 @@ export interface ActionSpecView {
   readonly hook?: string;
 }
 
+export type SessionState = "starting" | "connected" | "isolated" | "waiting-auth";
+
+export interface SessionSnapshot {
+  readonly name: string;
+  readonly state: SessionState;
+  readonly since: string;
+  readonly reason?: string;
+  readonly attempts: number;
+  readonly flows: readonly FlowRef[];
+}
+
+export interface FlowSuspension {
+  readonly since: string;
+  readonly reason: string;
+  readonly session?: string;
+  readonly error?: string;
+}
+
 export interface FlowSnapshot {
   readonly kind: FlowKind;
   readonly id: string;
@@ -30,6 +48,7 @@ export interface FlowSnapshot {
   readonly hook?: string;
   readonly logFile: boolean;
   readonly startedAt?: string;
+  readonly suspended?: FlowSuspension;
 }
 
 export interface ActiveActionView {
@@ -45,6 +64,15 @@ export interface LogScopeInfo {
   readonly path: string;
 }
 
+export type SessionLoginReply =
+  | { readonly status: "ok" }
+  | {
+      readonly status: "prompt";
+      readonly kind: "phone" | "code" | "password";
+      readonly message?: string;
+    }
+  | { readonly status: "error"; readonly message: string };
+
 export interface RuntimeSnapshot {
   readonly running: boolean;
   readonly pid: number;
@@ -54,6 +82,7 @@ export interface RuntimeSnapshot {
   readonly schedules: readonly string[];
   readonly activeServices: readonly string[];
   readonly activeActions: readonly ActiveActionView[];
+  readonly sessions: readonly SessionSnapshot[];
   readonly flows: readonly FlowSnapshot[];
   readonly logs: readonly LogScopeInfo[];
 }
@@ -181,6 +210,32 @@ export interface ConfigReloadedEvent {
   readonly at: string;
 }
 
+export interface SessionStateEvent {
+  readonly type: "session.state";
+  readonly name: string;
+  readonly state: SessionState;
+  readonly reason?: string;
+  readonly since: string;
+  readonly at: string;
+}
+
+export interface FlowSuspendedEvent {
+  readonly type: "flow.suspended";
+  readonly id: string;
+  readonly kind: FlowKind;
+  readonly session: string;
+  readonly error?: string;
+  readonly at: string;
+}
+
+export interface FlowResumedEvent {
+  readonly type: "flow.resumed";
+  readonly id: string;
+  readonly kind: FlowKind;
+  readonly session: string;
+  readonly at: string;
+}
+
 export type RuntimeEvent =
   | ActionStartedEvent
   | ActionFinishedEvent
@@ -191,7 +246,10 @@ export type RuntimeEvent =
   | FlowFinishedEvent
   | ScheduleFiredEvent
   | ConfigReloadingEvent
-  | ConfigReloadedEvent;
+  | ConfigReloadedEvent
+  | SessionStateEvent
+  | FlowSuspendedEvent
+  | FlowResumedEvent;
 
 export const RUNTIME_EVENT_TYPES = [
   "action.started",
@@ -203,5 +261,8 @@ export const RUNTIME_EVENT_TYPES = [
   "flow.finished",
   "schedule.fired",
   "config.reloading",
-  "config.reloaded"
+  "config.reloaded",
+  "session.state",
+  "flow.suspended",
+  "flow.resumed"
 ] as const;

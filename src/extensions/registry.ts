@@ -2,6 +2,7 @@ import type {
   Action,
   ActionConstructor,
   CapabilityKind,
+  CapabilityOptions,
   PluginContext,
   RuntimeLogger,
   Service,
@@ -15,14 +16,15 @@ export class CapabilityRegistry {
   readonly triggers = new Map<string, TriggerConstructor>();
   readonly services = new Map<string, ServiceConstructor>();
   private readonly owners = new Map<string, string>();
+  private readonly controlGrants = new Map<string, boolean>();
 
   /** `scope` 是该插件的日志作用域（插件包名）。 */
   context(logger: RuntimeLogger, scope?: string): PluginContext {
     return {
       logger,
-      registerAction: (name, constructor) => this.register("action", name, constructor, scope),
-      registerTrigger: (name, constructor) => this.register("trigger", name, constructor, scope),
-      registerService: (name, constructor) => this.register("service", name, constructor, scope)
+      registerAction: (name, constructor, options) => this.register("action", name, constructor, scope, options),
+      registerTrigger: (name, constructor, options) => this.register("trigger", name, constructor, scope, options),
+      registerService: (name, constructor, options) => this.register("service", name, constructor, scope, options)
     };
   }
 
@@ -31,14 +33,20 @@ export class CapabilityRegistry {
     return this.owners.get(`${kind}:${name}`);
   }
 
-  register(kind: "action", name: string, constructor: ActionConstructor, scope?: string): void;
-  register(kind: "trigger", name: string, constructor: TriggerConstructor, scope?: string): void;
-  register(kind: "service", name: string, constructor: ServiceConstructor, scope?: string): void;
+  /** 该能力是否声明需要运行时控制（未声明时上下文中不注入 RuntimeControl）。 */
+  grantsControl(kind: CapabilityKind, name: string): boolean {
+    return this.controlGrants.get(`${kind}:${name}`) === true;
+  }
+
+  register(kind: "action", name: string, constructor: ActionConstructor, scope?: string, options?: CapabilityOptions): void;
+  register(kind: "trigger", name: string, constructor: TriggerConstructor, scope?: string, options?: CapabilityOptions): void;
+  register(kind: "service", name: string, constructor: ServiceConstructor, scope?: string, options?: CapabilityOptions): void;
   register(
     kind: CapabilityKind,
     name: string,
     constructor: ActionConstructor | TriggerConstructor | ServiceConstructor,
-    scope?: string
+    scope?: string,
+    options?: CapabilityOptions
   ): void {
     const normalized = name.trim();
     if (!normalized) throw new Error(kind + " capability name cannot be empty");
@@ -47,6 +55,7 @@ export class CapabilityRegistry {
     if (this.hasAny(normalized)) throw new Error("capability is registered more than once: " + normalized);
     target.set(normalized, constructor);
     if (scope) this.owners.set(`${kind}:${normalized}`, scope);
+    if (options?.control === true) this.controlGrants.set(`${kind}:${normalized}`, true);
   }
 
   getAction(name: string): ActionConstructor {
