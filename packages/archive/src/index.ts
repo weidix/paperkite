@@ -2,8 +2,9 @@ import { Action } from "@paperkite/sdk";
 import { utils } from "telegram";
 import { MessageArchiver, type ArchiveClient } from "./archiver.js";
 import { buildTargets, coerceBool, coerceInt, type ArchiveConfig } from "./config.js";
-import { ArchiveConsoleWebService } from "./console/service.js";
 import { createArchiveStore, resolveBackend } from "./storage/index.js";
+
+export { ArchiveConsoleWebService } from "./console/service.js";
 
 type PeerLike = Parameters<typeof utils.getPeerId>[0];
 
