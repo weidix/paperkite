@@ -24,3 +24,4 @@ packages/runtime-console/public/
 .svelte-kit/
 .pnpm-store/
 data/downloads/
+viz/

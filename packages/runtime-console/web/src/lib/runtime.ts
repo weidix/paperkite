@@ -39,6 +39,7 @@ export interface FlowSnapshot {
   readonly enabled: boolean;
   readonly active: boolean;
   readonly session?: string;
+  readonly actionSession?: string;
   readonly autoStart?: boolean;
   readonly cron?: string;
   readonly intervalSeconds?: number;

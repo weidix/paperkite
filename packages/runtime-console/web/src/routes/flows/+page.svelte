@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     CalendarClock,
+    CircleAlert,
     CirclePlay,
     FileClock,
     MoreHorizontal,
@@ -10,6 +11,7 @@
   } from "lucide-svelte";
   import { DropdownMenu } from "bits-ui";
   import { toast } from "$lib/toast-store.svelte";
+  import { isEmptyConfig } from "$lib/action-draft";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import Status from "$lib/components/ui/status.svelte";
@@ -27,10 +29,11 @@
   const MenuContent = DropdownMenu.Content;
   const MenuItem = DropdownMenu.Item;
 
-  type FlowTab = "all" | FlowKind;
+  type FlowTab = "all" | "missing" | FlowKind;
 
   const TABS = [
     { value: "all" as FlowTab, label: "全部", icon: CirclePlay },
+    { value: "missing" as FlowTab, label: "缺配置", icon: CircleAlert },
     { value: "trigger" as FlowTab, label: "触发器", icon: Zap },
     { value: "command" as FlowTab, label: "命令", icon: Rocket },
     { value: "schedule" as FlowTab, label: "定时任务", icon: CalendarClock },
@@ -51,13 +54,24 @@
 
   const snapshot = $derived(runtime.snapshot);
   const flows = $derived(snapshot?.flows ?? []);
-  const visible = $derived(tab === "all" ? flows : flows.filter((flow) => flow.kind === tab));
+  const visible = $derived(
+    tab === "all"
+      ? flows
+      : tab === "missing"
+        ? flows.filter((flow) => configSummary(flow).missing > 0)
+        : flows.filter((flow) => flow.kind === tab)
+  );
   const tabItems = $derived(
     TABS.map((item) => ({
       value: item.value,
       label: item.label,
       icon: item.icon,
-      count: item.value === "all" ? flows.length : flows.filter((flow) => flow.kind === item.value).length
+      count:
+        item.value === "all"
+          ? flows.length
+          : item.value === "missing"
+            ? flows.filter((flow) => configSummary(flow).missing > 0).length
+            : flows.filter((flow) => flow.kind === item.value).length
     }))
   );
 
@@ -67,6 +81,20 @@
     if (flow.kind === "service") return flow.autoStart ? "自启" : "手动";
     const actionCount = flow.actions?.length ?? 0;
     return `${actionCount} 个动作${flow.maxRuns ? ` · 最多 ${flow.maxRuns} 次` : ""}`;
+  }
+
+  function configSummary(flow: FlowSnapshot): { filled: number; total: number; missing: number } {
+    const slots: { label: string; config: unknown }[] =
+      flow.kind === "trigger"
+        ? [
+            { label: "自身", config: flow.config },
+            ...(flow.actions ?? []).map((action, index) => ({ label: `动作 ${index + 1}`, config: action.config }))
+          ]
+        : flow.kind === "service"
+          ? [{ label: "自身", config: flow.config }]
+          : [{ label: "动作", config: flow.config }];
+    const missing = slots.filter((slot) => isEmptyConfig(slot.config)).length;
+    return { filled: slots.length - missing, total: slots.length, missing };
   }
 
   async function run(flow: FlowSnapshot): Promise<void> {
@@ -139,10 +167,15 @@
     {#if visible.length === 0}
       <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
           <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-            <CirclePlay class="size-5 text-muted-foreground" aria-hidden="true" />
+            <CircleAlert class="size-5 text-muted-foreground" aria-hidden="true" />
           </span>
-          <p class="text-sm font-medium">没有已配置的流程</p>
-          <p class="max-w-sm text-xs text-muted-foreground">在 flows.yml 中声明触发器、命令、定时任务或服务后，这里会出现对应条目。</p>
+          {#if tab === "missing"}
+            <p class="text-sm font-medium">没有缺配置的流程</p>
+            <p class="max-w-sm text-xs text-muted-foreground">所有流程的自身配置与动作配置都已填写。</p>
+          {:else}
+            <p class="text-sm font-medium">没有已配置的流程</p>
+            <p class="max-w-sm text-xs text-muted-foreground">在 flows.yml 中声明触发器、命令、定时任务或服务后，这里会出现对应条目。</p>
+          {/if}
         </div>
     {:else}
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -155,6 +188,7 @@
                 <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0">能力</th>
                 <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden md:table-cell">会话</th>
                 <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden sm:table-cell">摘要</th>
+                <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden lg:table-cell">配置</th>
                 <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-14 text-center">启用</th>
                 <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-12"></th>
               </tr>
@@ -162,6 +196,7 @@
             <tbody class="[&_tr:last-child]:border-0">
               {#each visible as flow (`${flow.kind}:${flow.id}`)}
                 {@const busy = pending === flow.id}
+                {@const summary = configSummary(flow)}
                 <tr class="border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted cursor-pointer" onclick={() => openDialog(flow)}>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
                     {#if flow.suspended}
@@ -202,6 +237,17 @@
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden max-w-56 truncate sm:table-cell">
                     <span class="text-xs text-muted-foreground">{flowSummary(flow)}</span>
+                  </td>
+                  <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden lg:table-cell">
+                    {#if summary.missing > 0}
+                      <Badge variant="destructive" title={`${summary.filled}/${summary.total} 个配置已填写`}>
+                        缺 {summary.missing} 项
+                      </Badge>
+                    {:else}
+                      <Badge variant="outline" title={`${summary.filled}/${summary.total} 个配置已填写`}>
+                        已配置
+                      </Badge>
+                    {/if}
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-center">
                     {#if flow.kind !== "command"}
