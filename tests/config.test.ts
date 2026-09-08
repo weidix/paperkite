@@ -8,11 +8,11 @@ import { fromMapping, loadCatalog, updateFlowItem } from "../src/config/loader.j
 test("normalizes flow sections and exposes only referenced capabilities", () => {
   const catalog = fromMapping({
     commands: [{ id: "send", run: { capability: "messages.send", config: { text: "hi" } } }],
-    triggers: [{ id: "watch", capability: "watch.group", config: {}, actions: [{ capability: "notifications.bark" }] }],
+    triggers: [{ id: "watch", capability: "messages.watch", config: {}, actions: [{ capability: "notify.bark" }] }],
     schedules: [{ id: "archive", intervalSeconds: 60, run: { capability: "archive.sync" } }]
   });
 
-  assert.deepEqual([...catalog.atomRefs()].sort(), ["archive.sync", "messages.send", "notifications.bark", "watch.group"]);
+  assert.deepEqual([...catalog.atomRefs()].sort(), ["archive.sync", "messages.send", "messages.watch", "notify.bark"]);
   assert.equal(catalog.find("command:send")?.kind, "command");
   assert.equal(catalog.find("watch")?.kind, "trigger");
 });
@@ -28,7 +28,7 @@ test("expands YAML merge keys before normalizing flow configuration", async () =
       "  url: postgresql://localhost/archive",
       "services:",
       "  - id: console",
-      "    capability: runtime.console_web",
+      "    capability: runtime.console",
       "    config:",
       "      <<: *storage",
       "      port: 18080",
@@ -55,14 +55,14 @@ test("updates an explicitly identified flow without dropping YAML comments", asy
     [
       "triggers:",
       "  - id: watcher # stable id",
-      "    capability: watch.group",
+      "    capability: messages.watch",
       "    enabled: true # user note",
       "    config: {}",
       "    actions: []",
       ""
     ].join("\n")
   );
-  const catalog = fromMapping({ triggers: [{ id: "watcher", capability: "watch.group", enabled: true, config: {}, actions: [] }] }, file);
+  const catalog = fromMapping({ triggers: [{ id: "watcher", capability: "messages.watch", enabled: true, config: {}, actions: [] }] }, file);
   await assert.rejects(updateFlowItem(catalog, "trigger:watcher", { bogus: 1 }), /does not accept field bogus/);
   const next = await updateFlowItem(catalog, "trigger:watcher", { enabled: false });
   assert.ok(next);

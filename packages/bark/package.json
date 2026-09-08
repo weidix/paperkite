@@ -14,7 +14,7 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "action", "name": "notifications.bark", "handler": "BarkAction" }
+        { "kind": "action", "name": "notify.bark", "handler": "BarkAction" }
       ]
     }
   }

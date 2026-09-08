@@ -48,7 +48,7 @@
         },
         {
           "kind": "service",
-          "name": "archive.console_web",
+          "name": "archive.console",
           "handler": "ArchiveConsoleWebService"
         }
       ]

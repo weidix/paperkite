@@ -22,12 +22,12 @@ pnpm start run
 | 插件 | 能力 |
 | --- | --- |
 | `@paperkite/plugin-telegram-messages` | `messages.send` |
-| `@paperkite/plugin-bark` | `notifications.bark` |
-| `@paperkite/plugin-conversation-watch` | `watch.group`、`watch.poll` |
-| `@paperkite/plugin-account-watch` | `watch.session` |
-| `@paperkite/plugin-message-archive` | `archive.sync`、`archive.console_web` |
-| `@paperkite/plugin-process-command` | `system.command` |
-| `@paperkite/plugin-console-web` | `runtime.console_web` |
+| `/plugin-bark` | `notify.bark` |
+| `/plugin-conversation-watch` | `messages.watch`、`messages.poll` |
+| `/plugin-account-watch` | `account.health` |
+| `/plugin-message-archive` | `archive.sync`、`archive.console` |
+| `/plugin-process-command` | `process.run` |
+| `/plugin-console-web` | `runtime.console` |
 
 `@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
 
@@ -60,11 +60,11 @@ run:
 
 触发器的 `actions` 会接收 `emission`，消息动作支持 `{{event.text}}`、`{{event.senderId}}` 等路径模板，也兼容 `{text}`、`{chat}` 等简写。动作可声明 `hook` 指向一个导出函数的 TypeScript 模块，用于在执行前转换或跳过本次 payload。
 
-`messages.send` 支持个人会话和 Telegram Bot API 两种模式。个人会话使用 `session` 与 `peer`，Bot 模式使用 `mode: bot`、`botToken` 与 `chatId`。`notifications.bark` 只负责 Bark 请求，不持有 Telegram 会话，这两个能力始终是两个插件：
+`messages.send` 支持个人会话和 Telegram Bot API 两种模式。个人会话使用 `session` 与 `peer`，Bot 模式使用 `mode: bot`、`botToken` 与 `chatId`。`notify.bark` 只负责 Bark 请求，不持有 Telegram 会话，这两个能力始终是两个插件：
 
 ```yaml
 run:
-  capability: notifications.bark
+  capability: notify.bark
   config:
     server: "https://api.day.app"   # 可省略，默认官方服务；自建部署时填自己的入口
     key: replace-with-your-bark-key
@@ -81,12 +81,12 @@ config:
   url: postgresql://user:password@host/database
 ```
 
-归档台（`archive.console_web`）是消息归档插件的 Web 终端，面向拥有者本人翻查归档资料：检索消息、按会话浏览、查看同群上下文、预览与下载媒体。页面由 SvelteKit 静态 SPA 构成，构建产物输出到 `packages/message-archive/public`，与 API 由同一服务进程托管：
+归档台（`archive.console`）是消息归档插件的 Web 终端，面向拥有者本人翻查归档资料：检索消息、按会话浏览、查看同群上下文、预览与下载媒体。页面由 SvelteKit 静态 SPA 构成，构建产物输出到 `packages/message-archive/public`，与 API 由同一服务进程托管：
 
 ```yaml
 services:
   - id: archive-console
-    capability: archive.console_web
+    capability: archive.console
     session: primary        # 可选；配置后可从 Telegram 在线取回未落盘媒体
     config:
       host: 127.0.0.1
@@ -102,12 +102,12 @@ services:
 
 命令插件默认不经过 shell，只有明确设置 `shell: true` 才会启用 shell 解释。
 
-运行控制台（`runtime.console_web`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 SvelteKit + Bits UI 组成：
+运行控制台（`runtime.console`）是运行时自身的 Web 前端，通过服务注入的 `RuntimeControl` 契约取数、下发操作并订阅事件，页面由 SvelteKit + Bits UI 组成：
 
 ```yaml
 services:
   - id: runtime-console
-    capability: runtime.console_web
+    capability: runtime.console
     config:
       host: 127.0.0.1
       port: 3378

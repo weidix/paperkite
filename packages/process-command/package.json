@@ -14,7 +14,7 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "action", "name": "system.command", "handler": "ProcessCommandAction" }
+        { "kind": "action", "name": "process.run", "handler": "ProcessCommandAction" }
       ]
     }
   }

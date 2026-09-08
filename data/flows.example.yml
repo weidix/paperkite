@@ -10,37 +10,37 @@ commands:
 
 triggers:
   - id: account-health
-    capability: watch.session
+    capability: account.health
     config:
       notifyOnRecovery: true
     actions:
-      - capability: notifications.bark
+      - capability: notify.bark
         config:
           key: replace-with-your-bark-key
           title: 会话异常
           body: "{{event.session}} {{event.state}}"
 
   - id: important-message
-    capability: watch.group
+    capability: messages.watch
     session: primary
     config:
       chats: ["@example"]
       keywords: ["提醒"]
     actions:
-      - capability: notifications.bark
+      - capability: notify.bark
         config:
           key: replace-with-your-bark-key
           title: 新消息
           body: "{{event.text}}"
 
   - id: important-message-secondary
-    capability: watch.group
+    capability: messages.watch
     session: secondary
     config:
       chats: ["@example"]
       keywords: ["提醒"]
     actions:
-      - capability: notifications.bark
+      - capability: notify.bark
         config:
           key: replace-with-your-bark-key
           title: 新消息
@@ -60,7 +60,7 @@ schedules:
 
 services:
   - id: runtime-console
-    capability: runtime.console_web
+    capability: runtime.console
     config:
       host: 127.0.0.1
       port: 3378

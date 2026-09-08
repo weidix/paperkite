@@ -39,7 +39,7 @@
   >
     <span class="font-display text-sm font-semibold tracking-tight">{title}</span>
   </button>
-  <span class="hidden font-mono text-[11px] text-muted-foreground sm:inline">archive.console_web</span>
+  <span class="hidden font-mono text-[11px] text-muted-foreground sm:inline">archive.console</span>
   <div class="ml-auto flex items-center gap-1.5">
     <span class="hidden rounded-md border px-2 py-0.5 font-mono text-[11px] text-muted-foreground sm:inline">
       {state?.session ? `会话 ${state.session}` : "未配置会话"}

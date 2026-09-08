@@ -69,7 +69,7 @@
       </span>
       <div class="flex flex-col leading-tight">
         <span class="font-display text-sm font-semibold tracking-tight">纸鸢</span>
-        <span class="font-mono text-[11px] text-muted-foreground">runtime.console_web</span>
+        <span class="font-mono text-[11px] text-muted-foreground">runtime.console</span>
       </div>
     </div>
 
@@ -114,7 +114,7 @@
             </span>
             <div class="flex flex-col leading-tight">
               <span class="font-display text-sm font-semibold tracking-tight">纸鸢</span>
-              <span class="font-mono text-[11px] text-muted-foreground">runtime.console_web</span>
+              <span class="font-mono text-[11px] text-muted-foreground">runtime.console</span>
             </div>
           </div>
           <nav class="flex flex-col gap-1" aria-label="移动端导航">

@@ -65,13 +65,13 @@ async function makeWatcherRuntime(
   const directory = await mkdtemp(join(tmpdir(), "paperkite-account-watch-"));
   const logger = new AppLogger("info", join(directory, "logs"));
   const registry = new CapabilityRegistry();
-  registry.register("trigger", "watch.session", SessionHealthTrigger, "@paperkite/plugin-account-watch", {
+  registry.register("trigger", "account.health", SessionHealthTrigger, "@paperkite/plugin-account-watch", {
     control: true
   });
   registry.register("action", "demo.capture", CaptureAction, "plugin-demo");
   const sessions = new FakeSessionPool({ "acct-1": "isolated", "acct-2": "connected" });
   const catalog = fromMapping({
-    triggers: [{ id: "account-health", capability: "watch.session", config, actions: [{ capability: "demo.capture" }] }]
+    triggers: [{ id: "account-health", capability: "account.health", config, actions: [{ capability: "demo.capture" }] }]
   });
   const runtime = new Runtime({
     catalog,
@@ -87,7 +87,7 @@ async function makeWatcherRuntime(
   return { runtime, sessions };
 }
 
-test("watch.session alerts bad sessions from the snapshot and follows state events without a bound session", async () => {
+test("account.health alerts bad sessions from the snapshot and follows state events without a bound session", async () => {
   const { runtime, sessions } = await makeWatcherRuntime({});
   assert.deepEqual(
     CaptureAction.emissions.map((entry) => entry.event),
@@ -111,7 +111,7 @@ test("watch.session alerts bad sessions from the snapshot and follows state even
   await runtime.stop();
 });
 
-test("watch.session recovery alerts are opt-in and the watcher restarts on reload", async () => {
+test("account.health recovery alerts are opt-in and the watcher restarts on reload", async () => {
   const { runtime, sessions } = await makeWatcherRuntime({ notifyOnRecovery: true });
   sessions.emit({ name: "acct-1", previous: "isolated", state: "connected" });
   await new Promise((resolve) => setTimeout(resolve, 30));
