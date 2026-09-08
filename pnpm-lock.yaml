@@ -145,9 +145,6 @@ importers:
       luxon:
         specifier: ^3.7.2
         version: 3.7.2
-      telegram:
-        specifier: ^2.26.22
-        version: 2.26.22
 
   packages/messages-watch:
     dependencies:

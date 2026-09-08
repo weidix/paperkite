@@ -9,8 +9,7 @@
   },
   "dependencies": {
     "@paperkite/sdk": "workspace:*",
-    "luxon": "^3.7.2",
-    "telegram": "^2.26.22"
+    "luxon": "^3.7.2"
   },
   "paperkite": {
     "plugin": {
