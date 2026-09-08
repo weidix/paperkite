@@ -88,14 +88,6 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
     async reconnectSession(id) {
       calls.push("reconnect:" + id);
     },
-    async beginSessionLogin(id) {
-      calls.push("login:" + id);
-      return { status: "error" as const, message: "not supported" };
-    },
-    async submitSessionLogin(id) {
-      calls.push("login:" + id);
-      return { status: "error" as const, message: "not supported" };
-    },
     listPlugins() {
       return PLUGINS;
     },

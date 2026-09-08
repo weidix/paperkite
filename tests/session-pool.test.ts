@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SessionUnavailableError } from "@paperkite/sdk";
-import { SessionPool, createGramLogger, type SessionClient } from "../src/telegram/pool.js";
+import { SessionPool } from "../src/telegram/pool.js";
+import { createGramLogger, type SessionClient } from "../src/telegram/client.js";
+import { writeSessionFile } from "../src/telegram/session-files.js";
 import type { AppSettings } from "../src/config/settings.js";
 import type { RuntimeLogger } from "@paperkite/sdk";
 
@@ -14,20 +16,11 @@ test("session operations are serialized without worker threads", async () => {
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
     logging: { level: "error", directory }
   };
-  const logger: RuntimeLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return logger; } };
-  let starts = 0;
+  await writeSessionFile(directory, "primary", "saved");
+  const logger = makeLogger();
   let active = 0;
   let maximum = 0;
-  const client: SessionClient = {
-    connected: true,
-    async start() { starts += 1; },
-    async connect() {},
-    async disconnect() {},
-    async getMe() { return {}; },
-    async invoke() { return {}; },
-    session: { save: () => "saved" }
-  };
-  const pool = new SessionPool(settings, logger, () => client);
+  const pool = new SessionPool(settings, logger, () => workingClient());
   await pool.ensure(["primary", "primary.session"]);
   await Promise.all([
     pool.run("primary", async () => {
@@ -42,7 +35,6 @@ test("session operations are serialized without worker threads", async () => {
       active -= 1;
     })
   ]);
-  assert.equal(starts, 1);
   assert.equal(maximum, 1);
   await pool.closeAll();
 });
@@ -89,11 +81,9 @@ function makeLogger(): RuntimeLogger {
 
 function workingClient(): SessionClient {
   return {
-    connected: true,
     async start() {},
     async connect() {},
     async disconnect() {},
-    async getMe() {},
     async invoke() {},
     session: { save: () => "saved" }
   };
@@ -114,6 +104,7 @@ test("session faults isolate the session and automatic reconnects recover it", a
     },
     logging: { level: "error", directory }
   };
+  await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
   const pool = new SessionPool(settings, logger, () => workingClient());
   await pool.ensure(["primary"]);
@@ -144,6 +135,7 @@ test("auth-class failures move the session to waiting-auth with a typed error", 
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
     logging: { level: "error", directory }
   };
+  await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
   const pool = new SessionPool(settings, logger, () => workingClient());
   await pool.ensure(["primary"]);
@@ -155,6 +147,10 @@ test("auth-class failures move the session to waiting-auth with a typed error", 
     throw authError;
   }));
   assert.equal(pool.state("primary"), "waiting-auth");
+  assert.match(
+    pool.states().find((info) => info.name === "primary")?.reason ?? "",
+    /run `paperkite session login primary` to log in/
+  );
   await assert.rejects(pool.run("primary", async () => 1), (error: unknown) => {
     assert.ok(error instanceof SessionUnavailableError);
     return true;
@@ -173,6 +169,7 @@ test("action-class failures do not count toward session isolation", async () => 
     },
     logging: { level: "error", directory }
   };
+  await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
   const pool = new SessionPool(settings, logger, () => workingClient());
   await pool.ensure(["primary"]);
@@ -194,6 +191,7 @@ test("access hands out an implicit single-session handle only for a declared ses
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
     logging: { level: "error", directory }
   };
+  await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
   const pool = new SessionPool(settings, logger, () => workingClient());
   await pool.ensure(["primary"]);
@@ -201,5 +199,26 @@ test("access hands out an implicit single-session handle only for a declared ses
   assert.ok(access, "a declared session gets a session handle");
   assert.equal(await access!.run(async () => 42), 42);
   assert.equal(pool.access(undefined), undefined, "plugins without a declared session see no handle");
+  await pool.closeAll();
+});
+
+test("startup with a missing session isolates it and reports the login command", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-missing-"));
+  const settings: AppSettings = {
+    telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
+    logging: { level: "error", directory }
+  };
+  const logger = makeLogger();
+  const pool = new SessionPool(settings, logger, () => workingClient());
+  await pool.ensure(["primary"]);
+  assert.equal(pool.state("primary"), "waiting-auth");
+  const info = pool.states().find((item) => item.name === "primary");
+  assert.ok(info, "the missing session must be reported");
+  assert.match(info.reason ?? "", /has no saved login; run `paperkite session login primary` to log in/);
+  await assert.rejects(pool.run("primary", async () => 1), (error: unknown) => {
+    assert.ok(error instanceof SessionUnavailableError);
+    assert.match(error.message, /run `paperkite session login primary` to log in/);
+    return true;
+  });
   await pool.closeAll();
 });

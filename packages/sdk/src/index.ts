@@ -315,15 +315,6 @@ export interface RuntimeSnapshot {
   readonly logs: readonly LogScopeInfo[];
 }
 
-export type SessionLoginReply =
-  | { readonly status: "ok" }
-  | {
-      readonly status: "prompt";
-      readonly kind: "phone" | "code" | "password";
-      readonly message?: string;
-    }
-  | { readonly status: "error"; readonly message: string };
-
 export interface ActionSpecInput {
   readonly capability: string;
   readonly config?: unknown;
@@ -490,8 +481,6 @@ export interface RuntimeControl {
   stopService(identifier: string): Promise<void>;
   reload(): Promise<void>;
   reconnectSession(name: string): Promise<void>;
-  beginSessionLogin(name: string): Promise<SessionLoginReply>;
-  submitSessionLogin(name: string, value: string): Promise<SessionLoginReply>;
   listPlugins(): readonly PluginInfo[];
   subscribe(listener: RuntimeEventListener): Unsubscribe;
 }

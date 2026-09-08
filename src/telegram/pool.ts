@@ -1,36 +1,15 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions/index.js";
-import { Logger as GramLogger, LogLevel } from "telegram/extensions/Logger.js";
 import { Api } from "telegram/tl/api.js";
 import {
   SessionUnavailableError,
   type RuntimeLogger,
   type SessionAccess,
-  type SessionLoginReply,
   type SessionState,
   type Unsubscribe
 } from "@paperkite/sdk";
 import type { AppSettings } from "../config/settings.js";
+import { createGramClient, type SessionClient } from "./client.js";
 import { classifySessionFailure } from "./failure.js";
-
-export interface SessionClient {
-  readonly connected?: boolean;
-  start(options: {
-    phoneNumber: () => Promise<string>;
-    phoneCode: () => Promise<string>;
-    password: () => Promise<string>;
-    onError: (error: unknown) => void;
-  }): Promise<unknown>;
-  connect(): Promise<unknown>;
-  disconnect(): Promise<unknown>;
-  getMe(): Promise<unknown>;
-  session: { save(): string };
-  invoke(request: unknown): Promise<unknown>;
-}
+import { normalizeSessionName, readSessionFile, writeSessionFile } from "./session-files.js";
 
 export interface SessionStateInfo {
   readonly name: string;
@@ -49,8 +28,6 @@ export interface SessionStateChange {
 
 export type SessionStateListener = (change: SessionStateChange) => void;
 
-type LoginPromptKind = "phone" | "code" | "password";
-
 interface Health {
   state: SessionState;
   since: number;
@@ -68,12 +45,6 @@ interface Entry {
   tail: Promise<void>;
   health: Health;
   timer?: NodeJS.Timeout;
-  login?: LoginFlow;
-}
-
-interface LoginFlow {
-  ask?: { kind: LoginPromptKind; resolve: (value: string) => void; timer: NodeJS.Timeout };
-  result?: { ok: boolean; error?: string };
 }
 
 interface GuardSettings {
@@ -84,7 +55,6 @@ interface GuardSettings {
 }
 
 const DEFAULT_GUARD: GuardSettings = { windowMs: 60_000, threshold: 5, backoffMinMs: 30_000, backoffMaxMs: 30 * 60_000 };
-const LOGIN_INPUT_TIMEOUT_MS = 180_000;
 
 export class SessionPool {
   private readonly entries = new Map<string, Entry>();
@@ -119,7 +89,7 @@ export class SessionPool {
       const existing = this.entries.get(name);
       if (!existing) {
         const created = this.createEntry(name);
-        void this.attempt(created, "auto");
+        void this.attempt(created);
         pending.push(created);
       } else if (existing.health.state === "starting") {
         pending.push(existing);
@@ -178,35 +148,7 @@ export class SessionPool {
     const entry = this.entries.get(normalizeSessionName(name));
     if (!entry) throw new Error("unknown session: " + name);
     if (entry.health.state === "starting" || entry.health.state === "connected") return;
-    await this.attempt(entry, "auto");
-  }
-
-  async beginSessionLogin(name: string): Promise<SessionLoginReply> {
-    const entry = this.entries.get(normalizeSessionName(name));
-    if (!entry) throw new Error("unknown session: " + name);
-    if (entry.health.state === "connected") return { status: "ok" };
-    if (entry.health.state === "starting") {
-      return { status: "error", message: "a session attempt is already in progress" };
-    }
-    if (entry.login && entry.login.ask === undefined && entry.login.result === undefined) {
-      return { status: "error", message: "a login flow is already in progress" };
-    }
-    if (this.closed) return { status: "error", message: "runtime is stopping" };
-    entry.login = { result: undefined };
-    await this.attempt(entry, "login");
-    return this.awaitLogin(entry);
-  }
-
-  async submitSessionLogin(name: string, value: string): Promise<SessionLoginReply> {
-    const entry = this.entries.get(normalizeSessionName(name));
-    if (!entry) throw new Error("unknown session: " + name);
-    const flow = entry.login;
-    const ask = flow?.ask;
-    if (!flow || !ask) return { status: "error", message: "no login flow is waiting for input" };
-    clearTimeout(ask.timer);
-    flow.ask = undefined;
-    ask.resolve(value);
-    return this.awaitLogin(entry);
+    await this.attempt(entry);
   }
 
   async closeAll(): Promise<void> {
@@ -237,7 +179,7 @@ export class SessionPool {
     return entry;
   }
 
-  private async attempt(entry: Entry, mode: "auto" | "login"): Promise<void> {
+  private async attempt(entry: Entry): Promise<void> {
     if (this.closed) return;
     if (entry.health.state === "starting") {
       await entry.ready.catch(() => undefined);
@@ -246,21 +188,20 @@ export class SessionPool {
     if (entry.health.state === "connected") return;
     if (entry.timer) clearTimeout(entry.timer);
     entry.timer = undefined;
-    if (entry.health.state === "isolated") entry.health.attempts = mode === "login" ? 0 : entry.health.attempts;
-    entry.health.reason = mode === "login" ? "re-login in progress" : "connecting";
+    entry.health.reason = "connecting";
     entry.health.state = "starting";
     entry.ready = new Promise<void>((resolvePromise) => {
       entry.readyResolve = resolvePromise;
     });
     try {
-      const outcome = await this.performAttempt(entry, mode);
+      const outcome = await this.performAttempt(entry);
       if (this.closed) return;
       if (outcome.ok) {
         await this.saveSession(entry);
         this.transition(entry, "connected");
         return;
       }
-      this.failAttempt(entry, outcome.error, mode, outcome.hadContent);
+      this.failAttempt(entry, outcome.error, outcome.hadContent);
     } finally {
       entry.readyResolve?.();
       entry.readyResolve = undefined;
@@ -268,8 +209,7 @@ export class SessionPool {
   }
 
   private async performAttempt(
-    entry: Entry,
-    mode: "auto" | "login"
+    entry: Entry
   ): Promise<{ ok: boolean; error?: unknown; hadContent: boolean }> {
     await this.disposeClient(entry);
     const content = await readSessionFile(this.settings.telegram.sessionsDir, entry.name).catch((error: unknown) =>
@@ -277,30 +217,25 @@ export class SessionPool {
     );
     if (content instanceof Error) return { ok: false, error: content, hadContent: false };
     const hadContent = Boolean(content);
+    if (!hadContent) {
+      return { ok: false, error: new Error("session " + entry.name + " has no saved login"), hadContent: false };
+    }
     try {
-      if (mode === "login" || !content) {
-        if (!entry.client) entry.client = this.createClient(entry.name, content);
-        await this.runLogin(entry, mode === "login" ? this.askOverControl(entry) : this.askOverStdin(entry.name));
-        return { ok: true, hadContent };
-      }
       const client = this.createClient(entry.name, content);
       entry.client = client;
       await client.connect();
       await this.checkAuthorized(client);
       return { ok: true, hadContent };
     } catch (error) {
-      if (mode === "login" && entry.login && entry.login.result === undefined) {
-        entry.login.result = { ok: false, error: messageOf(error) };
-      }
       return { ok: false, error, hadContent };
     }
   }
 
-  private failAttempt(entry: Entry, error: unknown, mode: "auto" | "login", hadContent: boolean): void {
+  private failAttempt(entry: Entry, error: unknown, hadContent: boolean): void {
     const message = messageOf(error);
     const kind = classifySessionFailure(error);
-    if (mode === "login" || kind === "auth" || !hadContent) {
-      this.transition(entry, "waiting-auth", message || "session login is required");
+    if (kind === "auth" || !hadContent) {
+      this.transition(entry, "waiting-auth", loginHint(entry.name, message));
       return;
     }
     entry.health.attempts += 1;
@@ -311,7 +246,7 @@ export class SessionPool {
   private scheduleBackoff(entry: Entry): void {
     if (this.closed || entry.health.state !== "isolated") return;
     const delay = Math.min(this.guard.backoffMaxMs, this.guard.backoffMinMs * 2 ** Math.max(0, entry.health.attempts - 1));
-    const timer = setTimeout(() => void this.attempt(entry, "auto"), delay);
+    const timer = setTimeout(() => void this.attempt(entry), delay);
     timer.unref();
     entry.timer = timer;
   }
@@ -319,7 +254,7 @@ export class SessionPool {
   private noteFailure(entry: Entry, error: unknown): void {
     const kind = classifySessionFailure(error);
     if (kind === "auth") {
-      this.transition(entry, "waiting-auth", messageOf(error));
+      this.transition(entry, "waiting-auth", loginHint(entry.name, messageOf(error)));
       void this.disposeClient(entry);
       return;
     }
@@ -344,13 +279,15 @@ export class SessionPool {
 
   private transition(entry: Entry, state: SessionState, reason?: string): void {
     if (entry.health.state === state) {
-      if (reason !== undefined) entry.health.reason = reason;
+      if (state === "connected") entry.health.reason = undefined;
+      else if (reason !== undefined) entry.health.reason = reason;
       return;
     }
     const previous = entry.health.state;
     entry.health.state = state;
     entry.health.since = Date.now();
-    if (reason !== undefined) entry.health.reason = reason;
+    if (state === "connected") entry.health.reason = undefined;
+    else if (reason !== undefined) entry.health.reason = reason;
     if (state === "connected" || state === "waiting-auth") entry.health.attempts = 0;
     if (this.closed) return;
     this.logger.info(`session ${entry.name} ${previous} -> ${state}` + (reason ? ": " + reason : ""));
@@ -394,156 +331,13 @@ export class SessionPool {
   private async checkAuthorized(client: SessionClient): Promise<void> {
     await client.invoke(new Api.updates.GetState());
   }
-
-  private async runLogin(entry: Entry, ask: (kind: LoginPromptKind) => Promise<string>): Promise<void> {
-    const client = entry.client ?? (entry.client = this.createClient(entry.name, ""));
-    await client.start({
-      phoneNumber: () => ask("phone"),
-      phoneCode: () => ask("code"),
-      password: () => ask("password"),
-      onError: (error: unknown) => this.logger.warn("session login step failed: " + entry.name, error)
-    });
-    if (entry.login && !this.closed) entry.login.result = { ok: true };
-  }
-
-  private askOverStdin(name: string): (kind: LoginPromptKind) => Promise<string> {
-    return (kind) => {
-      if (!input.isTTY) throw new Error("session " + name + " login needs an interactive terminal");
-      const readline = createInterface({ input, output });
-      const label = kind === "phone" ? "Phone number: " : kind === "code" ? "Login code: " : "Two-factor password: ";
-      return readline.question(label).finally(() => readline.close());
-    };
-  }
-
-  private askOverControl(entry: Entry): (kind: LoginPromptKind) => Promise<string> {
-    return (kind) =>
-      new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (entry.login?.ask?.timer === timer) entry.login.ask = undefined;
-          reject(new Error("login input timed out after " + LOGIN_INPUT_TIMEOUT_MS / 1_000 + "s"));
-        }, LOGIN_INPUT_TIMEOUT_MS);
-        timer.unref();
-        const flow = entry.login;
-        if (!flow) {
-          clearTimeout(timer);
-          reject(new Error("login flow ended"));
-          return;
-        }
-        flow.ask = {
-          kind,
-          resolve: (value: string) => {
-            clearTimeout(timer);
-            resolve(value);
-          },
-          timer
-        };
-      });
-  }
-
-  private async awaitLogin(entry: Entry): Promise<SessionLoginReply> {
-    for (;;) {
-      if (this.closed) return { status: "error", message: "runtime is stopping" };
-      if (entry.health.state === "connected") return { status: "ok" };
-      const flow = entry.login;
-      if (!flow) return { status: "error", message: "login flow ended" };
-      if (flow.ask) return { status: "prompt", kind: flow.ask.kind };
-      if (flow.result) {
-        return flow.result.ok ? { status: "ok" } : { status: "error", message: flow.result.error ?? "session login failed" };
-      }
-      if (entry.health.state !== "starting") {
-        return { status: "error", message: entry.health.reason ?? "session login failed" };
-      }
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
-    }
-  }
-}
-
-export function createGramClient(sessionName: string, content: string): SessionClient {
-  const session = new StringSession(content);
-  return new TelegramClient(session, currentSettings.telegram.apiId, currentSettings.telegram.apiHash, {
-    connectionRetries: 5,
-    autoReconnect: true,
-    ...(currentLogger ? { baseLogger: createGramLogger(currentLogger, currentSettings.logging.level) } : {})
-  }) as unknown as SessionClient;
-}
-
-let currentSettings: AppSettings = {
-  telegram: { apiId: 0, apiHash: "", sessionsDir: resolve("data/accounts") },
-  logging: { level: "info", directory: resolve("data/logs") }
-};
-
-let currentLogger: RuntimeLogger | undefined;
-
-export function configureTelegramClientFactory(settings: AppSettings, logger?: RuntimeLogger): void {
-  currentSettings = settings;
-  currentLogger = logger;
-}
-
-export function createGramLogger(logger: RuntimeLogger, level: string): GramLogger {
-  const gram = new GramLogger(gramLogLevel(level));
-  gram.log = (logLevel, message) => {
-    switch (logLevel) {
-      case LogLevel.ERROR:
-        logger.error(message);
-        break;
-      case LogLevel.WARN:
-        logger.warn(message);
-        break;
-      case LogLevel.DEBUG:
-        logger.debug(message);
-        break;
-      default:
-        logger.info(message);
-    }
-  };
-  return gram;
-}
-
-function gramLogLevel(level: string): LogLevel {
-  switch (level.toLowerCase()) {
-    case "debug":
-      return LogLevel.DEBUG;
-    case "warn":
-      return LogLevel.WARN;
-    case "error":
-      return LogLevel.ERROR;
-    default:
-      return LogLevel.INFO;
-  }
-}
-
-async function readSessionFile(directory: string, name: string): Promise<string> {
-  const path = sessionPath(directory, name);
-  try {
-    await access(path);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return "";
-    throw error;
-  }
-  return readFile(path, "utf8");
-}
-
-async function writeSessionFile(directory: string, name: string, value: string): Promise<void> {
-  await mkdir(directory, { recursive: true });
-  await writeFile(sessionPath(directory, name), value, "utf8");
-}
-
-function sessionPath(directory: string, name: string): string {
-  const filename = name.endsWith(".session") ? name : name + ".session";
-  if (basename(filename) !== filename) throw new Error("invalid session name: " + name);
-  return join(directory, filename);
-}
-
-function normalizeSessionName(value: string): string {
-  const result = String(value).trim();
-  if (!result) throw new Error("session name cannot be empty");
-  return result.endsWith(".session") ? result.slice(0, -8) : result;
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
+function loginHint(name: string, detail: string | undefined): string {
+  const base = detail && detail.trim() ? detail : "session login is required";
+  return base + "; run `paperkite session login " + name + "` to log in";
 }
