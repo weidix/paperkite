@@ -60,7 +60,18 @@ run:
 
 触发器的 `actions` 会接收 `emission`，消息动作支持 `{{event.text}}`、`{{event.senderId}}` 等路径模板，也兼容 `{text}`、`{chat}` 等简写。动作可声明 `hook` 指向一个导出函数的 TypeScript 模块，用于在执行前转换或跳过本次 payload。
 
-`messages.send` 支持个人会话和 Telegram Bot API 两种模式。个人会话使用 `session` 与 `peer`，Bot 模式使用 `mode: bot`、`botToken` 与 `chatId`。`notifications.bark` 只负责 Bark 请求，不持有 Telegram 会话，这两个能力始终是两个插件。
+`messages.send` 支持个人会话和 Telegram Bot API 两种模式。个人会话使用 `session` 与 `peer`，Bot 模式使用 `mode: bot`、`botToken` 与 `chatId`。`notifications.bark` 只负责 Bark 请求，不持有 Telegram 会话，这两个能力始终是两个插件：
+
+```yaml
+run:
+  capability: notifications.bark
+  config:
+    server: "https://api.day.app"   # 可省略，默认官方服务；自建部署时填自己的入口
+    key: replace-with-your-bark-key
+    title: "新消息"
+    body: "{{event.text}}"
+    method: post                    # 或 get；按 Bark 格式拼请求，title/body 支持模板
+```
 
 归档默认使用 Node 内置 SQLite，也支持 PostgreSQL：
 

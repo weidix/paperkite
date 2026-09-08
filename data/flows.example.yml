@@ -18,7 +18,6 @@ triggers:
     actions:
       - capability: notifications.bark
         config:
-          endpoint: "https://bark.example/{key}"
           key: replace-with-your-bark-key
           title: 新消息
           body: "{{event.text}}"
