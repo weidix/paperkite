@@ -12,6 +12,7 @@ export type SearchPatch = Partial<{
 }>;
 
 export type View =
+  | { kind: "overview" }
   | {
       kind: "search";
       q: string;
@@ -70,10 +71,11 @@ export function initRouter(): () => void {
 
 export function parseHash(hash: string): View {
   const raw = hash.replace(/^#/, "");
+  if (raw === "" || raw === "/") return { kind: "overview" };
   if (raw.startsWith("/m/")) {
     const rowId = raw.slice(3).split("?")[0] ?? "";
     if (/^\d+$/.test(rowId)) return { kind: "message", rowId };
-    return emptySearch();
+    return { kind: "overview" };
   }
   if (raw.startsWith("/q")) {
     const query = new URLSearchParams(raw.includes("?") ? raw.slice(raw.indexOf("?")) : "");
@@ -94,10 +96,11 @@ export function parseHash(hash: string): View {
       forwardFrom: query.get("fwd") ?? ""
     };
   }
-  return emptySearch();
+  return { kind: "overview" };
 }
 
 function hashOf(view: View): string {
+  if (view.kind === "overview") return "#/";
   if (view.kind === "message") return `#/m/${view.rowId}`;
   const query = new URLSearchParams();
   if (view.q) query.set("q", view.q);
@@ -113,6 +116,11 @@ function hashOf(view: View): string {
 
 export function emptySearch(): View {
   return { kind: "search", q: "", chats: [], from: "", to: "", mode: "include", users: [], forwardFrom: "" };
+}
+
+/** 总览视图：进入控制台与点击品牌角标时的落点。 */
+export function overviewView(): View {
+  return { kind: "overview" };
 }
 
 /** 已解析的用户信息缓存：用户 chips 与菜单展示名优先取此。 */

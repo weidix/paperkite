@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Menu, Moon, ShieldBan, Sun } from "lucide-svelte";
-  import { openBlocks, themeStore, toggleTheme, viewStore } from "$lib/state.svelte";
+  import { openBlocks, overviewView, navigate, themeStore, toggleTheme, viewStore } from "$lib/state.svelte";
   import { fetchState, type ArchiveState } from "$lib/api";
   import Button from "$lib/components/button.svelte";
 
@@ -11,7 +11,13 @@
     fetchState().then((value) => (state = value)).catch(() => {});
   });
 
-  const title = $derived(viewStore.current.kind === "message" ? `消息 #${viewStore.current.rowId}` : "检索台");
+  const title = $derived(
+    viewStore.current.kind === "message"
+      ? `消息 #${viewStore.current.rowId}`
+      : viewStore.current.kind === "overview"
+        ? "总览"
+        : "检索台"
+  );
 </script>
 
 <header class="flex h-14 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm">
@@ -24,10 +30,16 @@
   >
     <Menu class="size-4" aria-hidden="true" />
   </Button>
-  <div class="flex min-w-0 items-baseline gap-2">
+  <button
+    type="button"
+    class="flex min-w-0 items-baseline gap-2 rounded-md text-left transition-colors hover:text-muted-foreground"
+    aria-label="回到总览"
+    title="总览"
+    onclick={() => navigate(overviewView())}
+  >
     <span class="font-display text-sm font-semibold tracking-tight">{title}</span>
-    <span class="hidden font-mono text-[11px] text-muted-foreground sm:inline">archive.console_web</span>
-  </div>
+  </button>
+  <span class="hidden font-mono text-[11px] text-muted-foreground sm:inline">archive.console_web</span>
   <div class="ml-auto flex items-center gap-1.5">
     <span class="hidden rounded-md border px-2 py-0.5 font-mono text-[11px] text-muted-foreground sm:inline">
       {state?.session ? `会话 ${state.session}` : "未配置会话"}
