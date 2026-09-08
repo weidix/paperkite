@@ -78,12 +78,13 @@ export async function loadExtensions(
   const registry = new CapabilityRegistry();
   for (const candidate of [...selected.values()].sort((left, right) => left.name.localeCompare(right.name))) {
     const module = await importPlugin(candidate);
-    const scopedLogger = options.logger.child(candidate.name);
+    const scope = shortPluginName(candidate.name);
+    const scopedLogger = options.logger.child(scope);
     for (const capability of candidate.capabilities) {
-      bindCapability(registry, candidate, module, capability, candidate.name);
+      bindCapability(registry, candidate, module, capability, scope);
     }
     if (typeof module.register === "function") {
-      await module.register(registry.context(scopedLogger, candidate.name));
+      await module.register(registry.context(scopedLogger, scope));
     }
   }
   const installed: PluginInfo[] = [...candidates]
@@ -183,6 +184,11 @@ function resolvePackageJson(name: string, profile: string): string | undefined {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+/** 日志与注册作用域使用包短名（`@paperkite/plugin-messages-watch` → `messages-watch`）。 */
+function shortPluginName(name: string): string {
+  return name.replace(/^@[^/]+\/plugin-/, "");
 }
 
 interface CoreManifest {

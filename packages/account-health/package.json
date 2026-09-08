@@ -1,5 +1,5 @@
 {
-  "name": "@paperkite/plugin-bark",
+  "name": "@paperkite/plugin-account-health",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "action", "name": "notify.bark", "handler": "BarkAction" }
+        { "kind": "trigger", "name": "account.health", "handler": "SessionHealthTrigger", "control": true }
       ]
     }
   }

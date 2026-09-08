@@ -1,5 +1,5 @@
 {
-  "name": "@paperkite/plugin-telegram-messages",
+  "name": "@paperkite/plugin-notify-bark",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,15 +8,13 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@paperkite/sdk": "workspace:*",
-    "luxon": "^3.7.2",
-    "telegram": "^2.26.22"
+    "@paperkite/sdk": "workspace:*"
   },
   "paperkite": {
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "action", "name": "messages.send", "handler": "SendMessageAction" }
+        { "kind": "action", "name": "notify.bark", "handler": "BarkAction" }
       ]
     }
   }

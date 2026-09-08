@@ -11,31 +11,31 @@
   },
   "paperkite": {
     "bundles": [
-      "@paperkite/plugin-telegram-messages",
-      "@paperkite/plugin-bark",
-      "@paperkite/plugin-conversation-watch",
-      "@paperkite/plugin-account-watch",
-      "@paperkite/plugin-message-archive",
-      "@paperkite/plugin-process-command",
-      "@paperkite/plugin-console-web"
+      "@paperkite/plugin-messages",
+      "@paperkite/plugin-notify-bark",
+      "@paperkite/plugin-messages-watch",
+      "@paperkite/plugin-account-health",
+      "@paperkite/plugin-archive",
+      "@paperkite/plugin-process-run",
+      "@paperkite/plugin-runtime-console"
     ]
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsc -p tsconfig.json && pnpm --filter @paperkite/plugin-console-web build:web && pnpm --filter @paperkite/plugin-message-archive build:web",
+    "build": "tsc -p tsconfig.json && pnpm --filter @paperkite/plugin-runtime-console build:web && pnpm --filter @paperkite/plugin-archive build:web",
     "start": "node --import tsx/esm dist/src/cli.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @paperkite/plugin-console-web typecheck:web && pnpm --filter @paperkite/plugin-message-archive typecheck:web",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @paperkite/plugin-runtime-console typecheck:web && pnpm --filter @paperkite/plugin-archive typecheck:web",
     "test": "tsx --test tests/*.test.ts",
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@paperkite/plugin-account-watch": "workspace:*",
-    "@paperkite/plugin-bark": "workspace:*",
-    "@paperkite/plugin-console-web": "workspace:*",
-    "@paperkite/plugin-conversation-watch": "workspace:*",
-    "@paperkite/plugin-message-archive": "workspace:*",
-    "@paperkite/plugin-process-command": "workspace:*",
-    "@paperkite/plugin-telegram-messages": "workspace:*",
+    "@paperkite/plugin-account-health": "workspace:*",
+    "@paperkite/plugin-notify-bark": "workspace:*",
+    "@paperkite/plugin-runtime-console": "workspace:*",
+    "@paperkite/plugin-messages-watch": "workspace:*",
+    "@paperkite/plugin-archive": "workspace:*",
+    "@paperkite/plugin-process-run": "workspace:*",
+    "@paperkite/plugin-messages": "workspace:*",
     "@paperkite/sdk": "workspace:*",
     "commander": "^15.0.0",
     "cron-parser": "^5.10.0",

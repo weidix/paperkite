@@ -8,27 +8,27 @@ importers:
 
   .:
     dependencies:
-      '@paperkite/plugin-account-watch':
+      '@paperkite/plugin-account-health':
         specifier: workspace:*
-        version: link:packages/account-watch
-      '@paperkite/plugin-bark':
+        version: link:packages/account-health
+      '@paperkite/plugin-archive':
         specifier: workspace:*
-        version: link:packages/bark
-      '@paperkite/plugin-console-web':
+        version: link:packages/archive
+      '@paperkite/plugin-messages':
         specifier: workspace:*
-        version: link:packages/console-web
-      '@paperkite/plugin-conversation-watch':
+        version: link:packages/messages
+      '@paperkite/plugin-messages-watch':
         specifier: workspace:*
-        version: link:packages/conversation-watch
-      '@paperkite/plugin-message-archive':
+        version: link:packages/messages-watch
+      '@paperkite/plugin-notify-bark':
         specifier: workspace:*
-        version: link:packages/message-archive
-      '@paperkite/plugin-process-command':
+        version: link:packages/notify-bark
+      '@paperkite/plugin-process-run':
         specifier: workspace:*
-        version: link:packages/process-command
-      '@paperkite/plugin-telegram-messages':
+        version: link:packages/process-run
+      '@paperkite/plugin-runtime-console':
         specifier: workspace:*
-        version: link:packages/telegram-messages
+        version: link:packages/runtime-console
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:packages/sdk
@@ -64,89 +64,13 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  packages/account-watch:
+  packages/account-health:
     dependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
 
-  packages/bark:
-    dependencies:
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-
-  packages/console-web:
-    dependencies:
-      '@fastify/static':
-        specifier: ^10.1.3
-        version: 10.1.3
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      fastify:
-        specifier: ^5.12.1
-        version: 5.12.1
-    devDependencies:
-      '@fontsource-variable/inter':
-        specifier: ^5.2.5
-        version: 5.3.0
-      '@fontsource-variable/jetbrains-mono':
-        specifier: ^5.2.5
-        version: 5.3.0
-      '@fontsource-variable/space-grotesk':
-        specifier: ^5.2.5
-        version: 5.3.0
-      '@internationalized/date':
-        specifier: ^3.8.1
-        version: 3.12.4
-      '@sveltejs/adapter-static':
-        specifier: ^3.0.10
-        version: 3.0.10(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))
-      '@sveltejs/kit':
-        specifier: ^2.70.3
-        version: 2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
-      '@sveltejs/vite-plugin-svelte':
-        specifier: ^6.2.4
-        version: 6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
-      '@tailwindcss/vite':
-        specifier: ^4.3.3
-        version: 4.3.3(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
-      bits-ui:
-        specifier: ^2.19.0
-        version: 2.19.0(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)
-      lucide-svelte:
-        specifier: ^1.0.1
-        version: 1.0.1(svelte@5.57.0)
-      svelte:
-        specifier: ^5.57.0
-        version: 5.57.0
-      svelte-check:
-        specifier: ^4.7.6
-        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.0)(typescript@5.9.3)
-      tailwindcss:
-        specifier: ^4.3.3
-        version: 4.3.3
-      tw-animate-css:
-        specifier: ^1.3.7
-        version: 1.4.0
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vite:
-        specifier: ^7.0.5
-        version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
-
-  packages/conversation-watch:
-    dependencies:
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      telegram:
-        specifier: ^2.26.22
-        version: 2.26.22
-
-  packages/message-archive:
+  packages/archive:
     dependencies:
       '@fastify/static':
         specifier: ^10.1.3
@@ -213,15 +137,7 @@ importers:
         specifier: ^7.0.5
         version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
 
-  packages/process-command:
-    dependencies:
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-
-  packages/sdk: {}
-
-  packages/telegram-messages:
+  packages/messages:
     dependencies:
       '@paperkite/sdk':
         specifier: workspace:*
@@ -232,6 +148,90 @@ importers:
       telegram:
         specifier: ^2.26.22
         version: 2.26.22
+
+  packages/messages-watch:
+    dependencies:
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      telegram:
+        specifier: ^2.26.22
+        version: 2.26.22
+
+  packages/notify-bark:
+    dependencies:
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+
+  packages/process-run:
+    dependencies:
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+
+  packages/runtime-console:
+    dependencies:
+      '@fastify/static':
+        specifier: ^10.1.3
+        version: 10.1.3
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      fastify:
+        specifier: ^5.12.1
+        version: 5.12.1
+    devDependencies:
+      '@fontsource-variable/inter':
+        specifier: ^5.2.5
+        version: 5.3.0
+      '@fontsource-variable/jetbrains-mono':
+        specifier: ^5.2.5
+        version: 5.3.0
+      '@fontsource-variable/space-grotesk':
+        specifier: ^5.2.5
+        version: 5.3.0
+      '@internationalized/date':
+        specifier: ^3.8.1
+        version: 3.12.4
+      '@sveltejs/adapter-static':
+        specifier: ^3.0.10
+        version: 3.0.10(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))
+      '@sveltejs/kit':
+        specifier: ^2.70.3
+        version: 2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
+      '@sveltejs/vite-plugin-svelte':
+        specifier: ^6.2.4
+        version: 6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
+      '@tailwindcss/vite':
+        specifier: ^4.3.3
+        version: 4.3.3(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0))
+      bits-ui:
+        specifier: ^2.19.0
+        version: 2.19.0(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)
+      lucide-svelte:
+        specifier: ^1.0.1
+        version: 1.0.1(svelte@5.57.0)
+      svelte:
+        specifier: ^5.57.0
+        version: 5.57.0
+      svelte-check:
+        specifier: ^4.7.6
+        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.0)(typescript@5.9.3)
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.3
+      tw-animate-css:
+        specifier: ^1.3.7
+        version: 1.4.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.0.5
+        version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
+
+  packages/sdk: {}
 
 packages:
 

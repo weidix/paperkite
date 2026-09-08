@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { RuntimeConsoleWebService } from "../packages/console-web/src/index.js";
+import { RuntimeConsoleWebService } from "../packages/runtime-console/src/index.js";
 import { fromMapping } from "../src/config/loader.js";
 import { CapabilityRegistry } from "../src/extensions/registry.js";
 import { AppLogger } from "../src/engine/logger.js";
@@ -43,7 +43,7 @@ test("reload completes and the console restarts while its own SSE stream is open
   const directory = await mkdtemp(join(tmpdir(), "paperkite-console-reload-"));
   const logger = new AppLogger("info", join(directory, "logs"));
   const registry = new CapabilityRegistry();
-  registry.register("service", "runtime.console", RuntimeConsoleWebService, "@paperkite/plugin-console-web", {
+  registry.register("service", "runtime.console", RuntimeConsoleWebService, "@paperkite/plugin-runtime-console", {
     control: true
   });
   const catalog = fromMapping({

@@ -6,10 +6,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Api } from "telegram";
 import type { RuntimeLogger, ServiceContext, SessionAccess } from "@paperkite/sdk";
-import type { DialogEntry, TelegramMessage } from "../packages/message-archive/src/archiver.js";
-import { createArchiveConsoleServer } from "../packages/message-archive/src/console/server.js";
-import { ArchiveConsoleWebService } from "../packages/message-archive/src/console/service.js";
-import { SqliteArchiveStore, type MediaRow, type MessageRow } from "../packages/message-archive/src/storage/index.js";
+import type { DialogEntry, TelegramMessage } from "../packages/archive/src/archiver.js";
+import { createArchiveConsoleServer } from "../packages/archive/src/console/server.js";
+import { ArchiveConsoleWebService } from "../packages/archive/src/console/service.js";
+import { SqliteArchiveStore, type MediaRow, type MessageRow } from "../packages/archive/src/storage/index.js";
 
 const logger: RuntimeLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return logger; } };
 

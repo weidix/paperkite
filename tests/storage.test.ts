@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createArchiveStore, SqliteArchiveStore, type MessageRow } from "../packages/message-archive/src/storage/index.js";
-import { paramPlaceholders, toIsoDate } from "../packages/message-archive/src/storage/model.js";
+import { createArchiveStore, SqliteArchiveStore, type MessageRow } from "../packages/archive/src/storage/index.js";
+import { paramPlaceholders, toIsoDate } from "../packages/archive/src/storage/model.js";
 
 const CHAT_ID = "100";
 
