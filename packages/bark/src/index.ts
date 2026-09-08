@@ -1,8 +1,9 @@
 import { Action, definePlugin, type PluginContext, type TriggerEmission } from "@paperkite/sdk";
 
 interface BarkConfig {
-  readonly endpoint?: string;
-  readonly url?: string;
+  /** Bark 服务入口；缺省用官方 api.day.app，自建部署时如 https://bark.example:444。 */
+  readonly server?: string;
+  /** 设备 key：推送目标 `${server}/${key}`。 */
   readonly key?: string;
   readonly title?: string;
   readonly body?: string;
@@ -10,7 +11,9 @@ interface BarkConfig {
   readonly group?: string;
   readonly level?: string;
   readonly icon?: string;
+  /** 点击通知后跳转的 URL。 */
   readonly click?: string;
+  /** 长按通知可复制的文本。 */
   readonly copy?: string;
   readonly timeoutMs?: number;
   readonly method?: "get" | "post";
@@ -18,35 +21,49 @@ interface BarkConfig {
 
 class BarkAction extends Action<BarkConfig> {
   protected async run(): Promise<void> {
-    const endpoint = this.payload.endpoint ?? this.payload.url ?? process.env.BARK_ENDPOINT;
-    if (!endpoint) throw new Error("notifications.bark needs endpoint");
+    const server = this.payload.server?.trim() || "https://api.day.app";
+    const key = this.payload.key?.trim();
+    if (!key) throw new Error("notifications.bark needs key");
+    const title = render(this.payload.title ?? "Paperkite", this.emission);
     const body = render(this.payload.body ?? this.payload.message ?? "", this.emission);
     const method = (this.payload.method ?? "post").toUpperCase() as "GET" | "POST";
     if (method === "POST" && !body) throw new Error("notifications.bark needs body or message");
-    const target = buildBarkUrl(endpoint, this.payload.key);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), normalizeTimeout(this.payload.timeoutMs));
     const onAbort = (): void => controller.abort();
     this.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      const response = await fetch(target, {
-        method,
-        ...(method === "POST"
-          ? {
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                title: render(this.payload.title ?? "Paperkite", this.emission),
-                body,
-                group: this.payload.group,
-                level: this.payload.level,
-                icon: this.payload.icon,
-                url: this.payload.click,
-                copy: this.payload.copy
-              })
-            }
-          : {}),
-        signal: controller.signal
-      });
+      const response = await fetch(
+        method === "POST"
+          ? buildBarkUrl(server, key, { title: "" })
+          : buildBarkUrl(server, key, {
+              title,
+              body,
+              group: this.payload.group,
+              level: this.payload.level,
+              icon: this.payload.icon,
+              click: this.payload.click,
+              copy: this.payload.copy
+            }),
+        {
+          method,
+          ...(method === "POST"
+            ? {
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  title,
+                  body,
+                  group: this.payload.group,
+                  level: this.payload.level,
+                  icon: this.payload.icon,
+                  url: this.payload.click,
+                  copy: this.payload.copy
+                })
+              }
+            : {}),
+          signal: controller.signal
+        }
+      );
       if (!response.ok) throw new Error(`Bark request failed with HTTP ${response.status}`);
     } finally {
       clearTimeout(timer);
@@ -67,15 +84,30 @@ export async function register(context: PluginContext): Promise<void> {
 
 export default definePlugin({ manifest, register });
 
-export function buildBarkUrl(endpoint: string, key?: string): string {
-  const value = endpoint.trim();
-  if (!value) throw new Error("Bark endpoint cannot be empty");
-  const withKey = key ? value.replaceAll("{key}", encodeURIComponent(key)) : value;
-  const parsed = new URL(withKey);
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error("Bark endpoint must use http or https");
+export interface BarkMessage {
+  readonly title: string;
+  readonly body?: string;
+  readonly group?: string;
+  readonly level?: string;
+  readonly icon?: string;
+  readonly click?: string;
+  readonly copy?: string;
+}
+
+/** 按 Bark 路径格式拼推送 URL：`server/key/title(/body)?group&level&icon&url&copy`。 */
+export function buildBarkUrl(server: string, key: string, message: BarkMessage): string {
+  const root = new URL(server);
+  if (root.protocol !== "https:" && root.protocol !== "http:") {
+    throw new Error("Bark server must use http or https");
   }
-  return parsed.toString();
+  const segments = [key, message.title, message.body ?? ""].filter((part) => part !== "");
+  const url = new URL(`${root.toString().replace(/\/+$/, "")}/${segments.map(encodeURIComponent).join("/")}`);
+  if (message.group) url.searchParams.set("group", message.group);
+  if (message.level) url.searchParams.set("level", message.level);
+  if (message.icon) url.searchParams.set("icon", message.icon);
+  if (message.click) url.searchParams.set("url", message.click);
+  if (message.copy) url.searchParams.set("copy", message.copy);
+  return url.toString();
 }
 
 function render(value: string, emission: TriggerEmission | undefined): string {
