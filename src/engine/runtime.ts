@@ -694,6 +694,7 @@ export class Runtime {
       symbol: definition.kind === "command" ? definition.symbol : undefined,
       cron: definition.kind === "schedule" ? definition.cron : undefined,
       intervalSeconds: definition.kind === "schedule" ? definition.intervalSeconds : undefined,
+      actionSession: definition.action.session,
       hook: definition.action.hook,
       config: copyOf(definition.action.config)
     };

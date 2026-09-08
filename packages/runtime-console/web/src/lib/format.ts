@@ -45,6 +45,16 @@ export function parseJson(text: string): unknown {
   return JSON.parse(trimmed);
 }
 
+export function tryFormatJson(text: string): { formatted?: string; error?: string } {
+  const trimmed = text.trim();
+  if (!trimmed) return { formatted: "" };
+  try {
+    return { formatted: JSON.stringify(JSON.parse(trimmed), null, 2) };
+  } catch {
+    return { error: "config 不是合法 JSON" };
+  }
+}
+
 export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
