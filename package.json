@@ -17,7 +17,8 @@
       "@paperkite/plugin-account-health",
       "@paperkite/plugin-archive",
       "@paperkite/plugin-process-run",
-      "@paperkite/plugin-runtime-console"
+      "@paperkite/plugin-runtime-console",
+      "@paperkite/plugin-favorites-cleanup"
     ]
   },
   "scripts": {
@@ -35,6 +36,7 @@
     "@paperkite/plugin-messages-watch": "workspace:*",
     "@paperkite/plugin-archive": "workspace:*",
     "@paperkite/plugin-process-run": "workspace:*",
+    "@paperkite/plugin-favorites-cleanup": "workspace:*",
     "@paperkite/plugin-messages": "workspace:*",
     "@paperkite/sdk": "workspace:*",
     "commander": "^15.0.0",

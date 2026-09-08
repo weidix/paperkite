@@ -11,7 +11,8 @@ const pluginDirectories = [
   "account-health",
   "archive",
   "process-run",
-  "runtime-console"
+  "runtime-console",
+  "favorites-cleanup"
 ];
 
 test("each actual plugin owns one manifest and shared packages stay ordinary", async () => {
@@ -34,6 +35,7 @@ const ALL_CAPABILITIES = [
   "account.health",
   "archive.sync",
   "archive.console",
+  "favorites.cleanup",
   "messages.send",
   "messages.watch",
   "messages.poll",
@@ -44,12 +46,13 @@ const ALL_CAPABILITIES = [
 
 test("bundles load through the extension loader and bind declared handlers", async () => {
   const { registry, installed, packages } = await loadExtensions(ALL_CAPABILITIES);
-  assert.equal(installed.length, 7);
-  assert.equal(packages.length, 7);
-  assert.equal(registry.actions.size, 4);
+  assert.equal(installed.length, 8);
+  assert.equal(packages.length, 8);
+  assert.equal(registry.actions.size, 5);
   assert.equal(registry.triggers.size, 3);
   assert.equal(registry.services.size, 2);
   assert.ok(registry.getAction("archive.sync"));
+  assert.ok(registry.getAction("favorites.cleanup"));
   assert.ok(registry.getAction("messages.send"));
   assert.ok(registry.getAction("process.run"));
   assert.ok(registry.getTrigger("messages.watch"));

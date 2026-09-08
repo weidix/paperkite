@@ -53,6 +53,7 @@ run:
 | `@paperkite/plugin-account-health` | `account.health` | [README](packages/account-health/README.md) |
 | `@paperkite/plugin-archive` | `archive.sync`、`archive.console` | [README](packages/archive/README.md) |
 | `@paperkite/plugin-process-run` | `process.run` | [README](packages/process-run/README.md) |
+| `@paperkite/plugin-favorites-cleanup` | `favorites.cleanup` | [README](packages/favorites-cleanup/README.md) |
 | `@paperkite/plugin-runtime-console` | `runtime.console` | [README](packages/runtime-console/README.md) |
 
 `@paperkite/sdk` 是共享库，不属于插件，没有 `paperkite.plugin` 声明。
