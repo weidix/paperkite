@@ -28,12 +28,12 @@ export async function loadSettings(path = "data/settings.yml"): Promise<AppSetti
   if (!isRecord(data) || !isRecord(data.telegram)) {
     throw new Error("settings.yml needs a telegram section");
   }
-  const apiId = Number(data.telegram.apiId ?? data.telegram.api_id);
-  const apiHash = normalizeSession(data.telegram.apiHash ?? data.telegram.api_hash);
+  const apiId = Number(data.telegram.apiId);
+  const apiHash = normalizeSession(data.telegram.apiHash);
   if (!Number.isInteger(apiId) || apiId <= 0 || !apiHash) {
     throw new Error("settings.yml needs telegram.apiId and telegram.apiHash");
   }
-  const sessionsDir = normalizeSession(data.telegram.sessionsDir ?? data.telegram.sessions_dir) ?? "data/accounts";
+  const sessionsDir = normalizeSession(data.telegram.sessionsDir) ?? "data/accounts";
   const logging = isRecord(data.logging) ? data.logging : {};
   const guard = isRecord(data.telegram.sessionGuard) ? data.telegram.sessionGuard : {};
   return {

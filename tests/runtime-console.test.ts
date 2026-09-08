@@ -301,7 +301,7 @@ test("runtime console replays events buffered before the connection opens", asyn
   };
   emit(early);
   const live: RuntimeEvent = {
-    type: "config.reloaded",
+    type: "flows.reloaded",
     ok: true,
     at: "2026-09-02T09:00:00.000Z"
   };
@@ -328,9 +328,9 @@ test("runtime console replays events buffered before the connection opens", asyn
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      if (buffer.includes('"config.reloaded"')) break;
+      if (buffer.includes('"flows.reloaded"')) break;
     }
-    assert.ok(buffer.includes('"config.reloaded"'), buffer);
+    assert.ok(buffer.includes('"flows.reloaded"'), buffer);
   } finally {
     controller.abort();
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));

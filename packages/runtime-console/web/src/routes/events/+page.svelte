@@ -46,7 +46,7 @@
           : undefined;
       case "service.stopped":
         return { reason: event.reason, error: event.error };
-      case "config.reloaded":
+      case "flows.reloaded":
         return event.error === undefined ? undefined : { error: event.error };
       default:
         return undefined;

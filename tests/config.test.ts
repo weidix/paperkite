@@ -12,7 +12,7 @@ test("normalizes flow sections and exposes only referenced capabilities", () => 
     schedules: [{ id: "archive", intervalSeconds: 60, run: { capability: "archive.sync" } }]
   });
 
-  assert.deepEqual([...catalog.atomRefs()].sort(), ["archive.sync", "messages.send", "messages.watch", "notify.bark"]);
+  assert.deepEqual([...catalog.capabilityRefs()].sort(), ["archive.sync", "messages.send", "messages.watch", "notify.bark"]);
   assert.equal(catalog.find("command:send")?.kind, "command");
   assert.equal(catalog.find("watch")?.kind, "trigger");
 });

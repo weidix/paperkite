@@ -198,13 +198,13 @@ export interface ScheduleFiredEvent {
   readonly at: string;
 }
 
-export interface ConfigReloadingEvent {
-  readonly type: "config.reloading";
+export interface FlowsReloadingEvent {
+  readonly type: "flows.reloading";
   readonly at: string;
 }
 
-export interface ConfigReloadedEvent {
-  readonly type: "config.reloaded";
+export interface FlowsReloadedEvent {
+  readonly type: "flows.reloaded";
   readonly ok: boolean;
   readonly error?: string;
   readonly at: string;
@@ -245,8 +245,8 @@ export type RuntimeEvent =
   | FlowReloadedEvent
   | FlowFinishedEvent
   | ScheduleFiredEvent
-  | ConfigReloadingEvent
-  | ConfigReloadedEvent
+  | FlowsReloadingEvent
+  | FlowsReloadedEvent
   | SessionStateEvent
   | FlowSuspendedEvent
   | FlowResumedEvent;
@@ -260,8 +260,8 @@ export const RUNTIME_EVENT_TYPES = [
   "flow.reloaded",
   "flow.finished",
   "schedule.fired",
-  "config.reloading",
-  "config.reloaded",
+  "flows.reloading",
+  "flows.reloaded",
   "session.state",
   "flow.suspended",
   "flow.resumed"

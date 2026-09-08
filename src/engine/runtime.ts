@@ -140,12 +140,12 @@ export class Runtime {
   private async performReload(): Promise<void> {
     await this.settleStopping();
     if (!this.options.reloadCatalog) throw new Error("config reload is not configured");
-    this.emit({ type: "config.reloading" });
+    this.emit({ type: "flows.reloading" });
     let next: FlowCatalog;
     try {
       next = await this.options.reloadCatalog();
     } catch (error) {
-      this.emit({ type: "config.reloaded", ok: false, error: messageOf(error) });
+      this.emit({ type: "flows.reloaded", ok: false, error: messageOf(error) });
       throw error;
     }
     const wasStarted = this.started;
@@ -156,7 +156,7 @@ export class Runtime {
       if (sessions.size) await this.options.sessions.ensure(sessions);
       this.startFlows();
     }
-    this.emit({ type: "config.reloaded", ok: true });
+    this.emit({ type: "flows.reloaded", ok: true });
   }
 
   async executeAction(spec: ActionSpecInput, flow?: FlowRef): Promise<void> {
