@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SqliteArchiveStore, type ArchiveStore } from "../packages/message-archive/src/storage/index.js";
-import { MessageArchiver, type ArchiveClient, type TelegramMessage } from "../packages/message-archive/src/archiver.js";
-import { buildTargets } from "../packages/message-archive/src/config.js";
+import { SqliteArchiveStore, type ArchiveStore } from "../packages/archive/src/storage/index.js";
+import { MessageArchiver, type ArchiveClient, type TelegramMessage } from "../packages/archive/src/archiver.js";
+import { buildTargets } from "../packages/archive/src/config.js";
 import type { RuntimeLogger } from "@paperkite/sdk";
 
 const logger: RuntimeLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return logger; } };

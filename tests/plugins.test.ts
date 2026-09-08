@@ -4,13 +4,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const pluginDirectories = [
-  "telegram-messages",
-  "bark",
-  "conversation-watch",
-  "account-watch",
-  "message-archive",
-  "process-command",
-  "console-web"
+  "messages",
+  "notify-bark",
+  "messages-watch",
+  "account-health",
+  "archive",
+  "process-run",
+  "runtime-console"
 ];
 
 test("each actual plugin owns one manifest and shared packages stay ordinary", async () => {

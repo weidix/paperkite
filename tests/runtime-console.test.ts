@@ -5,8 +5,8 @@ import { createServer } from "node:net";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { RuntimeControl, RuntimeEvent, RuntimeEventListener, RuntimeLogger, ServiceContext } from "@paperkite/sdk";
-import { createRuntimeConsoleServer } from "../packages/console-web/src/console/server.js";
-import { RuntimeConsoleWebService } from "../packages/console-web/src/index.js";
+import { createRuntimeConsoleServer } from "../packages/runtime-console/src/console/server.js";
+import { RuntimeConsoleWebService } from "../packages/runtime-console/src/index.js";
 
 const logger: RuntimeLogger = {
   debug() {},
@@ -20,7 +20,7 @@ const logger: RuntimeLogger = {
 
 const PLUGINS = [
   {
-    name: "@paperkite/plugin-console-web",
+    name: "@paperkite/plugin-runtime-console",
     version: "0.1.0",
     capabilities: [{ kind: "service" as const, name: "runtime.console" }],
     loaded: true

@@ -1,5 +1,5 @@
 {
-  "name": "@paperkite/plugin-process-command",
+  "name": "@paperkite/plugin-process-run",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "action", "name": "process.run", "handler": "ProcessCommandAction" }
+        { "kind": "action", "name": "process.run", "handler": "ProcessRunAction" }
       ]
     }
   }

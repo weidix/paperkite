@@ -1,5 +1,5 @@
 {
-  "name": "@paperkite/plugin-conversation-watch",
+  "name": "@paperkite/plugin-messages-watch",
   "version": "0.1.0",
   "private": true,
   "type": "module",

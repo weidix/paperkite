@@ -39,7 +39,7 @@ test("local control socket dispatches runtime, flow, session, and action operati
       calls.push("plugins");
       return [
         {
-          name: "@paperkite/plugin-bark",
+          name: "@paperkite/plugin-notify-bark",
           version: "1.0.0",
           capabilities: [{ kind: "action", name: "notify.bark" }],
           loaded: true
@@ -65,7 +65,7 @@ test("local control socket dispatches runtime, flow, session, and action operati
   });
   assert.deepEqual(await requestControl({ action: "plugins" }, path), [
     {
-      name: "@paperkite/plugin-bark",
+      name: "@paperkite/plugin-notify-bark",
       version: "1.0.0",
       capabilities: [{ kind: "action", name: "notify.bark" }],
       loaded: true

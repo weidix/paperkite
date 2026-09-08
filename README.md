@@ -21,13 +21,13 @@ pnpm start run
 
 | 插件 | 能力 |
 | --- | --- |
-| `@paperkite/plugin-telegram-messages` | `messages.send` |
-| `/plugin-bark` | `notify.bark` |
-| `/plugin-conversation-watch` | `messages.watch`、`messages.poll` |
-| `/plugin-account-watch` | `account.health` |
-| `/plugin-message-archive` | `archive.sync`、`archive.console` |
-| `/plugin-process-command` | `process.run` |
-| `/plugin-console-web` | `runtime.console` |
+| `@paperkite/plugin-messages` | `messages.send` |
+| `@paperkite/plugin-notify-bark` | `notify.bark` |
+| `@paperkite/plugin-messages-watch` | `messages.watch`、`messages.poll` |
+| `@paperkite/plugin-account-health` | `account.health` |
+| `@paperkite/plugin-archive` | `archive.sync`、`archive.console` |
+| `@paperkite/plugin-process-run` | `process.run` |
+| `@paperkite/plugin-runtime-console` | `runtime.console` |
 
 `@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
 
@@ -81,7 +81,7 @@ config:
   url: postgresql://user:password@host/database
 ```
 
-归档台（`archive.console`）是消息归档插件的 Web 终端，面向拥有者本人翻查归档资料：检索消息、按会话浏览、查看同群上下文、预览与下载媒体。页面由 SvelteKit 静态 SPA 构成，构建产物输出到 `packages/message-archive/public`，与 API 由同一服务进程托管：
+归档台（`archive.console`）是消息归档插件的 Web 终端，面向拥有者本人翻查归档资料：检索消息、按会话浏览、查看同群上下文、预览与下载媒体。页面由 SvelteKit 静态 SPA 构成，构建产物输出到 `packages/archive/public`，与 API 由同一服务进程托管：
 
 ```yaml
 services:
@@ -113,7 +113,7 @@ services:
       port: 3378
 ```
 
-提供总览（运行状态、执行中的动作、实时活动）、流程（查看与编辑 flows.yml、运行/重载/启停）、事件流（SSE 实时、类型筛选）、动作（临时按能力执行）、日志（跟随日志文件）与插件清单六个视图。构建产物输出到 `packages/console-web/public`，默认端口 3378。SPA 静态构建按路由拆包，事件流与轮询只在页面可见时刷新，日志与上下文列表采用虚拟化渲染。
+提供总览（运行状态、执行中的动作、实时活动）、流程（查看与编辑 flows.yml、运行/重载/启停）、事件流（SSE 实时、类型筛选）、动作（临时按能力执行）、日志（跟随日志文件）与插件清单六个视图。构建产物输出到 `packages/runtime-console/public`，默认端口 3378。SPA 静态构建按路由拆包，事件流与轮询只在页面可见时刷新，日志与上下文列表采用虚拟化渲染。
 
 ## 控制平面
 
@@ -135,4 +135,4 @@ pnpm test
 pnpm build
 ```
 
-项目源码和插件源码全部使用 TypeScript；浏览器端 `packages/console-web/web/`（运行控制台）与 `packages/message-archive/web/`（归档台）为 SvelteKit + Bits UI 静态 SPA 源码（黑白灰主题），分别经 SvelteKit 静态适配器构建到各自的 `public/` 目录，构建产物不作为源码维护。
+项目源码和插件源码全部使用 TypeScript；浏览器端 `packages/runtime-console/web/`（运行控制台）与 `packages/archive/web/`（归档台）为 SvelteKit + Bits UI 静态 SPA 源码（黑白灰主题），分别经 SvelteKit 静态适配器构建到各自的 `public/` 目录，构建产物不作为源码维护。

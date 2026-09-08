@@ -80,7 +80,7 @@ async function publicDirectory(configured: string | undefined): Promise<string> 
     await access(local);
     return local;
   } catch {
-    return resolve(process.cwd(), "packages/console-web/public");
+    return resolve(process.cwd(), "packages/runtime-console/public");
   }
 }
 

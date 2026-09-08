@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildBarkUrl } from "../packages/bark/src/index.js";
+import { buildBarkUrl } from "../packages/notify-bark/src/index.js";
 
 test("Bark GET url follows server/key/title/body path format with encoded segments", () => {
   const title = encodeURIComponent("新消息");

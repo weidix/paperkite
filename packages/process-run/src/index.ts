@@ -13,7 +13,7 @@ interface CommandConfig {
   readonly maxOutputBytes?: number;
 }
 
-export class ProcessCommandAction extends Action<CommandConfig> {
+export class ProcessRunAction extends Action<CommandConfig> {
   protected async run(): Promise<void> {
     const [program, args] = commandParts(this.config);
     const shell = this.config.shell === true;

@@ -102,6 +102,6 @@ async function publicDirectory(configured: string | undefined): Promise<string> 
     await access(local);
     return local;
   } catch {
-    return resolve(process.cwd(), "packages/message-archive/public");
+    return resolve(process.cwd(), "packages/archive/public");
   }
 }
