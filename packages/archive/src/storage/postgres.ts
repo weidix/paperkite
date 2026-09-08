@@ -1086,8 +1086,8 @@ function buildWhere(query: ArchiveQuery, alias = "m"): { where: string; values: 
     values.push(value);
     conditions.push(condition.replace("$N", `$${values.length}`));
   };
-  for (const term of splitTerms(query.keyword)) add(`${alias}.text ILIKE $N`, `%${term}%`);
-  for (const term of splitTerms(query.excludeKeyword)) add(`${alias}.text NOT ILIKE $N`, `%${term}%`);
+  for (const term of splitTerms(query.keyword)) add(`lower(${alias}.text) LIKE $N`, `%${term.toLowerCase()}%`);
+  for (const term of splitTerms(query.excludeKeyword)) add(`lower(${alias}.text) NOT LIKE $N`, `%${term.toLowerCase()}%`);
   const chatIds = (query.chatIds ?? []).map((id) => id.trim()).filter(Boolean);
   if (chatIds.length > 0) {
     const start = values.length + 1;
