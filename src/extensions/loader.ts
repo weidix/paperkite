@@ -109,6 +109,12 @@ function bindCapability(
     throw new Error("plugin " + candidate.name + " capability " + capability.name + " has no handler symbol");
   }
   const constructor = module[capability.handler];
+  if (typeof constructor !== "function") {
+    throw new Error(
+      "plugin " + candidate.name + " does not export handler " + capability.handler +
+      " for capability " + capability.name
+    );
+  }
   assertConstructorKind(constructor, capability.kind, candidate.name, capability.name);
   registry.register(
     capability.kind,
@@ -165,9 +171,13 @@ async function importPlugin(candidate: PluginCandidate): Promise<PluginModule> {
   const loaded = (await import(pathToFileURL(modulePath).href)) as PluginModule & {
     default?: Partial<PluginModule>;
   };
-  const module = loaded.register ? loaded : loaded.default;
+  const module = hasNamedExports(loaded) ? loaded : loaded.default;
   if (!module) throw new Error("invalid paperkite plugin: " + candidate.name);
   return module as PluginModule;
+}
+
+function hasNamedExports(module: object): boolean {
+  return Object.keys(module).some((key) => key !== "default");
 }
 
 function resolvePackageJson(name: string, profile: string): string | undefined {
