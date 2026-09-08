@@ -1,13 +1,8 @@
 import type {
-  Action,
   ActionConstructor,
   CapabilityKind,
   CapabilityOptions,
-  PluginContext,
-  RuntimeLogger,
-  Service,
   ServiceConstructor,
-  Trigger,
   TriggerConstructor
 } from "@paperkite/sdk";
 
@@ -17,16 +12,6 @@ export class CapabilityRegistry {
   readonly services = new Map<string, ServiceConstructor>();
   private readonly owners = new Map<string, string>();
   private readonly controlGrants = new Map<string, boolean>();
-
-  /** `scope` 是该插件的日志作用域（插件包名）。 */
-  context(logger: RuntimeLogger, scope?: string): PluginContext {
-    return {
-      logger,
-      registerAction: (name, constructor, options) => this.register("action", name, constructor, scope, options),
-      registerTrigger: (name, constructor, options) => this.register("trigger", name, constructor, scope, options),
-      registerService: (name, constructor, options) => this.register("service", name, constructor, scope, options)
-    };
-  }
 
   /** 返回拥有该能力的插件日志作用域（未登记时为 undefined）。 */
   scopeOf(kind: CapabilityKind, name: string): string | undefined {
@@ -87,5 +72,3 @@ export class CapabilityRegistry {
     return this.services;
   }
 }
-
-export type RegisteredAtom = Action | Trigger | Service;

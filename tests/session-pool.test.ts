@@ -24,6 +24,7 @@ test("session operations are serialized without worker threads", async () => {
     async connect() {},
     async disconnect() {},
     async getMe() { return {}; },
+    async invoke() { return {}; },
     session: { save: () => "saved" }
   };
   const pool = new SessionPool(settings, logger, () => client);
@@ -93,6 +94,7 @@ function workingClient(): SessionClient {
     async connect() {},
     async disconnect() {},
     async getMe() {},
+    async invoke() {},
     session: { save: () => "saved" }
   };
 }

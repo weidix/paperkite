@@ -12,7 +12,6 @@ import {
   type PluginCapability,
   type PluginInfo,
   type PluginModule,
-  type RuntimeLogger,
   type ServiceConstructor,
   type TriggerConstructor
 } from "@paperkite/sdk";
@@ -38,7 +37,7 @@ export interface LoadedExtensions {
 
 export async function loadExtensions(
   references: Iterable<string>,
-  options: { profile?: string; logger: RuntimeLogger }
+  options: { profile?: string } = {}
 ): Promise<LoadedExtensions> {
   const profile = profileDirectory(options.profile ?? "default");
   const profileManifest = await readProfile(profile);
@@ -79,12 +78,8 @@ export async function loadExtensions(
   for (const candidate of [...selected.values()].sort((left, right) => left.name.localeCompare(right.name))) {
     const module = await importPlugin(candidate);
     const scope = shortPluginName(candidate.name);
-    const scopedLogger = options.logger.child(scope);
     for (const capability of candidate.capabilities) {
       bindCapability(registry, candidate, module, capability, scope);
-    }
-    if (typeof module.register === "function") {
-      await module.register(registry.context(scopedLogger, scope));
     }
   }
   const installed: PluginInfo[] = [...candidates]
@@ -126,13 +121,13 @@ function bindCapability(
 }
 
 function assertConstructorKind(
-  constructor: unknown,
+  constructor: Function,
   kind: CapabilityKind,
   pluginName: string,
   capabilityName: string
 ): void {
   const base = kind === "action" ? Action : kind === "trigger" ? Trigger : Service;
-  if (typeof constructor !== "function" || !(constructor.prototype instanceof base)) {
+  if (!(constructor.prototype instanceof base)) {
     throw new Error(
       "plugin " + pluginName + " handler for capability " + capabilityName + " must extend " + kind
     );
@@ -168,16 +163,7 @@ async function inspectPlugin(name: string, profile: string): Promise<PluginCandi
 
 async function importPlugin(candidate: PluginCandidate): Promise<PluginModule> {
   const modulePath = resolve(candidate.packageDirectory, candidate.entry);
-  const loaded = (await import(pathToFileURL(modulePath).href)) as PluginModule & {
-    default?: Partial<PluginModule>;
-  };
-  const module = hasNamedExports(loaded) ? loaded : loaded.default;
-  if (!module) throw new Error("invalid paperkite plugin: " + candidate.name);
-  return module as PluginModule;
-}
-
-function hasNamedExports(module: object): boolean {
-  return Object.keys(module).some((key) => key !== "default");
+  return (await import(pathToFileURL(modulePath).href)) as PluginModule;
 }
 
 function resolvePackageJson(name: string, profile: string): string | undefined {

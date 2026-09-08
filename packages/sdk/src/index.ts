@@ -500,13 +500,6 @@ export interface CapabilityOptions {
   readonly control?: boolean;
 }
 
-export interface PluginContext {
-  readonly logger: RuntimeLogger;
-  registerAction(name: string, constructor: ActionConstructor, options?: CapabilityOptions): void;
-  registerTrigger(name: string, constructor: TriggerConstructor, options?: CapabilityOptions): void;
-  registerService(name: string, constructor: ServiceConstructor, options?: CapabilityOptions): void;
-}
-
 export type ActionConstructor = new (context: ActionContext<any>) => Action<any>;
 export type TriggerConstructor = new (context: TriggerContext<any>) => Trigger<any>;
 export type ServiceConstructor = new (context: ServiceContext<any>) => Service<any>;
@@ -527,7 +520,6 @@ export interface PluginInfo {
 
 export interface PluginModule {
   readonly [handler: string]: unknown;
-  register?(context: PluginContext): void | Promise<void>;
 }
 
 function normalizeHookResult(result: unknown, current: unknown): { config: unknown; skip: boolean } {
@@ -554,13 +546,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function cloneValue<T>(value: T): T {
-  try {
-    return structuredClone(value);
-  } catch {
-    if (Array.isArray(value)) return value.map((item) => cloneValue(item)) as T;
-    if (isRecord(value)) {
-      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneValue(item)])) as T;
-    }
-    return value;
-  }
+  return structuredClone(value);
 }

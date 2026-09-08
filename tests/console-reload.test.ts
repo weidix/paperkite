@@ -15,7 +15,10 @@ import type { RuntimeEvent } from "@paperkite/sdk";
 const fakeSessions = {
   ensure: async () => undefined,
   access: () => ({ run: async (operation: (client: unknown) => unknown) => operation(undefined) }),
-  closeAll: async () => undefined
+  closeAll: async () => undefined,
+  subscribe: () => () => undefined,
+  state: () => undefined,
+  states: () => []
 } as unknown as SessionPool;
 
 function freePort(): Promise<number> {

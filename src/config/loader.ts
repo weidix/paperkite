@@ -14,7 +14,6 @@ import {
   type TriggerDefinition,
   isRecord,
   normalizeBool,
-  normalizeKind,
   normalizeMaxRuns,
   normalizePositiveInt,
   normalizeSession
@@ -22,25 +21,25 @@ import {
 
 export const DEFAULT_FLOWS_PATH = "data/flows.yml";
 
-export async function loadCatalog(path = DEFAULT_FLOWS_PATH, strict = true): Promise<FlowCatalog> {
+export async function loadCatalog(path = DEFAULT_FLOWS_PATH): Promise<FlowCatalog> {
   const absolutePath = resolve(path);
   let text = "";
   try {
     text = await readFile(absolutePath, "utf8");
   } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return fromMapping({}, absolutePath, strict);
+    if (isNodeError(error) && error.code === "ENOENT") return fromMapping({}, absolutePath);
     throw error;
   }
   const parsed = parse(text, { merge: true }) as unknown;
-  return fromMapping(isRecord(parsed) ? parsed : {}, absolutePath, strict);
+  return fromMapping(isRecord(parsed) ? parsed : {}, absolutePath);
 }
 
-export function fromMapping(value: Record<string, unknown>, path?: string, strict = true): FlowCatalog {
+export function fromMapping(value: Record<string, unknown>, path?: string): FlowCatalog {
   const definitions = {
-    trigger: parseTriggers(value.triggers, strict),
-    command: parseCommands(value.commands, strict),
-    schedule: parseSchedules(value.schedules, strict),
-    service: parseServices(value.services, strict)
+    trigger: parseTriggers(value.triggers),
+    command: parseCommands(value.commands),
+    schedule: parseSchedules(value.schedules),
+    service: parseServices(value.services)
   } satisfies Record<FlowKind, FlowDefinition[]>;
   for (const [kind, items] of Object.entries(definitions) as [FlowKind, FlowDefinition[]][]) {
     const ids = new Set<string>();
@@ -73,7 +72,7 @@ export async function updateFlowItem(
   }
   const section = sectionFor(item.kind);
   const root = parse(await readFile(catalog.path, "utf8"), { merge: true }) as Record<string, unknown>;
-  const entries = list(root[section], section, true);
+  const entries = list(root[section], section);
   const index = entries.findIndex((entry) => String(entry.id ?? "").trim() === item.id);
   if (index < 0) throw new Error(`missing ${section} item: ${item.id}`);
   entries[index] = { ...entries[index], ...patch };
@@ -82,10 +81,10 @@ export async function updateFlowItem(
   return next;
 }
 
-function parseTriggers(value: unknown, strict: boolean): TriggerDefinition[] {
-  return list(value, "triggers", strict).map((item, index) => {
+function parseTriggers(value: unknown): TriggerDefinition[] {
+  return list(value, "triggers").map((item, index) => {
     const capability = text(item.capability, "trigger capability");
-    const actions = list(item.actions, "trigger actions", strict).map((action) => parseAction(action, strict));
+    const actions = list(item.actions, "trigger actions").map((action) => parseAction(action));
     return {
       kind: "trigger",
       id: makeId(capability, item.id, index),
@@ -102,10 +101,10 @@ function parseTriggers(value: unknown, strict: boolean): TriggerDefinition[] {
   });
 }
 
-function parseCommands(value: unknown, strict: boolean): CommandDefinition[] {
-  return list(value, "commands", strict).map((item, index) => {
-    if (strict && "enabled" in item) throw new Error("commands do not support enabled; remove the entry to hide it");
-    const action = parseAction(item.run, strict);
+function parseCommands(value: unknown): CommandDefinition[] {
+  return list(value, "commands").map((item, index) => {
+    if ("enabled" in item) throw new Error("commands do not support enabled; remove the entry to hide it");
+    const action = parseAction(item.run);
     const id = makeId(action.capability, item.id, index);
     return {
       kind: "command",
@@ -119,9 +118,9 @@ function parseCommands(value: unknown, strict: boolean): CommandDefinition[] {
   });
 }
 
-function parseSchedules(value: unknown, strict: boolean): ScheduleDefinition[] {
-  return list(value, "schedules", strict).map((item, index) => {
-    const action = parseAction(item.run, strict);
+function parseSchedules(value: unknown): ScheduleDefinition[] {
+  return list(value, "schedules").map((item, index) => {
+    const action = parseAction(item.run);
     const cron = text(item.cron, "schedule cron", false) || undefined;
     const intervalSeconds = normalizePositiveInt(item.intervalSeconds, "intervalSeconds");
     if ((cron ? 1 : 0) + (intervalSeconds ? 1 : 0) !== 1) {
@@ -142,8 +141,8 @@ function parseSchedules(value: unknown, strict: boolean): ScheduleDefinition[] {
   });
 }
 
-function parseServices(value: unknown, strict: boolean): ServiceDefinition[] {
-  return list(value, "services", strict).map((item, index) => {
+function parseServices(value: unknown): ServiceDefinition[] {
+  return list(value, "services").map((item, index) => {
     const capability = text(item.capability, "service capability");
     return {
       kind: "service",
@@ -160,11 +159,11 @@ function parseServices(value: unknown, strict: boolean): ServiceDefinition[] {
   });
 }
 
-function parseAction(value: unknown, strict: boolean): ActionSpec {
+function parseAction(value: unknown): ActionSpec {
   if (typeof value === "string") return { capability: value.trim(), config: {} };
   if (!isRecord(value)) throw new Error("action requires a capability string or mapping");
   const capability = text(value.capability, "action capability");
-  if (strict && "enabled" in value) throw new Error("inline actions do not support enabled");
+  if ("enabled" in value) throw new Error("inline actions do not support enabled");
   const hook = text(value.hook, "action hook", false) || undefined;
   return {
     capability,
@@ -174,10 +173,9 @@ function parseAction(value: unknown, strict: boolean): ActionSpec {
   };
 }
 
-function list(value: unknown, field: string, strict: boolean): Record<string, unknown>[] {
+function list(value: unknown, field: string): Record<string, unknown>[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
-    if (!strict) return [];
     throw new Error(`${field} must be a list`);
   }
   return value.map((item, index) => {
@@ -209,6 +207,3 @@ export function sectionFor(kind: FlowKind): FlowSection {
   return `${kind}s` as FlowSection;
 }
 
-export function kindFor(value: FlowKind | FlowSection): FlowKind {
-  return normalizeKind(value);
-}

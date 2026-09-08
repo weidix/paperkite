@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { RuntimeLogger } from "@paperkite/sdk";
 import { loadExtensions } from "../src/extensions/loader.js";
 
 const pluginDirectories = [
@@ -14,16 +13,6 @@ const pluginDirectories = [
   "process-run",
   "runtime-console"
 ];
-
-const logger: RuntimeLogger = {
-  debug() {},
-  info() {},
-  warn() {},
-  error() {},
-  child() {
-    return logger;
-  }
-};
 
 test("each actual plugin owns one manifest and shared packages stay ordinary", async () => {
   for (const directory of pluginDirectories) {
@@ -54,7 +43,7 @@ const ALL_CAPABILITIES = [
 ];
 
 test("bundles load through the extension loader and bind declared handlers", async () => {
-  const { registry, installed, packages } = await loadExtensions(ALL_CAPABILITIES, { logger });
+  const { registry, installed, packages } = await loadExtensions(ALL_CAPABILITIES);
   assert.equal(installed.length, 7);
   assert.equal(packages.length, 7);
   assert.equal(registry.actions.size, 4);
