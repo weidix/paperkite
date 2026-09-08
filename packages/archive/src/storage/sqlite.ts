@@ -714,6 +714,27 @@ export class SqliteArchiveStore implements ArchiveStore {
     };
   }
 
+  async resolveMessageRef(ref: { chatId?: string; username?: string; code?: string; messageId: number }): Promise<string | undefined> {
+    let chatId = ref.chatId?.trim() || "";
+    if (!chatId && ref.username?.trim()) {
+      const row = this.database
+        .prepare(`SELECT chat_id FROM chats WHERE username = ? LIMIT 1`)
+        .get(ref.username.trim()) as { chat_id: string } | undefined;
+      chatId = row?.chat_id ?? "";
+    }
+    if (!chatId && ref.code?.trim()) {
+      const row = this.database
+        .prepare(`SELECT chat_id FROM chats WHERE chat_id IN ('-100' || ?, '-' || ?) LIMIT 1`)
+        .get(ref.code.trim(), ref.code.trim()) as { chat_id: string } | undefined;
+      chatId = row?.chat_id ?? "";
+    }
+    if (!chatId) return undefined;
+    const row = this.database
+      .prepare(`SELECT id FROM messages WHERE chat_id = ? AND message_id = ? LIMIT 1`)
+      .get(chatId, ref.messageId) as { id: number } | undefined;
+    return row ? String(row.id) : undefined;
+  }
+
   async getMessageContext(
     recordId: string,
     beforeN: number,

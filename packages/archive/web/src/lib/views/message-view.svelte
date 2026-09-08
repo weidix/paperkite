@@ -2,13 +2,14 @@
   import { ArrowLeft, ChevronRight, Reply, UserRoundSearch, X } from "lucide-svelte";
   import { tick } from "svelte";
   import { fetchContext, fetchLiveText, fetchReplyChain, fetchState, mediaDiskUrl, mediaRowUrl, type ArchiveState } from "$lib/api";
-  import { chatLabel, fmtCount, fmtTs, richSegments, senderName, urlRangesOf } from "$lib/format";
+  import { chatLabel, fmtCount, fmtTs, richSegments, senderName, telegramMessageRefOf, urlRangesOf } from "$lib/format";
   import { albumLightboxItems, kindOfFile, kindOfRow, openAlbumLightbox, openMessageLightbox } from "$lib/media";
   import { backToSearch, navigate } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
   import MessageRow from "$lib/components/message-row.svelte";
   import MediaStrip, { type StripTile } from "$lib/components/media-strip.svelte";
+  import TelegramLink from "$lib/components/telegram-link.svelte";
   import type { AlbumContextEntry, ContextEntry, MessageEntity, MessageRecord, ReplyChainResult } from "$lib/model";
 
   const WINDOW = 20;
@@ -400,14 +401,22 @@
                 {#if segment.hit}
                   <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
                 {:else if segment.url}
-                  <a
-                    href={segment.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
-                    title="在新标签页打开"
-                    onclick={(event) => event.stopPropagation()}
-                  >{segment.text}</a>
+                  {#if telegramMessageRefOf(segment.url)}
+                    <TelegramLink
+                      href={segment.url}
+                      ref={telegramMessageRefOf(segment.url)!}
+                      class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                    >{segment.text}</TelegramLink>
+                  {:else}
+                    <a
+                      href={segment.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                      title="在新标签页打开"
+                      onclick={(event) => event.stopPropagation()}
+                    >{segment.text}</a>
+                  {/if}
                 {:else}
                   <span>{segment.text}</span>
                 {/if}
@@ -424,13 +433,21 @@
                   {#if segment.hit}
                     <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
                   {:else if segment.url}
-                    <a
-                      href={segment.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
-                      title="在新标签页打开"
-                    >{segment.text}</a>
+                    {#if telegramMessageRefOf(segment.url)}
+                      <TelegramLink
+                        href={segment.url}
+                        ref={telegramMessageRefOf(segment.url)!}
+                        class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                      >{segment.text}</TelegramLink>
+                    {:else}
+                      <a
+                        href={segment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                        title="在新标签页打开"
+                      >{segment.text}</a>
+                    {/if}
                   {:else}
                     <span>{segment.text}</span>
                   {/if}

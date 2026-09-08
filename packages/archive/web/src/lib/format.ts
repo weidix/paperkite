@@ -140,6 +140,29 @@ export function urlRangesOf(
   return ranges;
 }
 
+export interface TelegramMessageRef {
+  /** 私有频道/群组链接 t.me/c/<code>/<id> 的频道码。 */
+  readonly code?: string;
+  /** 公开链接 t.me/<username>/<id> 的频道用户名。 */
+  readonly username?: string;
+  readonly messageId: number;
+}
+
+const TME_MESSAGE_RE = /(?:t\.me|telegram\.me)\/(?:c\/(\d+)|([A-Za-z0-9_]{3,32}))\/(\d{1,18})/;
+
+/** 从 Telegram 消息链接中解析出「聊天引用 + 消息 ID」：两类链接各取其相应定位字段。 */
+export function telegramMessageRefOf(url: string): TelegramMessageRef | undefined {
+  const match = url.match(TME_MESSAGE_RE);
+  if (!match) return undefined;
+  const code = match[1];
+  const username = match[2];
+  return {
+    code: code ?? undefined,
+    username: username ?? undefined,
+    messageId: Number(match[3])
+  };
+}
+
 /** 富文本分段：关键词高亮与链接区间合并输出，链接优先于高亮。 */
 export function richSegments(
   text: string,

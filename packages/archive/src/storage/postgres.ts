@@ -810,6 +810,30 @@ export class PostgresArchiveStore implements ArchiveStore {
     };
   }
 
+  async resolveMessageRef(ref: { chatId?: string; username?: string; code?: string; messageId: number }): Promise<string | undefined> {
+    let chatId = ref.chatId?.trim() || "";
+    if (!chatId && ref.username?.trim()) {
+      const row = await this.pool.query(
+        `SELECT chat_id FROM ${this.table("chats")} WHERE username = $1 LIMIT 1`,
+        [ref.username.trim()]
+      );
+      chatId = row.rows.length ? String(row.rows[0]!.chat_id) : "";
+    }
+    if (!chatId && ref.code?.trim()) {
+      const row = await this.pool.query(
+        `SELECT chat_id FROM ${this.table("chats")} WHERE chat_id IN (('-100' || $1)::bigint, ('-' || $1)::bigint) LIMIT 1`,
+        [ref.code.trim()]
+      );
+      chatId = row.rows.length ? String(row.rows[0]!.chat_id) : "";
+    }
+    if (!chatId) return undefined;
+    const row = await this.pool.query(
+      `SELECT id FROM ${this.table("messages")} WHERE chat_id = $1 AND message_id = $2::bigint LIMIT 1`,
+      [chatId, ref.messageId]
+    );
+    return row.rows.length ? String(row.rows[0]!.id) : undefined;
+  }
+
   async getMessageContext(
     recordId: string,
     beforeN: number,

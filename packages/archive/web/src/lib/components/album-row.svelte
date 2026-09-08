@@ -1,10 +1,11 @@
 <script lang="ts">
   import { Image as ImageIcon, Images, Play, Reply } from "lucide-svelte";
   import { fetchReplyChain } from "$lib/api";
-  import { fmtTs, richSegments, senderName, urlRangesOf } from "$lib/format";
+  import { fmtTs, richSegments, senderName, telegramMessageRefOf, urlRangesOf } from "$lib/format";
   import { fileThumbOf, openAlbumLightbox } from "$lib/media";
   import { navigate, rememberSenderFromRecord, showToast } from "$lib/state.svelte";
   import MessageMenu from "$lib/components/message-menu.svelte";
+  import TelegramLink from "$lib/components/telegram-link.svelte";
   import UserMenu from "$lib/components/user-menu.svelte";
   import type { AlbumContextEntry, MessageRecord } from "$lib/model";
 
@@ -140,14 +141,22 @@
               {#if segment.hit}
                 <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
               {:else if segment.url}
-                <a
-                  href={segment.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
-                  title="在新标签页打开"
-                  onclick={(event) => event.stopPropagation()}
-                >{segment.text}</a>
+                {#if telegramMessageRefOf(segment.url)}
+                  <TelegramLink
+                    href={segment.url}
+                    ref={telegramMessageRefOf(segment.url)!}
+                    class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                  >{segment.text}</TelegramLink>
+                {:else}
+                  <a
+                    href={segment.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                    title="在新标签页打开"
+                    onclick={(event) => event.stopPropagation()}
+                  >{segment.text}</a>
+                {/if}
               {:else}
                 <span>{segment.text}</span>
               {/if}
