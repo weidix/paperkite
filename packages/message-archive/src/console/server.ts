@@ -2,10 +2,11 @@ import { createReadStream } from "node:fs";
 import fastify from "fastify";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
-import type { ArchiveStore, StoredMediaFile, TimeMode } from "../storage/index.js";
+import type { ArchiveStore, MessageEntity, MessageRecord, StoredMediaFile, TimeMode } from "../storage/index.js";
 import { normalizeContextLimit, normalizeDate, normalizeLimit, normalizeOffset, normalizeRowId, normalizeTimeMode } from "../storage/index.js";
+import { normalizeEntities, type TelegramMessage } from "../archiver.js";
 import { LiveMediaError, LiveMediaStreamer } from "./live.js";
-import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf, isPhotoLike, mimeFromName, parseRange } from "./media.js";
+import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf, isMissingPeer, isPhotoLike, mimeFromName, parseRange, resolveChatEntity } from "./media.js";
 
 export interface ArchiveConsoleServerOptions {
   readonly store: ArchiveStore;
@@ -23,11 +24,14 @@ const THUMB_TTL_MS = 60 * 60 * 1_000;
 const THUMB_CACHE_MAX = 512;
 /** 不可达（删除/不可访问）的阴性缓存，避免缩略图反复触发 Telegram 查询。 */
 const THUMB_NEGATIVE_TTL_MS = 30 * 1_000;
+/** 在线说明缓存：同一 rowId 5 分钟内不再重复取回。 */
+const LIVE_TEXT_TTL_MS = 5 * 60 * 1_000;
 
 export function createArchiveConsoleServer(options: ArchiveConsoleServerOptions): FastifyInstance {
   const server = fastify({ logger: false });
   const thumbCache = new Map<string, CachedThumb>();
   const negativeCache = new Map<string, NegativeThumb>();
+  const liveTextCache = new Map<string, LiveTextCacheEntry>();
   const live = options.session && options.sessions
     ? new LiveMediaStreamer({
         sessions: options.sessions,
@@ -47,7 +51,7 @@ export function createArchiveConsoleServer(options: ArchiveConsoleServerOptions)
       return reply.code(status).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });
-  registerRoutes(server, options, thumbCache, negativeCache, live);
+  registerRoutes(server, options, thumbCache, negativeCache, liveTextCache, live);
   return server;
 }
 
@@ -56,6 +60,7 @@ function registerRoutes(
   options: ArchiveConsoleServerOptions,
   thumbCache: Map<string, CachedThumb>,
   negativeCache: Map<string, NegativeThumb>,
+  liveTextCache: Map<string, LiveTextCacheEntry>,
   live: LiveMediaStreamer | undefined
 ): void {
   const { store, mediaRoot, session, sessions, logger } = options;
@@ -119,6 +124,7 @@ function registerRoutes(
     Querystring: {
       q?: string; exclude?: string; chat?: string; chatTitle?: string;
       from?: string; to?: string; timeMode?: string; limit?: string; offset?: string;
+      users?: string; forwardFrom?: string;
     };
   }>("/api/search", async (request, reply) => {
     try {
@@ -126,11 +132,14 @@ function registerRoutes(
       const result = await store.searchStructured({
         keyword: text(query.q),
         excludeKeyword: text(query.exclude),
-        chatId: text(query.chat),
+        chatIds: chatIdsOr(query.chat),
         chatTitle: text(query.chatTitle),
         dateFrom: dateOr(query.from),
         dateTo: dateOr(query.to),
         timeMode: modeOr(query.timeMode),
+        senderIds: usersOr(query.users),
+        forwardFromId: forwardIdOr(query.forwardFrom),
+        forwardFromName: forwardNameOr(query.forwardFrom),
         limit: normalizeLimit(intOr(query.limit)),
         offset: normalizeOffset(intOr(query.offset))
       });
@@ -179,6 +188,70 @@ function registerRoutes(
       return sendError(reply, error, logger);
     }
   });
+
+  server.get<{ Querystring: { q?: string; chat?: string; limit?: string } }>(
+    "/api/senders",
+    async (request, reply) => {
+      try {
+        return await store.searchSenders({
+          q: text(request.query.q),
+          chatId: text(request.query.chat),
+          limit: normalizeLimit(intOr(request.query.limit))
+        });
+      } catch (error) {
+        return sendError(reply, error, logger);
+      }
+    }
+  );
+
+  server.get<{ Params: { id: string }; Querystring: { chat?: string } }>(
+    "/api/senders/:id/summary",
+    async (request, reply) => {
+      try {
+        const summary = await store.getSenderSummary(senderIdOr(request.params.id), text(request.query.chat));
+        if (!summary) throw new HttpError(404, "没有该发送者的记录");
+        return summary;
+      } catch (error) {
+        return sendError(reply, error, logger);
+      }
+    }
+  );
+
+  server.get<{ Params: { id: string } }>(
+    "/api/messages/:id/replies",
+    async (request, reply) => {
+      try {
+        const chain = await store.getReplyChain(rowIdOr(request.params.id));
+        if (!chain) throw new HttpError(404, "消息不存在");
+        return chain;
+      } catch (error) {
+        return sendError(reply, error, logger);
+      }
+    }
+  );
+
+  server.get<{ Params: { id: string } }>(
+    "/api/messages/:id/live-text",
+    async (request, reply) => {
+      try {
+        if (!session || !sessions) throw new HttpError(503, "archive.console_web 未配置 Telegram 会话");
+        const rowId = rowIdOr(request.params.id);
+        const cached = liveTextCacheGet(rowId, liveTextCache);
+        if (cached !== undefined) return { text: cached.text, entities: cached.entities };
+        const record = await store.getMessageByRowId(rowId);
+        if (!record) throw new HttpError(404, "消息不存在");
+        const caption = await fetchLiveCaptionText(sessions, session, store, logger, record);
+        if (caption === undefined) {
+          liveTextCacheNeg(rowId, liveTextCache);
+          throw new HttpError(410, "消息已从 Telegram 删除或会话无法访问");
+        }
+        liveTextCachePut(rowId, caption, liveTextCache);
+        return { text: caption.text, entities: caption.entities };
+      } catch (error) {
+        return sendError(reply, error, logger);
+      }
+    }
+  );
 
   server.get<{ Params: { id: string } }>("/api/mediafiles/:id", async (request, reply) => {
     try {
@@ -431,6 +504,73 @@ function negativeCachePut(rowId: string, status: number, message: string, cache:
   cache.set(rowId, { status, message, expires: Date.now() + THUMB_NEGATIVE_TTL_MS });
 }
 
+interface LiveTextCacheEntry {
+  readonly text: string;
+  readonly entities: readonly MessageEntity[];
+  readonly expires: number;
+}
+
+function liveTextCacheGet(rowId: string, cache: Map<string, LiveTextCacheEntry>): LiveTextCacheEntry | undefined {
+  const hit = cache.get(rowId);
+  if (hit === undefined || Date.now() >= hit.expires) {
+    cache.delete(rowId);
+    return undefined;
+  }
+  return hit.text === "" ? undefined : hit;
+}
+
+function liveTextCachePut(rowId: string, entry: { text: string; entities: readonly MessageEntity[] }, cache: Map<string, LiveTextCacheEntry>): void {
+  cache.set(rowId, { ...entry, expires: Date.now() + LIVE_TEXT_TTL_MS });
+}
+
+function liveTextCacheNeg(rowId: string, cache: Map<string, LiveTextCacheEntry>): void {
+  cache.set(rowId, { text: "", entities: [], expires: Date.now() + THUMB_NEGATIVE_TTL_MS });
+}
+
+/** 在线说明：从 Telegram 实时取回消息原始文本与实体（相册取全部成员的最长文本），原样返回。 */
+async function fetchLiveCaptionText(
+  sessions: SessionAccess,
+  session: string,
+  store: ArchiveStore,
+  logger: RuntimeLogger,
+  record: MessageRecord
+): Promise<{ text: string; entities: readonly MessageEntity[] } | undefined> {
+  const targets = albumTargetsOf(record);
+  try {
+    const chatUsername = await store.getChatUsername(record.chatId);
+    return await sessions.run(session, async (client) => {
+      const host = client as unknown as import("../archiver.js").ArchiveClient;
+      const entity = await resolveChatEntity(host, record.chatId, chatUsername);
+      if (entity === undefined) return undefined;
+      const messages = await host.getMessages(entity, { ids: targets });
+      let best: { text: string; entities: readonly MessageEntity[] } | undefined;
+      for (const message of messages) {
+        if (message === undefined || message === null) continue;
+        const text = String(message.rawText ?? message.message ?? "").trim();
+        if (best === undefined || text.length > best.text.length) {
+          best = { text, entities: normalizeEntities(message.entities) };
+        }
+      }
+      if (best === undefined || best.text === "") return undefined;
+      return { text: best.text, entities: best.entities };
+    });
+  } catch (error) {
+    if (isMissingPeer(error)) {
+      logger.debug("live caption peer missing for message " + record.rowId);
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/** 相册取全部成员的消息 ID（上限 20），普通消息取自身。 */
+function albumTargetsOf(record: MessageRecord): readonly number[] {
+  const ids = record.albumRows.length > 0
+    ? record.albumRows.map((row) => row.messageId)
+    : [record.messageId];
+  return [...new Set(ids)].slice(0, 20);
+}
+
 function sendError(reply: FastifyReply, error: unknown, logger: RuntimeLogger): FastifyReply | undefined {
   if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
   const message = error instanceof Error ? error.message : String(error);
@@ -479,6 +619,40 @@ function intOr(value: string | undefined): number | undefined {
 function text(value: string | undefined): string | undefined {
   const result = value?.trim();
   return result || undefined;
+}
+
+/** 逗号分隔的用户 ID 列表：trim + 去空，上限 50；空串等价于未指定。 */
+function usersOr(value: string | undefined): string[] | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const users = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (users.length > 50) throw new HttpError(400, "用户数量超过上限（50）");
+  return users;
+}
+
+/** 逗号分隔的会话 ID 列表：trim + 去空，上限 50；空串等价于未指定。 */
+function chatIdsOr(value: string | undefined): string[] | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const chats = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (chats.length > 50) throw new HttpError(400, "群组数量超过上限（50）");
+  return chats;
+}
+
+/** 转发来源参数：纯数字按 ID 精确匹配，否则按显示名包含匹配（大小写不敏感）。 */
+function forwardIdOr(value: string | undefined): string | undefined {
+  const result = text(value);
+  return result && /^\d+$/.test(result) ? result : undefined;
+}
+
+function forwardNameOr(value: string | undefined): string | undefined {
+  const result = text(value);
+  return result && /^\d+$/.test(result) ? undefined : result;
+}
+
+/** 发送者 ID：trim + 长度校验（负 ID / 频道 ID 合法，不做数字限制）。 */
+function senderIdOr(value: string): string {
+  const result = value.trim();
+  if (result === "" || result.length > 64) throw new HttpError(400, "用户 ID 需为 1-64 字符");
+  return result;
 }
 
 function errorMessage(error: unknown): string {

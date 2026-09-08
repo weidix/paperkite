@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronRight, X } from "lucide-svelte";
+  import { ArrowLeft, ChevronRight, Reply, UserRoundSearch, X } from "lucide-svelte";
   import { tick } from "svelte";
-  import { fetchContext, fetchState, mediaDiskUrl, mediaRowUrl, type ArchiveState } from "$lib/api";
-  import { chatLabel, fmtCount, fmtTs, highlightSegments, senderName } from "$lib/format";
+  import { fetchContext, fetchLiveText, fetchReplyChain, fetchState, mediaDiskUrl, mediaRowUrl, type ArchiveState } from "$lib/api";
+  import { chatLabel, fmtCount, fmtTs, richSegments, senderName, urlRangesOf } from "$lib/format";
   import { albumLightboxItems, kindOfFile, kindOfRow, openAlbumLightbox, openMessageLightbox } from "$lib/media";
   import { backToSearch, navigate } from "$lib/state.svelte";
   import AlbumRow from "$lib/components/album-row.svelte";
   import Button from "$lib/components/button.svelte";
   import MessageRow from "$lib/components/message-row.svelte";
   import MediaStrip, { type StripTile } from "$lib/components/media-strip.svelte";
-  import type { AlbumContextEntry, ContextEntry, MessageRecord } from "$lib/model";
+  import type { AlbumContextEntry, ContextEntry, MessageEntity, MessageRecord, ReplyChainResult } from "$lib/model";
 
   const WINDOW = 20;
   const PAGE = 20;
@@ -31,12 +31,26 @@
   let loadingAfter = $state(false);
   let scrollAnchor = $state<string | null>(null);
   let expanded = $state(false);
+  let chain = $state<ReplyChainResult | null>(null);
+  let chainError = $state("");
+  /** 强制重新取回回复链（重试按钮）。 */
+  let chainSeq = $state(0);
+  /** 在线说明：归档文本缺 URL 时从 Telegram 实时补显原始文本与实体。 */
+  let liveCaptionText = $state("");
+  let liveCaptionEntities = $state<readonly MessageEntity[] | undefined>(undefined);
+  let liveCaptionBusy = $state(false);
 
   const album = $derived(anchor?.kind === "album" ? anchor : null);
   const messageAnchor = $derived(anchor?.kind === "message" ? anchor.record : null);
   const anchorRecord = $derived(album?.rows[0] ?? messageAnchor ?? null);
   const anchorText = $derived(album?.captionText ?? messageAnchor?.text ?? "");
-  const segments = $derived(highlightSegments(anchorText, terms));
+  /** 锚点文本对应的实体：相册取文本与说明一致的成员行。 */
+  const anchorEntities = $derived(
+    album !== null
+      ? album.rows.find((row) => row.text !== "" && row.text === album.captionText)?.entities ?? album.rows[0]?.entities
+      : messageAnchor?.entities
+  );
+  const segments = $derived(richSegments(anchorText, terms, urlRangesOf(anchorText, anchorEntities)));
   const stripTiles = $derived(buildStripTiles());
 
   /** 锚点文本实际被 line-clamp 截断时提供展开/收起（与字符数无关）。 */
@@ -82,6 +96,57 @@
 
   $effect(() => {
     if (anchor) expanded = false;
+  });
+
+  /** 回复链跟随锚点行 ID 取回；token 防串，chainSeq 强制重取。 */
+  $effect(() => {
+    void chainSeq;
+    if (anchor === null) return;
+    const id = anchorRowId(anchor);
+    chain = null;
+    chainError = "";
+    let cancelled = false;
+    fetchReplyChain(id)
+      .then((res) => {
+        if (!cancelled) chain = res;
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) chainError = messageOf(e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  const liveCaptionSegments = $derived(
+    liveCaptionText !== "" && liveCaptionText !== anchorText
+      ? richSegments(liveCaptionText, terms, urlRangesOf(liveCaptionText, liveCaptionEntities))
+      : []
+  );
+
+  /** 在线说明：归档文本不含 URL 时取回实时文本与实体（相册取成员中最长的说明）。 */
+  $effect(() => {
+    if (anchor === null || archiveState?.session === null) return;
+    if (/https?:\/\//.test(anchorText)) return;
+    const id = anchorRowId(anchor);
+    liveCaptionText = "";
+    liveCaptionEntities = undefined;
+    liveCaptionBusy = true;
+    let cancelled = false;
+    fetchLiveText(id)
+      .then((res) => {
+        if (!cancelled) {
+          liveCaptionText = res.text;
+          liveCaptionEntities = res.entities;
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) liveCaptionBusy = false;
+      });
+    return () => {
+      cancelled = true;
+    };
   });
 
   async function loadContext(id: string): Promise<void> {
@@ -147,7 +212,20 @@
   function openInChat(): void {
     const chatId = album?.rows[0]?.chatId ?? messageAnchor?.chatId;
     if (!chatId) return;
-    navigate({ kind: "search", q: "", chat: chatId, from: "", to: "", mode: "include" });
+    navigate({ kind: "search", q: "", chats: [chatId], from: "", to: "", mode: "include", users: [], forwardFrom: "" });
+  }
+
+  /** 该用户在此会话：在最近检索条件上增补发送者，会话取记忆条件或当前会话。 */
+  function openSenderInChat(): void {
+    const senderId = anchorRecord?.senderId;
+    const chatId = album?.rows[0]?.chatId ?? messageAnchor?.chatId;
+    const memory = backToSearch();
+    if (!senderId || !chatId || memory.kind !== "search") return;
+    navigate({
+      ...memory,
+      users: memory.users.includes(senderId) ? [...memory.users] : [...memory.users, senderId],
+      chats: memory.chats.length > 0 ? [...memory.chats] : [chatId]
+    });
   }
 
   /** 点击缩略图：定位到对应项并直接进入预览。 */
@@ -266,6 +344,12 @@
           {/if}
         </div>
       </div>
+      {#if anchorRecord?.senderId}
+        <Button variant="ghost" size="sm" class="hidden sm:inline-flex" onclick={openSenderInChat}>
+          <UserRoundSearch class="size-3.5" aria-hidden="true" />
+          该用户在此会话
+        </Button>
+      {/if}
       <Button variant="ghost" size="sm" class="hidden sm:inline-flex" onclick={openInChat}>
         在会话中打开
         <ChevronRight class="size-3.5" aria-hidden="true" />
@@ -315,6 +399,15 @@
               {#each segments as segment, i (i)}
                 {#if segment.hit}
                   <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
+                {:else if segment.url}
+                  <a
+                    href={segment.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                    title="在新标签页打开"
+                    onclick={(event) => event.stopPropagation()}
+                  >{segment.text}</a>
                 {:else}
                   <span>{segment.text}</span>
                 {/if}
@@ -323,6 +416,28 @@
               <span class="text-muted-foreground">（无文本）</span>
             {/if}
           </p>
+          {#if liveCaptionSegments.length > 0}
+            <div class="mt-2 rounded-md border border-border/60 bg-accent/40 px-2.5 py-2">
+              <p class="mb-1 font-mono text-[10px] tracking-widest text-muted-foreground">在线说明</p>
+              <p class="whitespace-pre-wrap break-words text-[13px] leading-snug">
+                {#each liveCaptionSegments as segment, i (i)}
+                  {#if segment.hit}
+                    <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
+                  {:else if segment.url}
+                    <a
+                      href={segment.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                      title="在新标签页打开"
+                    >{segment.text}</a>
+                  {:else}
+                    <span>{segment.text}</span>
+                  {/if}
+                {/each}
+              </p>
+            </div>
+          {/if}
           {#if showExpand}
             <button
               class="mt-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
@@ -337,6 +452,59 @@
         </div>
         {#if stripTiles.length > 0}
           <MediaStrip tiles={stripTiles} onselect={selectStrip} />
+        {/if}
+      </div>
+
+      <div class="mt-2 rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div class="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
+          <Reply class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span class="font-display text-sm font-semibold tracking-tight">回复链</span>
+          {#if chain?.replyToMsgId !== undefined}
+            <span class="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              回复 #{chain.replyToMsgId}
+            </span>
+          {/if}
+          <span class="font-mono text-[10px] text-muted-foreground">
+            被回复 {fmtCount(chain?.children.length ?? 0)} 条
+          </span>
+        </div>
+        {#if chainError}
+          <div class="flex items-center gap-2 px-4 py-3">
+            <p class="min-w-0 flex-1 font-mono text-[11px] text-muted-foreground">{chainError}</p>
+            <Button variant="ghost" size="sm" onclick={() => (chainSeq += 1)}>重试</Button>
+          </div>
+        {:else if chain === null}
+          <div class="grid gap-1 p-4">
+            {#each Array(2) as _, i (i)}
+              <div class="h-10 animate-pulse rounded-lg bg-muted"></div>
+            {/each}
+          </div>
+        {:else}
+          {#if chain.parent}
+            <div class="border-b border-border/60 px-4 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground">
+              回复对象
+            </div>
+            {#if chain.parent.kind === "album"}
+              <AlbumRow entry={chain.parent} highlights={terms} />
+            {:else}
+              <MessageRow record={chain.parent.record} highlights={terms} />
+            {/if}
+          {/if}
+          {#if chain.children.length > 0}
+            <div class="border-b border-border/60 px-4 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground">
+              回复者 · {fmtCount(chain.children.length)}
+            </div>
+            {#each chain.children as entry (entryRowId(entry))}
+              {#if entry.kind === "album"}
+                <AlbumRow entry={entry} highlights={terms} />
+              {:else}
+                <MessageRow record={entry.record} highlights={terms} />
+              {/if}
+            {/each}
+          {/if}
+          {#if !chain.parent && chain.children.length === 0}
+            <p class="px-4 py-3 font-mono text-[11px] text-muted-foreground">这条消息没有回复关系。</p>
+          {/if}
         {/if}
       </div>
 

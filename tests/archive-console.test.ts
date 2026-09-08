@@ -270,6 +270,14 @@ test("archive console search returns items, total and filters", async () => {
     assert.equal(chat.statusCode, 200);
     assert.equal(chat.json().total, 1);
 
+    const multiChat = await h.server.inject({ method: "GET", url: "/api/search?chat=100%2C200" });
+    assert.equal(multiChat.statusCode, 200);
+    assert.equal(multiChat.json().total, 5);
+    assert.equal(multiChat.json().totalMessages, 5);
+
+    const partialChat = await h.server.inject({ method: "GET", url: "/api/search?chat=200,999" });
+    assert.equal(partialChat.json().total, 1);
+
     const dated = await h.server.inject({
       method: "GET",
       url: "/api/search?from=2025-03-02T00%3A00%3A00.000Z&to=2025-03-02T23%3A59%3A59.999Z"
@@ -335,6 +343,66 @@ test("archive console message and context endpoints return records", async () =>
     assert.equal(paged.statusCode, 200);
     assert.deepEqual(flat(paged.json().before), [1]);
     assert.deepEqual(flat(paged.json().after), []);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console live text appends url entities from telegram", async () => {
+  const h = await harness();
+  try {
+    const without = await h.server.inject({ method: "GET", url: "/api/messages/3/live-text" });
+    assert.equal(without.statusCode, 503);
+
+    const withSession = await harness({
+      session: true,
+      message: {
+        id: 3,
+        date: 0,
+        message: "测评 评测链接",
+        entities: [
+          { className: "MessageEntityTextUrl", offset: 0, length: 2, url: "https://t.me/x/7" }
+        ]
+      }
+    });
+    try {
+      const res = await withSession.server.inject({ method: "GET", url: "/api/messages/3/live-text" });
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.json(), {
+        text: "测评 评测链接",
+        entities: [{ className: "MessageEntityTextUrl", offset: 0, length: 2, url: "https://t.me/x/7" }]
+      });
+      assert.deepEqual(withSession.client.calls, ["getEntity:@test_chat", "getMessages:3"]);
+    } finally {
+      await withSession.close();
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console keeps native text and entity links apart", async () => {
+  const h = await harness();
+  try {
+    await h.store.saveBatch(
+      [{
+        messageId: 42, chatId: "100", chatTitle: "测试群", date: "2025-03-04T12:00:00.000Z",
+        text: "看看频道 测评", messageType: "text", hasMedia: false,
+        entities: [
+          { className: "MessageEntityTextUrl", offset: 2, length: 2, url: "https://t.me/x/7" },
+          { className: "MessageEntityBold", offset: 2, length: 2 }
+        ]
+      }],
+      []
+    );
+    const res = await h.server.inject({ method: "GET", url: "/api/messages/6" });
+    assert.equal(res.statusCode, 200);
+    const record = res.json();
+    assert.equal(record.text, "看看频道 测评");
+    assert.deepEqual(record.entities, [
+      { className: "MessageEntityTextUrl", offset: 2, length: 2, url: "https://t.me/x/7" },
+      { className: "MessageEntityBold", offset: 2, length: 2 }
+    ]);
   } finally {
     await h.close();
   }
@@ -1094,6 +1162,243 @@ test("archive console blocked users and blockwords keep each other's rows blocke
     assert.equal(res.statusCode, 200);
     res = await h.server.inject({ method: "GET", url: "/api/search?q=%E6%96%B0%E6%B6%88%E6%81%AF" });
     assert.equal(res.json().total, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console sender search matches by name, username and id", async () => {
+  const h = await harness();
+  try {
+    const byName = await h.server.inject({ method: "GET", url: "/api/senders?q=%E6%B5%8B" });
+    assert.equal(byName.statusCode, 200);
+    const byNameBody = byName.json();
+    assert.equal(byNameBody.total, 1);
+    assert.deepEqual(byNameBody.items, [{ senderId: "7", username: "tester", firstName: "测", lastName: "试" }]);
+
+    const byHandle = await h.server.inject({ method: "GET", url: "/api/senders?q=%40tester" });
+    assert.equal(byHandle.json().total, 1);
+    assert.equal(byHandle.json().items[0].senderId, "7");
+
+    const byId = await h.server.inject({ method: "GET", url: "/api/senders?q=7" });
+    assert.equal(byId.json().total, 1);
+    assert.equal(byId.json().items[0].senderId, "7");
+
+    const scoped = await h.server.inject({ method: "GET", url: "/api/senders?q=test&chat=200" });
+    assert.deepEqual(scoped.json(), { items: [], total: 0 });
+
+    const none = await h.server.inject({ method: "GET", url: "/api/senders?q=zzz" });
+    assert.deepEqual(none.json(), { items: [], total: 0 });
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console multi-user search combines users with other filters", async () => {
+  const h = await harness();
+  try {
+    const empty = await h.server.inject({ method: "GET", url: "/api/search?users=" });
+    assert.equal(empty.json().total, 5);
+
+    const single = await h.server.inject({ method: "GET", url: "/api/search?users=7" });
+    assert.equal(single.json().total, 2);
+    assert.equal(single.json().totalMessages, 2);
+
+    const wrongChat = await h.server.inject({ method: "GET", url: "/api/search?users=7&chat=200" });
+    assert.equal(wrongChat.json().total, 0);
+
+    const keyword = await h.server.inject({ method: "GET", url: "/api/search?users=7&q=%E5%A4%A9%E6%B0%94" });
+    assert.equal(keyword.json().total, 1);
+    assert.equal(keyword.json().items[0].record.text, "你好，今天天气不错");
+
+    await h.store.saveBatch(
+      [{ messageId: 6, chatId: "100", chatTitle: "测试群", date: "2025-03-04T11:00:00.000Z", text: "第八号用户的消息", messageType: "text", hasMedia: false, senderId: "8" }],
+      []
+    );
+    const pair = await h.server.inject({ method: "GET", url: "/api/search?users=7,8" });
+    assert.equal(pair.json().total, 3);
+
+    const tooMany = Array.from({ length: 51 }, (_, index) => index + 1).join(",");
+    const rejected = await h.server.inject({ method: "GET", url: `/api/search?users=${tooMany}` });
+    assert.equal(rejected.statusCode, 400);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console sender summary aggregates counts, dates and per-chat stats", async () => {
+  const h = await harness();
+  try {
+    const res = await h.server.inject({ method: "GET", url: "/api/senders/7/summary" });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.sender.senderId, "7");
+    assert.equal(body.total, 2);
+    assert.equal(body.firstDate, "2025-03-01T10:00:00.000Z");
+    assert.equal(body.lastDate, "2025-03-02T12:00:00.000Z");
+    assert.equal(body.chats.length, 1);
+    assert.equal(body.chats[0].chatId, "100");
+    assert.equal(body.chats[0].count, 2);
+    assert.equal(body.chats[0].lastText, "附上截图看看效果");
+
+    const scoped = await h.server.inject({ method: "GET", url: "/api/senders/7/summary?chat=200" });
+    assert.equal(scoped.statusCode, 200);
+    assert.equal(scoped.json().total, 0);
+    assert.deepEqual(scoped.json().chats, []);
+
+    const missing = await h.server.inject({ method: "GET", url: "/api/senders/999/summary" });
+    assert.equal(missing.statusCode, 404);
+    assert.equal(missing.json().error, "没有该发送者的记录");
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console reply chain resolves parent and children from replies", async () => {
+  const h = await harness();
+  try {
+    const root = await h.server.inject({ method: "GET", url: "/api/messages/1/replies" });
+    assert.equal(root.statusCode, 200);
+    const rootBody = root.json();
+    assert.equal(rootBody.parent, undefined);
+    assert.equal(rootBody.replyToMsgId, undefined);
+    assert.equal(rootBody.children.length, 1);
+    assert.equal(rootBody.children[0].kind, "message");
+    assert.equal(rootBody.children[0].record.messageId, 3);
+
+    const reply = await h.server.inject({ method: "GET", url: "/api/messages/3/replies" });
+    assert.equal(reply.statusCode, 200);
+    const replyBody = reply.json();
+    assert.equal(replyBody.replyToMsgId, 1);
+    assert.equal(replyBody.parent.kind, "message");
+    assert.equal(replyBody.parent.record.messageId, 1);
+    assert.equal(replyBody.children.length, 0);
+
+    const listed = await h.server.inject({ method: "GET", url: "/api/search" });
+    const m3 = listed.json().items.find(
+      (item: { kind: string; record?: { messageId: number } }) =>
+        item.kind === "message" && item.record?.messageId === 3
+    )?.record;
+    assert.equal(m3?.replyToMsgId, 1);
+    assert.equal(m3?.replyToText, "你好，今天天气不错");
+
+    const missing = await h.server.inject({ method: "GET", url: "/api/messages/999/replies" });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console forward filter matches by id or name", async () => {
+  const h = await harness();
+  try {
+    const byName = await h.server.inject({ method: "GET", url: "/api/search?forwardFrom=%E8%BD%AC%E5%8F%91%E4%BA%BA" });
+    const byNameBody = byName.json();
+    assert.equal(byNameBody.total, 1);
+    assert.equal(byNameBody.items[0].record.text, "好的收到");
+    assert.equal(byNameBody.items[0].record.forwardFromId, "9");
+
+    const byId = await h.server.inject({ method: "GET", url: "/api/search?forwardFrom=9" });
+    assert.equal(byId.json().total, 1);
+    assert.equal(byId.json().items[0].record.text, "好的收到");
+
+    const none = await h.server.inject({ method: "GET", url: "/api/search?forwardFrom=%E6%97%A0%E5%85%B3" });
+    assert.equal(none.json().total, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console blocking a user hides them from sender queries too", async () => {
+  const h = await harness();
+  try {
+    await h.server.inject({ method: "POST", url: "/api/blockedusers", payload: { userId: "7" } });
+
+    const search = await h.server.inject({ method: "GET", url: "/api/search?users=7" });
+    assert.equal(search.json().total, 0);
+
+    const senders = await h.server.inject({ method: "GET", url: "/api/senders?q=tester" });
+    assert.deepEqual(senders.json(), { items: [], total: 0 });
+
+    const summary = await h.server.inject({ method: "GET", url: "/api/senders/7/summary" });
+    assert.equal(summary.statusCode, 200);
+    assert.equal(summary.json().total, 0);
+    assert.deepEqual(summary.json().chats, []);
+
+    const replies = await h.server.inject({ method: "GET", url: "/api/messages/3/replies" });
+    assert.equal(replies.statusCode, 404);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console album of one sender folds into a single entry for user search", async () => {
+  const h = await harness();
+  try {
+    await h.store.saveBatch(
+      [
+        {
+          messageId: 7, chatId: "100", chatTitle: "测试群", groupedId: "album-7",
+          date: "2025-03-04T10:00:00.000Z", text: "用户相册一", messageType: "photo",
+          hasMedia: true, mediaType: "photo", senderId: "7"
+        },
+        {
+          messageId: 8, chatId: "100", chatTitle: "测试群", groupedId: "album-7",
+          date: "2025-03-04T10:01:00.000Z", text: "用户相册二", messageType: "photo",
+          hasMedia: true, mediaType: "photo", senderId: "7"
+        }
+      ],
+      [
+        { messageId: 7, chatId: "100", mediaType: "photo", fileName: "a.jpg", filePath: "/tmp/a.jpg" },
+        { messageId: 8, chatId: "100", mediaType: "photo", fileName: "b.jpg", filePath: "/tmp/b.jpg" }
+      ]
+    );
+
+    const search = await h.server.inject({ method: "GET", url: "/api/search?users=7" });
+    const body = search.json();
+    assert.equal(body.total, 3);
+    assert.equal(body.totalMessages, 4);
+    assert.equal(body.items[0].kind, "album");
+    assert.equal(body.items[0].rows.length, 2);
+
+    const summary = await h.server.inject({ method: "GET", url: "/api/senders/7/summary" });
+    assert.equal(summary.json().total, 4);
+    assert.equal(summary.json().lastDate, "2025-03-04T10:01:00.000Z");
+    const chat = summary.json().chats.find((item: { chatId: string }) => item.chatId === "100");
+    assert.equal(chat.lastText, "用户相册二");
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console album folds the whole group when only one member matches", async () => {
+  const h = await harness();
+  try {
+    await h.store.saveBatch(
+      [
+        {
+          messageId: 9, chatId: "100", chatTitle: "测试群", groupedId: "album-9",
+          date: "2025-03-04T10:00:00.000Z", text: "混合相册一", messageType: "photo",
+          hasMedia: true, mediaType: "photo", senderId: "8"
+        },
+        {
+          messageId: 10, chatId: "100", chatTitle: "测试群", groupedId: "album-9",
+          date: "2025-03-04T10:01:00.000Z", text: "混合相册二", messageType: "photo",
+          hasMedia: true, mediaType: "photo", senderId: "7"
+        }
+      ],
+      [
+        { messageId: 9, chatId: "100", mediaType: "photo", fileName: "c.jpg", filePath: "/tmp/c.jpg" },
+        { messageId: 10, chatId: "100", mediaType: "photo", fileName: "d.jpg", filePath: "/tmp/d.jpg" }
+      ]
+    );
+
+    const search = await h.server.inject({ method: "GET", url: "/api/search?users=7" });
+    const body = search.json();
+    assert.equal(body.total, 3);
+    assert.equal(body.totalMessages, 3);
+    const album = body.items.find((item: { kind: string }) => item.kind === "album");
+    assert.equal(album.rows.length, 2);
   } finally {
     await h.close();
   }

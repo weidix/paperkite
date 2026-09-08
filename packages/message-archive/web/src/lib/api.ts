@@ -1,7 +1,12 @@
 import type {
   ArchiveContextResult,
   ArchiveSearchResult,
+  MessageEntity,
   MessageRecord,
+  ReplyChainResult,
+  SenderQuery,
+  SenderSearchResult,
+  SenderSummary,
   StoredMediaFile,
   TimeMode
 } from "$lib/model";
@@ -62,11 +67,13 @@ export interface MediaMeta {
 
 export interface SearchQuery {
   q?: string;
-  chat?: string;
+  chatIds?: readonly string[];
   chatTitle?: string;
   from?: string;
   to?: string;
   mode?: TimeMode;
+  users?: readonly string[];
+  forwardFrom?: string;
   limit?: number;
   offset?: number;
 }
@@ -104,11 +111,13 @@ export async function fetchState(): Promise<ArchiveState> {
 export async function searchMessages(query: SearchQuery): Promise<ArchiveSearchResult> {
   const params = new URLSearchParams();
   if (query.q) params.set("q", query.q);
-  if (query.chat) params.set("chat", query.chat);
+  if (query.chatIds?.length) params.set("chat", query.chatIds.join(","));
   if (query.chatTitle) params.set("chatTitle", query.chatTitle);
   if (query.from) params.set("from", query.from);
   if (query.to) params.set("to", query.to);
   if (query.mode && query.mode !== "include") params.set("timeMode", query.mode);
+  if (query.users?.length) params.set("users", query.users.join(","));
+  if (query.forwardFrom) params.set("forwardFrom", query.forwardFrom);
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   if (query.offset !== undefined) params.set("offset", String(query.offset));
   return request(`/api/search?${params}`);
@@ -130,6 +139,30 @@ export async function fetchContext(
 
 export async function fetchChats(): Promise<ChatsResult> {
   return request("/api/chats");
+}
+
+export async function searchSenders(query: SenderQuery): Promise<SenderSearchResult> {
+  const params = new URLSearchParams();
+  if (query.q) params.set("q", query.q);
+  if (query.chatId) params.set("chat", query.chatId);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  return request(`/api/senders?${params}`);
+}
+
+export async function fetchSenderSummary(senderId: string, chatId?: string): Promise<SenderSummary> {
+  const params = new URLSearchParams();
+  if (chatId) params.set("chat", chatId);
+  const suffix = params.size ? `?${params}` : "";
+  return request(`/api/senders/${encodeURIComponent(senderId)}/summary${suffix}`);
+}
+
+export async function fetchReplyChain(rowId: string): Promise<ReplyChainResult> {
+  return request(`/api/messages/${rowId}/replies`);
+}
+
+/** 在线说明：从 Telegram 实时取回原始文本与实体（归档缺实体时用于补显）。 */
+export async function fetchLiveText(rowId: string): Promise<{ text: string; entities?: readonly MessageEntity[] }> {
+  return request(`/api/messages/${rowId}/live-text`);
 }
 
 export async function fetchMediaMeta(id: string): Promise<MediaMeta> {

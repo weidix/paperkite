@@ -1,8 +1,27 @@
 import { fetchChats, type ChatLedger, type TimeMode } from "./api";
-import type { ArchiveSearchResult } from "./model";
+import type { ArchiveSearchResult, SenderInfo } from "./model";
 
-type View =
-  | { kind: "search"; q: string; chat: string; from: string; to: string; mode: TimeMode }
+export type SearchPatch = Partial<{
+  q: string;
+  chats: readonly string[];
+  from: string;
+  to: string;
+  mode: TimeMode;
+  users: readonly string[];
+  forwardFrom: string;
+}>;
+
+export type View =
+  | {
+      kind: "search";
+      q: string;
+      chats: readonly string[];
+      from: string;
+      to: string;
+      mode: TimeMode;
+      users: readonly string[];
+      forwardFrom: string;
+    }
   | { kind: "message"; rowId: string };
 
 class ViewStore {
@@ -61,10 +80,18 @@ export function parseHash(hash: string): View {
     return {
       kind: "search",
       q: query.get("q") ?? "",
-      chat: query.get("chat") ?? "",
+      chats: (query.get("chat") ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
       from: query.get("from") ?? "",
       to: query.get("to") ?? "",
-      mode: modeOf(query.get("mode"))
+      mode: modeOf(query.get("mode")),
+      users: (query.get("users") ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
+      forwardFrom: query.get("fwd") ?? ""
     };
   }
   return emptySearch();
@@ -74,20 +101,64 @@ function hashOf(view: View): string {
   if (view.kind === "message") return `#/m/${view.rowId}`;
   const query = new URLSearchParams();
   if (view.q) query.set("q", view.q);
-  if (view.chat) query.set("chat", view.chat);
+  if (view.chats.length > 0) query.set("chat", view.chats.join(","));
   if (view.from) query.set("from", view.from);
   if (view.to) query.set("to", view.to);
   if (view.mode !== "include") query.set("mode", view.mode);
+  if (view.users.length > 0) query.set("users", view.users.join(","));
+  if (view.forwardFrom) query.set("fwd", view.forwardFrom);
   const text = query.toString();
   return text ? `#/q?${text}` : "#/q";
 }
 
 export function emptySearch(): View {
-  return { kind: "search", q: "", chat: "", from: "", to: "", mode: "include" };
+  return { kind: "search", q: "", chats: [], from: "", to: "", mode: "include", users: [], forwardFrom: "" };
 }
 
-export function isEmptySearch(v: View): boolean {
-  return v.kind === "search" && !v.q && !v.chat && !v.from && !v.to;
+/** 已解析的用户信息缓存：用户 chips 与菜单展示名优先取此。 */
+const knownUsers: Record<string, SenderInfo> = {};
+
+/** 记录发送者信息：字段更全者优先，供条件 chips 与菜单展示。 */
+export function rememberSender(info: SenderInfo): void {
+  const current = knownUsers[info.senderId];
+  if (current === undefined) {
+    knownUsers[info.senderId] = info;
+    return;
+  }
+  const pick = (a: string | undefined, b: string | undefined): string | undefined => (b ? b : a);
+  knownUsers[info.senderId] = {
+    senderId: info.senderId,
+    username: pick(current.username, info.username),
+    firstName: pick(current.firstName, info.firstName),
+    lastName: pick(current.lastName, info.lastName)
+  };
+}
+
+/** 消息行渲染时登记发送者身份，供用户 chips 展示名称。 */
+export function rememberSenderFromRecord(record: {
+  senderId?: string;
+  senderUsername?: string;
+  senderFirstName?: string;
+  senderLastName?: string;
+}): void {
+  if (record.senderId === undefined) return;
+  rememberSender({
+    senderId: record.senderId,
+    username: record.senderUsername,
+    firstName: record.senderFirstName,
+    lastName: record.senderLastName
+  });
+}
+
+/** 发送者展示名：显示名 > @用户名 > 用户 ID 截断。 */
+export function senderLabelOf(senderId: string): string {
+  const info = knownUsers[senderId];
+  if (info) {
+    const display = [info.firstName, info.lastName].filter(Boolean).join(" ");
+    if (display) return display;
+    if (info.username) return `@${info.username}`;
+  }
+  return `#${senderId.length > 12 ? senderId.slice(0, 12) : senderId}`;
 }
 
 function modeOf(value: string | null): TimeMode {

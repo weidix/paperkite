@@ -302,7 +302,7 @@ export async function fetchMessage(
     return await fetchById(host, file, file.chatId);
   } catch (error) {
     if (!isUnresolvedEntityError(error)) throw error;
-    const entity = await resolveChatEntity(host, file, chatUsername);
+    const entity = await resolveChatEntity(host, file.chatId, chatUsername);
     if (entity === undefined) throw error;
     return fetchById(host, file, entity);
   }
@@ -317,17 +317,17 @@ async function fetchById(
   return messages.find((item) => item !== undefined && item !== null && item.id === file.messageId);
 }
 
-/** 按归档用户名解析，失败后回退到会话清单扫描；返回与归档 chatId 匹配的实体。 */
-async function resolveChatEntity(
+/** 按归档用户名解析，失败后回退到会话清单扫描；返回与目标 chatId 匹配的实体。 */
+export async function resolveChatEntity(
   host: ArchiveClient,
-  file: StoredMediaFile,
+  chatId: string,
   chatUsername: string | undefined
 ): Promise<unknown | undefined> {
   const handle = chatUsername?.trim().replace(/^@/, "");
   if (handle) {
     try {
       const entity = await host.getEntity("@" + handle);
-      if (peerIdOf(entity) === file.chatId) return entity;
+      if (peerIdOf(entity) === chatId) return entity;
     } catch (error) {
       // 句柄失效（删除/更名/私密），继续尝试会话清单
     }
@@ -335,7 +335,7 @@ async function resolveChatEntity(
   try {
     for await (const dialog of host.iterDialogs()) {
       const entity = dialog.entity;
-      if (entity !== undefined && entity !== null && peerIdOf(entity) === file.chatId) return entity;
+      if (entity !== undefined && entity !== null && peerIdOf(entity) === chatId) return entity;
     }
   } catch (error) {
     // 会话清单不可迭代时按解析失败处理

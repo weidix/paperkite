@@ -14,6 +14,14 @@ export interface StoredMediaFile {
   readonly mimeType?: string;
 }
 
+/** 消息实体（对齐 Telegram 原生 entities）：offset/length 为 UTF-16 码元，链接实体带 url。 */
+export interface MessageEntity {
+  readonly className: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly url?: string;
+}
+
 /** 同相册内的一条可预览消息。 */
 export interface AlbumRow {
   readonly rowId: string;
@@ -43,6 +51,11 @@ export interface MessageRecord {
   readonly mediaType?: string;
   readonly messageType?: string;
   readonly mimeType?: string;
+  readonly replyToMsgId?: number;
+  readonly replyToText?: string;
+  readonly forwardFromId?: string;
+  readonly forwardFromName?: string;
+  readonly entities?: readonly MessageEntity[];
   readonly text: string;
   readonly mediaFiles: readonly StoredMediaFile[];
   readonly albumRows: readonly AlbumRow[];
@@ -80,4 +93,45 @@ export interface ArchiveContextResult {
   readonly after: readonly ContextEntry[];
   readonly beforeN: number;
   readonly afterN: number;
+}
+
+/** 发送者的展示信息（用户维度检索结果项）。 */
+export interface SenderInfo {
+  readonly senderId: string;
+  readonly username?: string;
+  readonly firstName?: string;
+  readonly lastName?: string;
+}
+
+export interface SenderQuery {
+  readonly q?: string;
+  readonly chatId?: string;
+  readonly limit?: number;
+}
+
+export interface SenderSearchResult {
+  readonly items: readonly SenderInfo[];
+  readonly total: number;
+}
+
+export interface SenderSummaryChat {
+  readonly chatId: string;
+  readonly chatTitle?: string;
+  readonly count: number;
+  readonly lastDate?: string;
+  readonly lastText?: string;
+}
+
+export interface SenderSummary {
+  readonly sender: SenderInfo;
+  readonly total: number;
+  readonly firstDate?: string;
+  readonly lastDate?: string;
+  readonly chats: readonly SenderSummaryChat[];
+}
+
+export interface ReplyChainResult {
+  readonly parent?: ContextEntry;
+  readonly children: readonly ContextEntry[];
+  readonly replyToMsgId?: number;
 }

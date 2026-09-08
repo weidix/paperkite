@@ -100,6 +100,9 @@ class CountingStore implements ArchiveStore {
   getMessageContext(rowId: string, beforeN: number, afterN: number) { return this.inner.getMessageContext(rowId, beforeN, afterN); }
   getMessageByRowId(rowId: string) { return this.inner.getMessageByRowId(rowId); }
   getMediaFileById(id: string) { return this.inner.getMediaFileById(id); }
+  searchSenders(query: Parameters<ArchiveStore["searchSenders"]>[0]) { return this.inner.searchSenders(query); }
+  getSenderSummary(senderId: string, chatId?: string) { return this.inner.getSenderSummary(senderId, chatId); }
+  getReplyChain(rowId: string) { return this.inner.getReplyChain(rowId); }
   listBlockwords() { return this.inner.listBlockwords(); }
   addBlockword(word: string) { return this.inner.addBlockword(word); }
   removeBlockword(word: string) { return this.inner.removeBlockword(word); }
@@ -284,7 +287,7 @@ test("archive rejects when both date and message limits are unlimited", async ()
   }
 });
 
-test("archive embeds text-url entity targets into stored text", async () => {
+test("archive stores native text with link entities kept apart", async () => {
   const h = await harness({
     messages: [
       new FakeMessage(1, undefined, undefined, "点这里 查看详情", [
@@ -296,7 +299,12 @@ test("archive embeds text-url entity targets into stored text", async () => {
     await h.archiver.saveChatMessages("@test_chat");
     const rows = (await h.store.searchStructured({})).items;
     assert.equal(rows[0]!.kind, "message");
-    assert.equal(rows[0]!.kind === "message" ? rows[0]!.record.text : null, "点这里 (https://t.me/invite) 查看详情");
+    const record = rows[0]!.kind === "message" ? rows[0]!.record : undefined;
+    assert.ok(record, "record must exist");
+    assert.equal(record.text, "点这里 查看详情");
+    assert.deepEqual(record.entities, [
+      { className: "MessageEntityTextUrl", offset: 1, length: 2, url: "https://t.me/invite" }
+    ]);
   } finally {
     await h.store.close();
   }
