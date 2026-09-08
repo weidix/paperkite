@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { AudioLines, File, Image as ImageIcon, Paperclip, Play } from "lucide-svelte";
-  import { fmtTs, highlightSegments, senderName } from "$lib/format";
+  import { AudioLines, File, Image as ImageIcon, Paperclip, Play, Reply } from "lucide-svelte";
+  import { fetchReplyChain } from "$lib/api";
+  import { fmtTs, richSegments, senderName, urlRangesOf } from "$lib/format";
   import { fileThumbOf, openMessageLightbox } from "$lib/media";
-  import { navigate } from "$lib/state.svelte";
+  import { navigate, rememberSenderFromRecord, showToast } from "$lib/state.svelte";
   import MessageMenu from "$lib/components/message-menu.svelte";
+  import UserMenu from "$lib/components/user-menu.svelte";
   import type { MessageRecord } from "$lib/model";
 
   let {
@@ -25,11 +27,16 @@
     inlineThumb?: boolean;
   }>();
 
-  const segments = $derived(highlightSegments(record.text, highlights));
+  $effect(() => {
+    rememberSenderFromRecord(record);
+  });
+
+  const segments = $derived(richSegments(record.text, highlights, urlRangesOf(record.text, record.entities)));
   const canExpandBase = $derived(expandable && !fullText);
   const thumb = $derived(fileThumbOf(record));
   let expanded = $state(false);
   let thumbFailed = $state(false);
+  let jumping = $state(false);
 
   /** 段落实际被 line-clamp 截断（与字符数无关：换行/长词也会截断）。 */
   let textEl = $state<HTMLParagraphElement | null>(null);
@@ -46,6 +53,37 @@
     observer.observe(el);
     return () => observer.disconnect();
   });
+
+  function openRow(): void {
+    navigate({ kind: "message", rowId: record.rowId });
+  }
+
+  function onRowKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openRow();
+    }
+  }
+
+  /** 点按回复指示：经回复链接口解析被回复消息的行 ID 后跳转。 */
+  async function openReplied(event: MouseEvent): Promise<void> {
+    event.stopPropagation();
+    if (jumping) return;
+    jumping = true;
+    try {
+      const chain = await fetchReplyChain(record.rowId);
+      if (chain.parent === undefined) {
+        showToast("被回复的消息不存在或不可见");
+        return;
+      }
+      const rowId = chain.parent.kind === "album" ? chain.parent.rowId : chain.parent.record.rowId;
+      navigate({ kind: "message", rowId });
+    } catch {
+      showToast("无法取回被回复的消息");
+    } finally {
+      jumping = false;
+    }
+  }
 </script>
 
 <div
@@ -53,10 +91,13 @@
   id="msg-{record.rowId}"
 >
   <div class="flex items-stretch">
-    <button
-      class="flex min-w-0 flex-1 gap-3 px-4 py-2 text-left"
-      onclick={() => navigate({ kind: "message", rowId: record.rowId })}
+    <div
+      class="flex min-w-0 flex-1 cursor-pointer gap-3 px-4 py-2 text-left"
+      role="button"
+      tabindex="0"
       aria-label="查看消息 #{(record.messageId)}"
+      onclick={openRow}
+      onkeydown={onRowKeydown}
     >
     <div class="w-[102px] shrink-0 pt-0.5 text-right font-mono text-[10px] leading-4 text-muted-foreground">
       <div>{fmtTs(record.date)}</div>
@@ -75,6 +116,18 @@
           </span>
         {/if}
       </div>
+      {#if record.replyToMsgId !== undefined}
+        <button
+          type="button"
+          class="mt-0.5 inline-flex min-w-0 max-w-full items-center gap-1 rounded px-0.5 font-mono text-[10px] text-muted-foreground/80 transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="查看被回复的消息"
+          aria-label="查看被回复的消息 #{record.replyToMsgId}"
+          onclick={openReplied}
+        >
+          <Reply class="size-3 shrink-0" aria-hidden="true" />
+          <span class="truncate">回复 #{record.replyToMsgId}{record.replyToText ? ` · ${record.replyToText}` : ""}</span>
+        </button>
+      {/if}
       <p
         class="mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-snug {expanded || fullText ? '' : 'line-clamp-3'}"
         bind:this={textEl}
@@ -83,6 +136,15 @@
           {#each segments as segment, i (i)}
             {#if segment.hit}
               <mark class="rounded-md bg-foreground px-1 text-background">{segment.text}</mark>
+            {:else if segment.url}
+              <a
+                href={segment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="break-all text-primary underline decoration-primary/50 underline-offset-2 transition-colors hover:decoration-primary"
+                title="在新标签页打开"
+                onclick={(event) => event.stopPropagation()}
+              >{segment.text}</a>
             {:else}
               <span>{segment.text}</span>
             {/if}
@@ -92,9 +154,9 @@
         {/if}
       </p>
     </div>
-  </button>
+  </div>
   {#if inlineThumb && record.hasMedia}
-    <div class="flex shrink-0 items-center pl-1 pr-3">
+    <div class="flex shrink-0 items-center pl-1">
       <button
         type="button"
         class="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-muted-foreground transition-colors hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring"
@@ -128,7 +190,8 @@
       </button>
     </div>
   {/if}
-  <div class="flex items-center pr-2">
+  <div class="flex w-16 shrink-0 items-center justify-end gap-0.5 pr-1.5">
+    <UserMenu {record} />
     <MessageMenu {record} />
   </div>
   </div>

@@ -117,6 +117,10 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+  /* Tailwind v4 preflight 不再给 button 默认 pointer 光标 */
+  :where(button, [role="button"]):not(:disabled) {
+    cursor: pointer;
+  }
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;

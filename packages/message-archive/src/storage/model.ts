@@ -16,6 +16,14 @@ export interface LastMessageInfo {
   readonly date: string;
 }
 
+/** 消息实体（对齐 Telegram 原生 entities）：offset/length 为 UTF-16 码元，链接实体带 url。 */
+export interface MessageEntity {
+  readonly className: string;
+  readonly offset: number;
+  readonly length: number;
+  readonly url?: string;
+}
+
 /** 写入后端的一条消息行（字段与 messages 表一一对应）。 */
 export interface MessageRow {
   readonly messageId: number;
@@ -28,6 +36,7 @@ export interface MessageRow {
   readonly senderLastName?: string;
   readonly date: string;
   readonly text: string;
+  readonly entities?: readonly MessageEntity[];
   readonly messageType: string;
   readonly replyToMsgId?: number;
   readonly forwardFromId?: string;
@@ -94,6 +103,13 @@ export interface MessageRecord {
   readonly mediaType?: string;
   readonly messageType?: string;
   readonly mimeType?: string;
+  readonly replyToMsgId?: number;
+  /** 被回复消息的文本摘录（同会话内按消息 ID 定位，blocked = 0）。 */
+  readonly replyToText?: string;
+  readonly forwardFromId?: string;
+  readonly forwardFromName?: string;
+  /** 原始消息实体（对齐 Telegram 原生 entities，链接渲染用）。 */
+  readonly entities?: readonly MessageEntity[];
   readonly text: string;
   readonly mediaFiles: readonly StoredMediaFile[];
   readonly albumRows: readonly AlbumRow[];
@@ -102,11 +118,16 @@ export interface MessageRecord {
 export interface ArchiveQuery {
   readonly keyword?: string;
   readonly excludeKeyword?: string;
-  readonly chatId?: string;
+  /** 多会话检索：与其余条件 AND，会话之间 OR。 */
+  readonly chatIds?: readonly string[];
   readonly chatTitle?: string;
   readonly dateFrom?: string;
   readonly dateTo?: string;
   readonly timeMode?: TimeMode;
+  /** 多用户检索：与其余条件 AND，用户之间 OR。 */
+  readonly senderIds?: readonly string[];
+  readonly forwardFromId?: string;
+  readonly forwardFromName?: string;
   readonly limit?: number;
   readonly offset?: number;
 }
@@ -135,6 +156,50 @@ export interface AlbumContextEntry {
 }
 
 export type ContextEntry = MessageContextEntry | AlbumContextEntry;
+
+/** 检索用户信息：按发送者聚合后的展示字段。 */
+export interface SenderInfo {
+  readonly senderId: string;
+  readonly username?: string;
+  readonly firstName?: string;
+  readonly lastName?: string;
+}
+
+export interface SenderQuery {
+  readonly q?: string;
+  readonly chatId?: string;
+  readonly limit?: number;
+}
+
+export interface SenderSearchResult {
+  readonly items: readonly SenderInfo[];
+  readonly total: number;
+}
+
+/** 用户聚合概要中的单会话条目。 */
+export interface SenderSummaryChat {
+  readonly chatId: string;
+  readonly chatTitle?: string;
+  readonly count: number;
+  readonly lastDate?: string;
+  readonly lastText?: string;
+}
+
+/** 用户聚合概要：总计 + 按会话拆分（含每会话最新文本）。 */
+export interface SenderSummary {
+  readonly sender: SenderInfo;
+  readonly total: number;
+  readonly firstDate?: string;
+  readonly lastDate?: string;
+  readonly chats: readonly SenderSummaryChat[];
+}
+
+/** 回复链：锚点的回复对象与回复者；parent/children 均为上下文条目。 */
+export interface ReplyChainResult {
+  readonly parent?: ContextEntry;
+  readonly children: readonly ContextEntry[];
+  readonly replyToMsgId?: number;
+}
 
 /** 锚点条目及两侧上下文；beforeN/afterN 为该侧条目总数（不含锚点）。 */
 export interface ArchiveContextResult {
@@ -256,6 +321,12 @@ export interface ArchiveStore {
     afterOffset?: number
   ): Promise<ArchiveContextResult>;
   getMessageByRowId(rowId: string): Promise<MessageRecord | undefined>;
+  /** 用户维度检索：按发送者聚合（blocked = 0），支持名字/用户名/ID 匹配。 */
+  searchSenders(query: SenderQuery): Promise<SenderSearchResult>;
+  /** 用户聚合概要：不存在该用户（不看屏蔽）返回 undefined，路由映射 404。 */
+  getSenderSummary(senderId: string, chatId?: string): Promise<SenderSummary | undefined>;
+  /** 回复链：锚点不存在（含被屏蔽）返回 undefined，路由映射 404。 */
+  getReplyChain(rowId: string): Promise<ReplyChainResult | undefined>;
   getMediaFileById(id: string): Promise<StoredMediaFile | undefined>;
   /** 屏蔽词内存缓存快照，读路径不触表。 */
   listBlockwords(): Promise<BlockwordState>;
@@ -344,6 +415,31 @@ export function groupKey(chatId: string, groupedId: string): string {
 
 export function paramPlaceholders(start: number, count: number): string {
   return Array.from({ length: count }, (_, index) => `$${start + index}`).join(", ");
+}
+
+/** 实体列：JSON 串 ↔ 实体数组（空数组与空值同样视为无实体）。 */
+export function entitiesJson(entities: readonly MessageEntity[] | undefined): string | null {
+  return entities !== undefined && entities.length > 0 ? JSON.stringify(entities) : null;
+}
+
+export function parseEntities(value: unknown): readonly MessageEntity[] | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return undefined;
+    const entities = parsed
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((item) => ({
+        className: String(item.className ?? ""),
+        offset: Number(item.offset ?? 0),
+        length: Number(item.length ?? 0),
+        ...(typeof item.url === "string" && item.url ? { url: item.url } : {})
+      }))
+      .filter((entity) => entity.className !== "" && entity.length > 0);
+    return entities.length > 0 ? entities : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function toIsoDate(value: unknown): string {

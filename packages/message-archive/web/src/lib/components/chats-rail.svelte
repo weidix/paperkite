@@ -9,7 +9,11 @@
     loadChats();
   });
 
-  const activeChat = $derived(viewStore.current.kind === "search" ? viewStore.current.chat : "");
+  const activeChat = $derived(
+    viewStore.current.kind === "search" && viewStore.current.chats.length === 1
+      ? viewStore.current.chats[0] ?? ""
+      : ""
+  );
 </script>
 
 <div class="flex h-full min-h-0 flex-col gap-3">
@@ -49,7 +53,7 @@
               ? "bg-accent text-accent-foreground"
               : "hover:bg-accent/60 hover:text-accent-foreground"
           )}
-          onclick={() => navigate({ kind: "search", q: "", chat: chat.chatId, from: "", to: "", mode: "include" })}
+          onclick={() => navigate({ kind: "search", q: "", chats: [chat.chatId], from: "", to: "", mode: "include", users: [], forwardFrom: "" })}
         >
           {#if activeChat === chat.chatId}
             <span class="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary" aria-hidden="true"></span>

@@ -20,9 +20,16 @@ import {
   type MediaRow,
   type MessageRecord,
   type MessageRow,
+  type ReplyChainResult,
+  type SenderInfo,
+  type SenderQuery,
+  type SenderSearchResult,
+  type SenderSummary,
+  type SenderSummaryChat,
   type StoredMediaFile,
   albumEntryOf,
   buildContextEntries,
+  entitiesJson,
   groupKey,
   mediaKey,
   normalizeBlockword,
@@ -32,6 +39,7 @@ import {
   normalizeRowId,
   normalizeTimeMode,
   normalizeUserId,
+  parseEntities,
   splitTerms,
   toIsoDate,
   uniqueGroupKeys
@@ -40,7 +48,14 @@ import {
 const MESSAGE_COLUMNS = `
   m.id AS row_id, m.message_id, m.chat_id, m.grouped_id, m.chat_title, m.date,
   m.sender_id, m.sender_username, m.sender_first_name, m.sender_last_name,
-  m.has_media, m.media_type, m.message_type, m.text
+  m.has_media, m.media_type, m.message_type, m.text, m.entities,
+  m.reply_to_msg_id, m.forward_from_id, m.forward_from_name,
+  (
+    SELECT substr(p.text, 1, 120) FROM messages p
+     WHERE p.chat_id = m.chat_id AND p.message_id = m.reply_to_msg_id
+       AND p.blocked = 0
+     LIMIT 1
+  ) AS reply_to_text
 `;
 
 const MIME_SUBQUERY = `(
@@ -92,6 +107,7 @@ export class SqliteArchiveStore implements ArchiveStore {
         reply_to_msg_id INTEGER,
         forward_from_id TEXT,
         forward_from_name TEXT,
+        entities TEXT,
         has_media INTEGER NOT NULL DEFAULT 0,
         media_type TEXT,
         media_path TEXT,
@@ -104,6 +120,8 @@ export class SqliteArchiveStore implements ArchiveStore {
       CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped_date_id ON messages(chat_id, grouped_id, date, id);
       CREATE INDEX IF NOT EXISTS idx_messages_date_id ON messages(date, id);
       CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_reply ON messages(chat_id, reply_to_msg_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_forward_from ON messages(forward_from_id);
       CREATE TABLE IF NOT EXISTS media_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         message_id INTEGER NOT NULL,
@@ -150,7 +168,7 @@ export class SqliteArchiveStore implements ArchiveStore {
         created_at TEXT NOT NULL
       );
     `);
-    this.ensureBlockedColumn();
+    this.ensureLegacyColumns();
     this.ensureBlockedIndexes();
     this.blockwords = (this.database
       .prepare("SELECT word FROM blockwords ORDER BY word")
@@ -162,11 +180,15 @@ export class SqliteArchiveStore implements ArchiveStore {
       .map(toBlockedUserInfo);
   }
 
-  /** 老库迁移：messages 补 blocked 标志列。 */
-  private ensureBlockedColumn(): void {
+  /** 老库迁移：messages 补 blocked 标志列与 entities 实体列。 */
+  private ensureLegacyColumns(): void {
     const columns = this.database.prepare("PRAGMA table_info(messages)").all() as readonly Record<string, unknown>[];
-    if (!columns.some((column) => String(column.name) === "blocked")) {
+    const names = new Set(columns.map((column) => String(column.name)));
+    if (!names.has("blocked")) {
       this.database.exec("ALTER TABLE messages ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!names.has("entities")) {
+      this.database.exec("ALTER TABLE messages ADD COLUMN entities TEXT");
     }
   }
 
@@ -263,10 +285,10 @@ export class SqliteArchiveStore implements ArchiveStore {
     const messageStatement = this.database.prepare(`
       INSERT OR IGNORE INTO messages
         (message_id, chat_id, grouped_id, chat_title, sender_id, sender_username,
-         sender_first_name, sender_last_name, date, text, message_type,
+         sender_first_name, sender_last_name, date, text, entities, message_type,
          reply_to_msg_id, forward_from_id, forward_from_name,
          has_media, media_type, media_path, created_at, blocked)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const mediaStatement = this.database.prepare(`
       INSERT INTO media_files
@@ -289,6 +311,7 @@ export class SqliteArchiveStore implements ArchiveStore {
           row.senderLastName ?? null,
           toIsoDate(row.date),
           row.text,
+          entitiesJson(row.entities),
           row.messageType ?? "text",
           row.replyToMsgId ?? null,
           row.forwardFromId ?? null,
@@ -547,6 +570,144 @@ export class SqliteArchiveStore implements ArchiveStore {
     return row ? this.attachMedia([row])[0] : undefined;
   }
 
+  async searchSenders(query: SenderQuery): Promise<SenderSearchResult> {
+    const limit = normalizeLimit(query.limit);
+    const conditions = ["m.blocked = 0"];
+    const values: (string | number)[] = [];
+    const q = (query.q ?? "").trim().replace(/^@/, "");
+    if (q) {
+      conditions.push(`(
+        m.sender_id = ?
+        OR m.sender_id LIKE ? COLLATE NOCASE
+        OR m.sender_username LIKE ? COLLATE NOCASE
+        OR m.sender_first_name LIKE ? COLLATE NOCASE
+        OR m.sender_last_name LIKE ? COLLATE NOCASE
+      )`);
+      const like = `%${escapeLike(q)}%`;
+      values.push(q, like, like, like, like);
+    }
+    if (query.chatId?.trim()) {
+      conditions.push("m.chat_id = ?");
+      values.push(query.chatId.trim());
+    }
+    const where = `WHERE ${conditions.join(" AND ")}`;
+    const total = this.database.prepare(
+      `SELECT COUNT(DISTINCT m.sender_id) AS count FROM messages m ${where}`
+    ).get(...values) as { count: number };
+    const rows = this.database.prepare(`
+      SELECT m.sender_id,
+             MAX(coalesce(m.sender_username, '')) AS sender_username,
+             MAX(coalesce(m.sender_first_name, '')) AS sender_first_name,
+             MAX(coalesce(m.sender_last_name, '')) AS sender_last_name,
+             COUNT(*) AS count
+        FROM messages m
+        ${where}
+       GROUP BY m.sender_id
+       ORDER BY count DESC, m.sender_id
+       LIMIT ?
+    `).all(...values, limit) as readonly Record<string, unknown>[];
+    return {
+      items: rows.filter((row) => row.sender_id !== null && row.sender_id !== "").map(toSenderInfo),
+      total: Number(total.count)
+    };
+  }
+
+  async getSenderSummary(senderId: string, chatId?: string): Promise<SenderSummary | undefined> {
+    const id = senderId.trim();
+    const exists = this.database.prepare(
+      "SELECT 1 FROM messages WHERE sender_id = ? LIMIT 1"
+    ).get(id);
+    if (exists === undefined) return undefined;
+    const chatFilter = chatId?.trim() ? " AND m.chat_id = ?" : "";
+    const chatValues: (string | number)[] = chatId?.trim() ? [id, chatId.trim()] : [id];
+    const stats = this.database.prepare(`
+      SELECT COUNT(*) AS total, MIN(m.date) AS first_date, MAX(m.date) AS last_date
+        FROM messages m
+       WHERE m.sender_id = ? AND m.blocked = 0${chatFilter}
+    `).get(...chatValues) as { total: number; first_date: unknown; last_date: unknown };
+    const chatRows = this.database.prepare(`
+      SELECT m.chat_id, c.title AS chat_title, COUNT(*) AS count,
+             MAX(m.date) AS last_date,
+             (
+               SELECT substr(m2.text, 1, 120)
+                 FROM messages m2
+                WHERE m2.chat_id = m.chat_id AND m2.sender_id = m.sender_id AND m2.blocked = 0
+                ORDER BY m2.date DESC, m2.id DESC LIMIT 1
+             ) AS last_text
+        FROM messages m
+        LEFT JOIN chats c ON c.chat_id = m.chat_id
+       WHERE m.sender_id = ? AND m.blocked = 0${chatFilter}
+       GROUP BY m.chat_id
+       ORDER BY last_date DESC, m.chat_id
+    `).all(...chatValues) as readonly Record<string, unknown>[];
+    const identity = this.database.prepare(`
+      SELECT m.sender_id,
+             MAX(coalesce(m.sender_username, '')) AS sender_username,
+             MAX(coalesce(m.sender_first_name, '')) AS sender_first_name,
+             MAX(coalesce(m.sender_last_name, '')) AS sender_last_name
+        FROM messages m
+       WHERE m.sender_id = ?
+       GROUP BY m.sender_id
+    `).get(id) as Record<string, unknown> | undefined;
+    return {
+      sender: toSenderInfo(identity ?? { sender_id: id }),
+      total: Number(stats.total),
+      firstDate: optionalString(stats.first_date) ? toIsoDate(stats.first_date) : undefined,
+      lastDate: optionalString(stats.last_date) ? toIsoDate(stats.last_date) : undefined,
+      chats: chatRows.map((row) => ({
+        chatId: String(row.chat_id),
+        chatTitle: optionalString(row.chat_title),
+        count: Number(row.count),
+        lastDate: optionalString(row.last_date) ? toIsoDate(row.last_date) : undefined,
+        lastText: optionalString(row.last_text)
+      }))
+    };
+  }
+
+  async getReplyChain(rowId: string): Promise<ReplyChainResult | undefined> {
+    const anchor = await this.getMessageByRowId(rowId);
+    if (!anchor) return undefined;
+    let parent: ReplyChainResult["parent"];
+    if (anchor.replyToMsgId !== undefined) {
+      const row = this.database.prepare(`
+        SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+          FROM messages m
+         WHERE m.chat_id = ? AND m.message_id = ? AND m.blocked = 0
+         LIMIT 1
+      `).get(anchor.chatId, anchor.replyToMsgId) as Record<string, unknown> | undefined;
+      if (row) {
+        const records = await this.attachMedia([row]);
+        const parentRecord = records[0];
+        if (parentRecord?.groupedId !== undefined) {
+          const group = await this.fetchGroupAttached(parentRecord.chatId, parentRecord.groupedId);
+          parent = group.length > 1
+            ? albumEntryOf(group, parentRecord.rowId)
+            : { kind: "message", record: parentRecord };
+        } else if (parentRecord !== undefined) {
+          parent = { kind: "message", record: parentRecord };
+        }
+      }
+    }
+    const childRows = this.database.prepare(`
+      SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
+        FROM messages m
+       WHERE m.chat_id = ? AND m.reply_to_msg_id = ? AND m.blocked = 0
+       ORDER BY m.date ASC, m.id ASC
+       LIMIT 100
+    `).all(anchor.chatId, anchor.messageId) as readonly Record<string, unknown>[];
+    const children = childRows.length
+      ? buildContextEntries(
+          await this.attachMedia(childRows),
+          await this.fetchGroupsAttached(uniqueGroupKeys(childRows))
+        )
+      : [];
+    return {
+      parent,
+      children,
+      replyToMsgId: anchor.replyToMsgId
+    };
+  }
+
   async getMessageContext(
     rowId: string,
     beforeN: number,
@@ -790,6 +951,11 @@ function toMessageRecord(
     mediaType: optionalString(row.media_type),
     messageType: optionalString(row.message_type) ?? "text",
     mimeType: optionalString(row.mime_type),
+    replyToMsgId: row.reply_to_msg_id === null || row.reply_to_msg_id === undefined ? undefined : Number(row.reply_to_msg_id),
+    replyToText: optionalString(row.reply_to_text),
+    forwardFromId: optionalString(row.forward_from_id),
+    forwardFromName: optionalString(row.forward_from_name),
+    entities: parseEntities(row.entities),
     text: String(row.text ?? ""),
     mediaFiles,
     albumRows
@@ -829,13 +995,27 @@ function buildWhere(query: ArchiveQuery, alias = "m"): { where: string; values: 
     conditions.push(`${alias}.text NOT LIKE ? COLLATE NOCASE`);
     values.push(`%${escapeLike(term)}%`);
   }
-  if (query.chatId?.trim()) {
-    conditions.push(`${alias}.chat_id = ?`);
-    values.push(query.chatId.trim());
+  const chatIds = (query.chatIds ?? []).map((id) => id.trim()).filter(Boolean);
+  if (chatIds.length > 0) {
+    conditions.push(`${alias}.chat_id IN (${chatIds.map(() => "?").join(", ")})`);
+    values.push(...chatIds);
   }
   if (query.chatTitle?.trim()) {
     conditions.push(`${alias}.chat_title LIKE ? COLLATE NOCASE`);
     values.push(`%${escapeLike(query.chatTitle.trim())}%`);
+  }
+  const senderIds = (query.senderIds ?? []).map((id) => id.trim()).filter(Boolean);
+  if (senderIds.length > 0) {
+    conditions.push(`${alias}.sender_id IN (${senderIds.map(() => "?").join(", ")})`);
+    values.push(...senderIds);
+  }
+  if (query.forwardFromId?.trim()) {
+    conditions.push(`${alias}.forward_from_id = ?`);
+    values.push(query.forwardFromId.trim());
+  }
+  if (query.forwardFromName?.trim()) {
+    conditions.push(`${alias}.forward_from_name LIKE ? COLLATE NOCASE`);
+    values.push(`%${escapeLike(query.forwardFromName.trim())}%`);
   }
   appendTimeWhere(conditions, values, query, alias);
   conditions.push(`${alias}.blocked = 0`);
@@ -915,6 +1095,15 @@ function toBlockedUserInfo(row: Record<string, unknown>): BlockedUserInfo {
     userId: String(row.user_id),
     name: optionalString(row.name),
     username: optionalString(row.username)
+  };
+}
+
+function toSenderInfo(row: Record<string, unknown>): SenderInfo {
+  return {
+    senderId: String(row.sender_id),
+    username: optionalString(row.sender_username),
+    firstName: optionalString(row.sender_first_name),
+    lastName: optionalString(row.sender_last_name)
   };
 }
 

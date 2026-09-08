@@ -166,7 +166,7 @@
 <div class="relative shrink-0">
   <button
     type="button"
-    class="rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100"
+    class="rounded-md p-1.5 text-muted-foreground opacity-40 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100"
     aria-label="消息操作"
     aria-haspopup="dialog"
     aria-expanded={open}

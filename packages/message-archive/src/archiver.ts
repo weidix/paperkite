@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { RuntimeLogger } from "@paperkite/sdk";
-import type { ArchiveStore, LastMessageInfo, MediaRow, MessageRow } from "./storage/index.js";
+import type { ArchiveStore, LastMessageInfo, MediaRow, MessageEntity, MessageRow } from "./storage/index.js";
 
 export interface TelegramMessage {
   readonly id: number;
@@ -398,7 +398,8 @@ function extractMessageRow(message: TelegramMessage, chatInfo: ChatInfo): Messag
     senderFirstName: entityFirstName(sender),
     senderLastName: entityLastName(sender),
     date: new Date(Number(message.date) * 1_000).toISOString(),
-    text: compileText(message),
+    text: message.rawText ?? message.message ?? "",
+    entities: normalizeEntities(message.entities),
     messageType: media.messageType,
     replyToMsgId: message.replyToMsgId ?? message.replyTo?.replyToMsgId,
     hasMedia: message.media !== undefined && message.media !== null,
@@ -408,32 +409,21 @@ function extractMessageRow(message: TelegramMessage, chatInfo: ChatInfo): Messag
   };
 }
 
-/** 纯文本不足呈现 MessageEntityTextUrl（链接目标只在实体里），把目标 URL 补进文本。 */
-function compileText(message: TelegramMessage): string {
-  const raw = message.rawText ?? message.message ?? "";
-  const links = (message.entities ?? [])
-    .filter((entity) => className(entity) === "MessageEntityTextUrl")
-    .map((entity) => {
-      const record = recordOf(entity) ?? {};
-      return {
-        offset: Number(record.offset ?? 0),
-        length: Number(record.length ?? 0),
-        url: optionalText(record.url)
-      };
-    })
-    .filter((link) => link.url !== undefined && link.length > 0)
-    .sort((left, right) => left.offset - right.offset || right.length - left.length);
-  if (!links.length) return raw;
-
-  const parts: string[] = [];
-  let cursor = 0;
-  for (const link of links) {
-    if (link.offset < cursor) continue;
-    parts.push(raw.slice(cursor, link.offset), `${raw.slice(link.offset, link.offset + link.length)} (${link.url})`);
-    cursor = link.offset + link.length;
+/** 消息实体归一化：与 Telegram 原生对齐（offset/length 为 UTF-16 码元），链接实体保留目标 URL。 */
+export function normalizeEntities(entities: readonly unknown[] | undefined): readonly MessageEntity[] {
+  if (!entities?.length) return [];
+  const normalized: MessageEntity[] = [];
+  for (const entity of entities) {
+    const record = recordOf(entity) ?? {};
+    const offset = Number(record.offset ?? 0);
+    const length = Number(record.length ?? 0);
+    if (!(length > 0)) continue;
+    const url = optionalText(record.url);
+    normalized.push(url === undefined
+      ? { className: String(record.className ?? ""), offset, length }
+      : { className: String(record.className ?? ""), offset, length, url });
   }
-  parts.push(raw.slice(cursor));
-  return parts.join("");
+  return normalized;
 }
 
 function describeMedia(media: unknown): { messageType: string; mediaType?: string; mimeType?: string } {
