@@ -6,6 +6,7 @@
   import Lightbox from "$lib/components/lightbox.svelte";
   import Topbar from "$lib/components/topbar.svelte";
   import MessageView from "$lib/views/message-view.svelte";
+  import OverviewView from "$lib/views/overview-view.svelte";
   import SearchView from "$lib/views/search-view.svelte";
   import {
     backToSearch,
@@ -16,6 +17,7 @@
     initRouter,
     lightbox,
     navigate,
+    overviewView,
     requestSearchFocus,
     themeStore,
     toast,
@@ -41,7 +43,7 @@
           || target.isContentEditable);
       if (event.key === "/" && !typing) {
         event.preventDefault();
-        if (viewStore.current.kind === "message") navigate(backToSearch());
+        if (viewStore.current.kind !== "search") navigate(backToSearch());
         requestSearchFocus();
       }
       if (event.key === "Escape") {
@@ -60,7 +62,13 @@
 </script>
 
 <svelte:head>
-  <title>{viewStore.current.kind === "message" ? `消息 #${viewStore.current.rowId} · 归档台` : "归档台 · 纸鸢"}</title>
+  <title>
+    {viewStore.current.kind === "message"
+      ? `消息 #${viewStore.current.rowId} · 归档台`
+      : viewStore.current.kind === "overview"
+        ? "总览 · 归档台"
+        : "归档台 · 纸鸢"}
+  </title>
 </svelte:head>
 
 <div class="relative flex h-dvh overflow-hidden bg-background text-foreground">
@@ -68,15 +76,21 @@
   <div class="dot-mask pointer-events-none absolute inset-x-0 top-0 z-0 h-40 opacity-60" aria-hidden="true"></div>
 
   <aside class="relative z-10 hidden w-56 shrink-0 flex-col gap-6 border-r bg-card/60 p-3 md:flex">
-    <div class="flex items-center gap-2.5 px-2 py-1">
+    <button
+      type="button"
+      class="flex items-center gap-2.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-accent/60"
+      aria-label="回到总览"
+      title="总览"
+      onclick={() => navigate(overviewView())}
+    >
       <span class="brand-mark flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <span class="block size-3 rotate-45 rounded-[3px] border-2 border-primary-foreground" aria-hidden="true"></span>
       </span>
-      <div class="flex flex-col leading-tight">
+      <span class="flex flex-col leading-tight">
         <span class="font-display text-sm font-semibold tracking-tight">归档台</span>
         <span class="font-mono text-[11px] text-muted-foreground">archive.console_web</span>
-      </div>
-    </div>
+      </span>
+    </button>
 
     <div class="flex min-h-0 flex-1 flex-col">
       <ChatsRail />
@@ -93,6 +107,8 @@
       <div class="mx-auto w-full max-w-5xl px-6 py-6">
         {#if viewStore.current.kind === "message"}
           <MessageView rowId={viewStore.current.rowId} />
+        {:else if viewStore.current.kind === "overview"}
+          <OverviewView />
         {:else}
           <SearchView />
         {/if}
@@ -110,12 +126,21 @@
       ></button>
       <aside class="absolute inset-y-0 left-0 flex w-64 animate-fade-in flex-col border-r bg-card shadow-sm">
         <div class="flex h-14 shrink-0 items-center justify-between border-b px-4">
-          <div class="flex items-center gap-2.5">
+          <button
+            type="button"
+            class="flex items-center gap-2.5 rounded-md text-left"
+            aria-label="回到总览"
+            title="总览"
+            onclick={() => {
+              railOpen = false;
+              navigate(overviewView());
+            }}
+          >
             <span class="brand-mark flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <span class="block size-2.5 rotate-45 rounded-[2px] border-2 border-primary-foreground" aria-hidden="true"></span>
             </span>
             <span class="font-display text-sm font-semibold tracking-tight">归档台</span>
-          </div>
+          </button>
           <button
             class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             aria-label="关闭会话清单"
