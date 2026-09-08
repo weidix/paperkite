@@ -491,9 +491,15 @@ export class SqliteArchiveStore implements ArchiveStore {
     const entry = buildSearchWhere(rowWhere, rowValues, memberWhere, memberValues);
     const limit = normalizeLimit(query.limit);
     const offset = normalizeOffset(query.offset);
+    const row = rowWhere.replace(/^WHERE\s+/, "");
     const entryCount = this.database.prepare(
-      `SELECT COUNT(*) AS count FROM messages m ${entry.where}`
-    ).get(...entry.values) as { count: number };
+      `SELECT (
+         (SELECT COUNT(*) FROM messages m
+           WHERE m.grouped_id IS NULL AND ${row})
+         + (SELECT COUNT(DISTINCT m.grouped_id) FROM messages m
+           WHERE m.grouped_id IS NOT NULL AND ${row})
+       ) AS count`
+    ).get(...rowValues, ...rowValues) as { count: number };
     const messageCount = this.database.prepare(
       `SELECT COUNT(*) AS count FROM messages m ${rowWhere}`
     ).get(...rowValues) as { count: number };
