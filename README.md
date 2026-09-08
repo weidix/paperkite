@@ -17,7 +17,7 @@ pnpm start run
 
 ## 插件边界
 
-每个实际插件都是一个独立 workspace 项目，并且拥有自己的 `package.json` 与 `paperkite.plugin` manifest：
+每个实际插件都是一个独立 workspace 项目，并且拥有自己的 `package.json` 与 `paperkite.plugin` 声明：
 
 | 插件 | 能力 |
 | --- | --- |
@@ -29,7 +29,7 @@ pnpm start run
 | `@paperkite/plugin-process-run` | `process.run` |
 | `@paperkite/plugin-runtime-console` | `runtime.console` |
 
-`@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 manifest 中，安装和运行不会依赖根项目偶然提升的依赖。
+`@paperkite/sdk` 是共享库，不是插件，因此没有 `paperkite.plugin` 声明。归档存储属于消息归档插件内部实现。插件的第三方依赖写在插件自己的 package.json 中，安装和运行不会依赖根项目偶然提升的依赖。
 
 ## 插件安装
 
@@ -43,7 +43,7 @@ paperkite plugin --profile default remove <npm-package>
 paperkite plugin --profile default update <npm-package>
 ```
 
-`add`、`remove`、`update` 后面的参数由 pnpm 处理。只有带有 `paperkite.plugin` manifest 的依赖才会成为可加载插件；普通依赖仍然只是普通依赖。运行时仅加载当前 YAML 实际引用的能力，未使用的插件不会执行初始化代码。
+`add`、`remove`、`update` 后面的参数由 pnpm 处理。只有带有 `paperkite.plugin` 声明的依赖才会成为可加载插件；普通依赖仍然只是普通依赖。运行时仅加载当前 YAML 实际引用的能力，未使用的插件不会执行初始化代码。
 
 ## 配置约定
 
@@ -58,7 +58,7 @@ run:
     text: "hello"
 ```
 
-触发器的 `actions` 会接收 `emission`，消息动作支持 `{{event.text}}`、`{{event.senderId}}` 等路径模板，也兼容 `{text}`、`{chat}` 等简写。动作可声明 `hook` 指向一个导出函数的 TypeScript 模块，用于在执行前转换或跳过本次 payload。
+触发器的 `actions` 会接收 `emission`，消息动作支持 `{{event.text}}`、`{{event.senderId}}` 等路径模板，也兼容 `{text}`、`{chat}` 等简写。动作可声明 `hook` 指向一个导出函数的 TypeScript 模块，用于在执行前转换或跳过本次 config。
 
 `messages.send` 支持个人会话和 Telegram Bot API 两种模式。个人会话使用 `session` 与 `peer`，Bot 模式使用 `mode: bot`、`botToken` 与 `chatId`。`notify.bark` 只负责 Bark 请求，不持有 Telegram 会话，这两个能力始终是两个插件：
 
@@ -121,7 +121,7 @@ services:
 - **操作**：`executeAction({ capability, config?, session?, hook?, label? })` 是执行原语，可临时执行任意 action；`runFlow(id)` 按 id 引用 flows 中已配置的 command/schedule action 执行一次，session 解析与定时触发一致（action 未声明时回落到 schedule 的 session）；`updateFlow(id, patch)` 按字段白名单修改并持久化写回 flows.yml（整条复检后生效，返回是否变更）；`reloadFlow(id)` 单独重载一条 flow（command 确认定义就绪、trigger/service/schedule 停止旧实例并按最新定义重启），组合即「改配置 + 立即生效」；`startService`/`stopService`、`listPlugins()`（已安装插件的 `name`/`version`/`capabilities`/`loaded` 全量清单）不变。
 - **热重载**：`reload()` 停止现有流、重读 flows.yml 并按新配置重新启动，进程与会话池不退出；仅支持 flows 配置，settings.yml 仍需重启生效。
 - **事件流**：`subscribe(listener)` 订阅任务流事件（`action.started`/`action.finished`、`service.started`/`service.stopped`、`flow.updated`、`flow.reloaded`、`flow.finished`、`schedule.fired`、`flows.reloading`/`flows.reloaded`），全部携带 `at` 时间戳；`action` 事件带 `flow`/`hook`/`ok`/`skipped`/`durationMs`/`effectiveConfig`，`service` 事件带 `capability`/`session`/`reason`/`durationMs`，`flow.finished` 带 `kind`/`id`/`capability`/`ok`/`durationMs`；退订返回函数；事件只在进程内分发，传输层由消费方自备。日志不入事件，直接读取日志文件。
-- **插件日志隔离**：每个插件注入以插件包名命名的子日志器，写入 `data/logs/<插件名>.log`，互不混用；快照的 `logs` 是外部读取这些文件的索引。
+- **插件日志隔离**：每个插件注入以插件包短名（如 `messages-watch`）命名的子日志器，写入 `data/logs/<短名>.log`，互不混用；快照的 `logs` 是外部读取这些文件的索引。
 
 Unix 域套接字协议（`data/.paperkite/control.sock`）同步暴露上述契约：`snapshot`、`plugins`、`flow.run`、`action.run`、`flow.update`、`flow.reload`、`service.start|stop`、`runtime.reload`。
 
