@@ -13,8 +13,8 @@ export interface TelegramMessage {
   readonly media?: unknown;
   readonly sender?: unknown;
   readonly senderId?: unknown;
-  readonly replyToMsgId?: number;
-  readonly replyTo?: { readonly replyToMsgId?: number; readonly replyToTopId?: number };
+  readonly replyToMessageId?: number;
+  readonly replyTo?: { readonly replyToMessageId?: number; readonly replyToTopId?: number };
   readonly forward?: { readonly fromId?: unknown; readonly fromName?: string };
   readonly fwdFrom?: { readonly fromId?: unknown; readonly fromName?: string };
   readonly groupedId?: unknown;
@@ -62,7 +62,7 @@ export interface ArchiveResult {
 
 export interface ArchiverDependencies {
   readonly store: ArchiveStore;
-  readonly mediaPath: string;
+  readonly mediaDir: string;
   readonly downloadMedia: boolean;
   readonly batchSize: number;
   readonly shouldStop: () => boolean;
@@ -325,7 +325,7 @@ export class MessageArchiver {
       .map((row) => ({ messageId: row.messageId, mediaType: row.mediaType ?? "document" }));
     if (!targets.length) return [];
 
-    const chatDir = join(this.deps.mediaPath, `chat_${chatId}`);
+    const chatDir = join(this.deps.mediaDir, `chat_${chatId}`);
     await mkdir(chatDir, { recursive: true });
 
     const ids = targets.map((target) => target.messageId);
@@ -401,7 +401,7 @@ function extractMessageRow(message: TelegramMessage, chatInfo: ChatInfo): Messag
     text: message.rawText ?? message.message ?? "",
     entities: normalizeEntities(message.entities),
     messageType: media.messageType,
-    replyToMsgId: message.replyToMsgId ?? message.replyTo?.replyToMsgId,
+    replyToMessageId: message.replyToMessageId ?? message.replyTo?.replyToMessageId,
     hasMedia: message.media !== undefined && message.media !== null,
     mediaType: media.mediaType,
     ...(groupedId !== undefined ? { groupedId } : {}),
@@ -525,8 +525,8 @@ function budgetExhausted(budget: { remaining?: number }): boolean {
 function withMediaPaths(rows: readonly MessageRow[], mediaRows: readonly MediaRow[]): MessageRow[] {
   const paths = new Map(mediaRows.map((row) => [row.messageId, row.filePath]));
   return rows.map((row) => {
-    const mediaPath = paths.get(row.messageId);
-    return mediaPath !== undefined ? { ...row, mediaPath } : row;
+    const mediaFilePath = paths.get(row.messageId);
+    return mediaFilePath !== undefined ? { ...row, mediaFilePath } : row;
   });
 }
 

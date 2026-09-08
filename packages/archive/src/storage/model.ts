@@ -38,12 +38,12 @@ export interface MessageRow {
   readonly text: string;
   readonly entities?: readonly MessageEntity[];
   readonly messageType: string;
-  readonly replyToMsgId?: number;
+  readonly replyToMessageId?: number;
   readonly forwardFromId?: string;
   readonly forwardFromName?: string;
   readonly hasMedia: boolean;
   readonly mediaType?: string;
-  readonly mediaPath?: string;
+  readonly mediaFilePath?: string;
 }
 
 /** 写入后端的一条媒体记录行。 */
@@ -103,7 +103,7 @@ export interface MessageRecord {
   readonly mediaType?: string;
   readonly messageType?: string;
   readonly mimeType?: string;
-  readonly replyToMsgId?: number;
+  readonly replyToMessageId?: number;
   /** 被回复消息的文本摘录（同会话内按消息 ID 定位，blocked = 0）。 */
   readonly replyToText?: string;
   readonly forwardFromId?: string;
@@ -198,7 +198,7 @@ export interface SenderSummary {
 export interface ReplyChainResult {
   readonly parent?: ContextEntry;
   readonly children: readonly ContextEntry[];
-  readonly replyToMsgId?: number;
+  readonly replyToMessageId?: number;
 }
 
 /** 锚点条目及两侧上下文；beforeN/afterN 为该侧条目总数（不含锚点）。 */
@@ -266,8 +266,6 @@ export interface ChatLedgerRow {
 }
 
 export interface ArchiveStoreOptions {
-  readonly backend?: string;
-  readonly file?: string;
   readonly url?: string;
   readonly schema?: string;
 }

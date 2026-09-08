@@ -51,7 +51,7 @@ export interface MessageRecord {
   readonly mediaType?: string;
   readonly messageType?: string;
   readonly mimeType?: string;
-  readonly replyToMsgId?: number;
+  readonly replyToMessageId?: number;
   readonly replyToText?: string;
   readonly forwardFromId?: string;
   readonly forwardFromName?: string;
@@ -133,5 +133,5 @@ export interface SenderSummary {
 export interface ReplyChainResult {
   readonly parent?: ContextEntry;
   readonly children: readonly ContextEntry[];
-  readonly replyToMsgId?: number;
+  readonly replyToMessageId?: number;
 }

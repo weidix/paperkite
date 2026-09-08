@@ -283,9 +283,11 @@ test("chat ledger joins chats metadata with per-chat aggregates", async () => {
   }
 });
 
-test("unknown archive backend raises", () => {
-  assert.throws(() => createArchiveStore({ backend: "oracle" }), /unknown archive backend/);
-  assert.throws(() => createArchiveStore({ backend: "postgres" }), /needs url/);
+test("archive backend is inferred from the url scheme", () => {
+  assert.throws(() => createArchiveStore({ url: "mysql://localhost/archive" }), /unknown archive backend/);
+  const store = createArchiveStore({ url: "sqlite:data/archive.db" });
+  assert.ok(store instanceof SqliteArchiveStore);
+  void store.close();
 });
 
 test("paramPlaceholders emits positional $n bindings so batch inserts never bind literals", () => {

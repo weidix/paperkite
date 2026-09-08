@@ -7,7 +7,6 @@ interface BarkConfig {
   readonly key?: string;
   readonly title?: string;
   readonly body?: string;
-  readonly message?: string;
   readonly group?: string;
   readonly level?: string;
   readonly icon?: string;
@@ -25,9 +24,9 @@ export class BarkAction extends Action<BarkConfig> {
     const key = this.config.key?.trim();
     if (!key) throw new Error("push needs key");
     const title = render(this.config.title ?? "Paperkite", this.emission);
-    const body = render(this.config.body ?? this.config.message ?? "", this.emission);
+    const body = render(this.config.body ?? "", this.emission);
     const method = (this.config.method ?? "post").toUpperCase() as "GET" | "POST";
-    if (method === "POST" && !body) throw new Error("push needs body or message");
+    if (method === "POST" && !body) throw new Error("push needs body");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), normalizeTimeout(this.config.timeoutMs));
     const onAbort = (): void => controller.abort();

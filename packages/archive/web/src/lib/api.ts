@@ -16,7 +16,7 @@ export type { TimeMode };
 export interface ArchiveState {
   readonly backend: string;
   readonly session: string | null;
-  readonly mediaRoot: string | null;
+  readonly mediaDir: string | null;
   readonly blockwords: {
     readonly version: number;
     readonly count: number;

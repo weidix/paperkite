@@ -119,16 +119,16 @@
             {entry.rows.length}
           </span>
         </div>
-        {#if first && first.replyToMsgId !== undefined}
+        {#if first && first.replyToMessageId !== undefined}
           <button
             type="button"
             class="mt-0.5 inline-flex min-w-0 max-w-full items-center gap-1 rounded px-0.5 font-mono text-[10px] text-muted-foreground/80 transition-colors hover:bg-accent hover:text-accent-foreground"
             title="查看被回复的消息"
-            aria-label="查看被回复的消息 #{first.replyToMsgId}"
+            aria-label="查看被回复的消息 #{first.replyToMessageId}"
             onclick={openReplied}
           >
             <Reply class="size-3 shrink-0" aria-hidden="true" />
-            <span class="truncate">回复 #{first.replyToMsgId}{first.replyToText ? ` · ${first.replyToText}` : ""}</span>
+            <span class="truncate">回复 #{first.replyToMessageId}{first.replyToText ? ` · ${first.replyToText}` : ""}</span>
           </button>
         {/if}
         <p

@@ -5,16 +5,13 @@ import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
 import { Service, type RuntimeLogger } from "@paperkite/sdk";
 import { createArchiveConsoleServer } from "./server.js";
-import { createArchiveStore } from "../storage/index.js";
+import { createArchiveStore, resolveBackend } from "../storage/index.js";
 
 export interface ArchiveConsoleWebConfig {
-  readonly backend?: string;
-  readonly file?: string;
-  readonly dbPath?: string;
   readonly url?: string;
   readonly schema?: string;
   /** 落盘媒体的解析根目录；相对路径的 file_path 以此为基准。 */
-  readonly mediaRoot?: string;
+  readonly mediaDir?: string;
   readonly host?: string;
   readonly port?: number;
   readonly publicDir?: string;
@@ -24,15 +21,13 @@ export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
   async run(): Promise<void> {
     const config = this.config ?? {};
     const store = createArchiveStore({
-      backend: config.backend,
-      file: config.file ?? config.dbPath,
       url: config.url,
       schema: config.schema
     });
     const server = createArchiveConsoleServer({
       store,
-      backend: String(config.backend ?? "sqlite").toLowerCase(),
-      mediaRoot: config.mediaRoot,
+      backend: resolveBackend(config.url),
+      mediaDir: config.mediaDir,
       session: this.session,
       sessions: this.sessions,
       logger: this.context.logger

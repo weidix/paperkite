@@ -8,20 +8,17 @@ export { PostgresArchiveStore } from "./postgres.js";
 export { SqliteArchiveStore } from "./sqlite.js";
 
 export function createArchiveStore(options: ArchiveStoreOptions = {}): ArchiveStore {
-  const backend = (options.backend ?? inferBackend(options)).toLowerCase();
-  if (backend === "sqlite") {
-    const file = options.file ?? "data/archive.db";
+  const url = options.url ?? "sqlite:data/archive.db";
+  if (resolveBackend(url) === "sqlite") {
+    const file = url.slice("sqlite:".length) || "data/archive.db";
     return new SqliteArchiveStore(resolve(file));
   }
-  if (backend === "postgres" || backend.startsWith("pg")) {
-    if (!options.url) throw new Error("postgres archive backend needs url");
-    return new PostgresArchiveStore(options.url, options.schema ?? "public");
-  }
-  throw new Error(`unknown archive backend: ${backend} (choose sqlite or postgres)`);
+  return new PostgresArchiveStore(url, options.schema ?? "public");
 }
 
-function inferBackend(options: ArchiveStoreOptions): string {
-  if (options.url) return "postgres";
-  if (options.backend) return options.backend;
-  return "sqlite";
+export function resolveBackend(url: string | undefined): "sqlite" | "postgres" {
+  const value = (url ?? "sqlite:data/archive.db").trim().toLowerCase();
+  if (value.startsWith("postgres:") || value.startsWith("postgresql:")) return "postgres";
+  if (value.startsWith("sqlite:")) return "sqlite";
+  throw new Error(`unknown archive backend scheme in url: ${String(url)} (use sqlite: or postgresql:)`);
 }

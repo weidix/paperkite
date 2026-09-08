@@ -459,9 +459,9 @@
         <div class="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
           <Reply class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span class="font-display text-sm font-semibold tracking-tight">回复链</span>
-          {#if chain?.replyToMsgId !== undefined}
+          {#if chain?.replyToMessageId !== undefined}
             <span class="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              回复 #{chain.replyToMsgId}
+              回复 #{chain.replyToMessageId}
             </span>
           {/if}
           <span class="font-mono text-[10px] text-muted-foreground">
