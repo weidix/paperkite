@@ -3,7 +3,7 @@ import fastify from "fastify";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
 import type { ArchiveStore, MessageEntity, MessageRecord, StoredMediaFile, TimeMode } from "../storage/index.js";
-import { normalizeContextLimit, normalizeDate, normalizeLimit, normalizeOffset, normalizeRowId, normalizeTimeMode } from "../storage/index.js";
+import { normalizeContextLimit, normalizeDate, normalizeLimit, normalizeOffset, normalizeRecordId, normalizeTimeMode } from "../storage/index.js";
 import { normalizeEntities, type TelegramMessage } from "../archiver.js";
 import { LiveMediaError, LiveMediaStreamer } from "./live.js";
 import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf, isMissingPeer, isPhotoLike, mimeFromName, parseRange, resolveChatEntity } from "./media.js";
@@ -19,12 +19,12 @@ export interface ArchiveConsoleServerOptions {
 
 const CHAT_MAX = 300;
 
-/** 缩略图成功缓存：同一 rowId 不再反复打 Telegram。 */
+/** 缩略图成功缓存：同一 recordId 不再反复打 Telegram。 */
 const THUMB_TTL_MS = 60 * 60 * 1_000;
 const THUMB_CACHE_MAX = 512;
 /** 不可达（删除/不可访问）的阴性缓存，避免缩略图反复触发 Telegram 查询。 */
 const THUMB_NEGATIVE_TTL_MS = 30 * 1_000;
-/** 在线说明缓存：同一 rowId 5 分钟内不再重复取回。 */
+/** 在线说明缓存：同一 recordId 5 分钟内不再重复取回。 */
 const LIVE_TEXT_TTL_MS = 5 * 60 * 1_000;
 
 export function createArchiveConsoleServer(options: ArchiveConsoleServerOptions): FastifyInstance {
@@ -152,7 +152,7 @@ function registerRoutes(
     "/api/messages/:id",
     async (request, reply) => {
       try {
-        const record = await store.getMessageByRowId(rowIdOr(request.params.id));
+        const record = await store.getMessageByRecordId(recordIdOr(request.params.id));
         if (!record) throw new HttpError(404, "消息不存在");
         return record;
       } catch (error) {
@@ -165,12 +165,12 @@ function registerRoutes(
     "/api/messages/:id/context",
     async (request, reply) => {
       try {
-        const rowId = rowIdOr(request.params.id);
+        const recordId = recordIdOr(request.params.id);
         const before = normalizeContextLimit(intOr(request.query.before));
         const after = normalizeContextLimit(intOr(request.query.after));
         const beforeOffset = normalizeOffset(intOr(request.query.beforeOffset));
         const afterOffset = normalizeOffset(intOr(request.query.afterOffset));
-        const context = await store.getMessageContext(rowId, before, after, beforeOffset, afterOffset);
+        const context = await store.getMessageContext(recordId, before, after, beforeOffset, afterOffset);
         if (!context.anchor) throw new HttpError(404, "消息不存在");
         return context;
       } catch (error) {
@@ -220,7 +220,7 @@ function registerRoutes(
     "/api/messages/:id/replies",
     async (request, reply) => {
       try {
-        const chain = await store.getReplyChain(rowIdOr(request.params.id));
+        const chain = await store.getReplyChain(recordIdOr(request.params.id));
         if (!chain) throw new HttpError(404, "消息不存在");
         return chain;
       } catch (error) {
@@ -234,17 +234,17 @@ function registerRoutes(
     async (request, reply) => {
       try {
         if (!session || !sessions) throw new HttpError(503, "archive console needs a Telegram session");
-        const rowId = rowIdOr(request.params.id);
-        const cached = liveTextCacheGet(rowId, liveTextCache);
+        const recordId = recordIdOr(request.params.id);
+        const cached = liveTextCacheGet(recordId, liveTextCache);
         if (cached !== undefined) return { text: cached.text, entities: cached.entities };
-        const record = await store.getMessageByRowId(rowId);
+        const record = await store.getMessageByRecordId(recordId);
         if (!record) throw new HttpError(404, "消息不存在");
         const caption = await fetchLiveCaptionText(sessions, store, logger, record);
         if (caption === undefined) {
-          liveTextCacheNeg(rowId, liveTextCache);
+          liveTextCacheNeg(recordId, liveTextCache);
           throw new HttpError(410, "消息已从 Telegram 删除或会话无法访问");
         }
-        liveTextCachePut(rowId, caption, liveTextCache);
+        liveTextCachePut(recordId, caption, liveTextCache);
         return { text: caption.text, entities: caption.entities };
       } catch (error) {
         return sendError(reply, error, logger);
@@ -254,7 +254,7 @@ function registerRoutes(
 
   server.get<{ Params: { id: string } }>("/api/mediafiles/:id", async (request, reply) => {
     try {
-      const file = await store.getMediaFileById(rowIdOr(request.params.id));
+      const file = await store.getMediaFileById(recordIdOr(request.params.id));
       if (!file) throw new HttpError(404, "媒体记录不存在");
       return { file, onDisk: (await diskMediaInfo(file, mediaDir)) !== undefined };
     } catch (error) {
@@ -267,12 +267,12 @@ function registerRoutes(
     async (request, reply) => {
       try {
         if (!session || !sessions) throw new HttpError(503, "archive console needs a Telegram session");
-        const rowId = rowIdOr(request.params.id);
-        const record = await store.getMessageByRowId(rowId);
+        const recordId = recordIdOr(request.params.id);
+        const record = await store.getMessageByRecordId(recordId);
         if (!record) throw new HttpError(404, "消息不存在");
         if (!record.hasMedia) throw new HttpError(400, "该消息没有媒体");
         const file: StoredMediaFile = {
-          id: record.rowId,
+          id: record.recordId,
           messageId: record.messageId,
           chatId: record.chatId,
           mediaType: record.mediaType ?? "",
@@ -286,12 +286,12 @@ function registerRoutes(
           }
           return serveLiveStream(request, reply, live, file, await store.getChatUsername(file.chatId), request.query.download === "1");
         }
-        const cached = thumbCacheGet(rowId, thumbCache);
+        const cached = thumbCacheGet(recordId, thumbCache);
         if (cached) {
           thumbHeaders(reply, cached.mime, cached.bytes.length, record.messageId, request.query.download === "1");
           return reply.send(cached.bytes);
         }
-        const negative = negativeCacheGet(rowId, negativeCache);
+        const negative = negativeCacheGet(recordId, negativeCache);
         if (negative) throw new HttpError(negative.status, negative.message);
         const result = await fetchLiveThumb(file, sessions, {
           chatUsername: await store.getChatUsername(file.chatId),
@@ -299,16 +299,16 @@ function registerRoutes(
         });
         if (!result.ok) {
           if (result.missing) {
-            negativeCachePut(rowId, 410, "消息已从 Telegram 删除或会话无法访问", negativeCache);
+            negativeCachePut(recordId, 410, "消息已从 Telegram 删除或会话无法访问", negativeCache);
             throw new HttpError(410, "消息已从 Telegram 删除或会话无法访问");
           }
           if (result.noThumb) {
-            negativeCachePut(rowId, 404, "该媒体没有可用的缩略图", negativeCache);
+            negativeCachePut(recordId, 404, "该媒体没有可用的缩略图", negativeCache);
             throw new HttpError(404, "该媒体没有可用的缩略图");
           }
           throw new HttpError(404, "无法从 Telegram 取回该媒体");
         }
-        thumbCachePut(rowId, result.bytes, result.mime, thumbCache);
+        thumbCachePut(recordId, result.bytes, result.mime, thumbCache);
         thumbHeaders(reply, result.mime, result.bytes.length, record.messageId, request.query.download === "1");
         return reply.send(result.bytes);
       } catch (error) {
@@ -321,7 +321,7 @@ function registerRoutes(
     "/api/mediafiles/:id/file",
     async (request, reply) => {
       try {
-        const file = await store.getMediaFileById(rowIdOr(request.params.id));
+        const file = await store.getMediaFileById(recordIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
         const info = await diskMediaInfo(file, mediaDir);
         if (!info) throw new HttpError(404, "媒体文件未落盘");
@@ -337,7 +337,7 @@ function registerRoutes(
     async (request, reply) => {
       try {
         if (live === undefined || !session || !sessions) throw new HttpError(503, "archive console needs a Telegram session");
-        const file = await store.getMediaFileById(rowIdOr(request.params.id));
+        const file = await store.getMediaFileById(recordIdOr(request.params.id));
         if (!file) throw new HttpError(404, "媒体记录不存在");
         if (isPhotoLike(file)) {
           return sendLiveFull(reply, file, sessions, store, logger, request.query.download === "1");
@@ -462,24 +462,24 @@ interface CachedThumb {
   readonly expires: number;
 }
 
-function thumbCacheGet(rowId: string, cache: Map<string, CachedThumb>): CachedThumb | undefined {
-  const hit = cache.get(rowId);
+function thumbCacheGet(recordId: string, cache: Map<string, CachedThumb>): CachedThumb | undefined {
+  const hit = cache.get(recordId);
   if (hit === undefined) return undefined;
   if (Date.now() >= hit.expires) {
-    cache.delete(rowId);
+    cache.delete(recordId);
     return undefined;
   }
-  cache.delete(rowId);
-  cache.set(rowId, hit);
+  cache.delete(recordId);
+  cache.set(recordId, hit);
   return hit;
 }
 
-function thumbCachePut(rowId: string, bytes: Buffer, mime: string, cache: Map<string, CachedThumb>): void {
+function thumbCachePut(recordId: string, bytes: Buffer, mime: string, cache: Map<string, CachedThumb>): void {
   if (cache.size >= THUMB_CACHE_MAX) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(rowId, { bytes, mime, expires: Date.now() + THUMB_TTL_MS });
+  cache.set(recordId, { bytes, mime, expires: Date.now() + THUMB_TTL_MS });
 }
 
 interface NegativeThumb {
@@ -488,18 +488,18 @@ interface NegativeThumb {
   readonly expires: number;
 }
 
-function negativeCacheGet(rowId: string, cache: Map<string, NegativeThumb>): NegativeThumb | undefined {
-  const hit = cache.get(rowId);
+function negativeCacheGet(recordId: string, cache: Map<string, NegativeThumb>): NegativeThumb | undefined {
+  const hit = cache.get(recordId);
   if (hit === undefined) return undefined;
   if (Date.now() >= hit.expires) {
-    cache.delete(rowId);
+    cache.delete(recordId);
     return undefined;
   }
   return hit;
 }
 
-function negativeCachePut(rowId: string, status: number, message: string, cache: Map<string, NegativeThumb>): void {
-  cache.set(rowId, { status, message, expires: Date.now() + THUMB_NEGATIVE_TTL_MS });
+function negativeCachePut(recordId: string, status: number, message: string, cache: Map<string, NegativeThumb>): void {
+  cache.set(recordId, { status, message, expires: Date.now() + THUMB_NEGATIVE_TTL_MS });
 }
 
 interface LiveTextCacheEntry {
@@ -508,21 +508,21 @@ interface LiveTextCacheEntry {
   readonly expires: number;
 }
 
-function liveTextCacheGet(rowId: string, cache: Map<string, LiveTextCacheEntry>): LiveTextCacheEntry | undefined {
-  const hit = cache.get(rowId);
+function liveTextCacheGet(recordId: string, cache: Map<string, LiveTextCacheEntry>): LiveTextCacheEntry | undefined {
+  const hit = cache.get(recordId);
   if (hit === undefined || Date.now() >= hit.expires) {
-    cache.delete(rowId);
+    cache.delete(recordId);
     return undefined;
   }
   return hit.text === "" ? undefined : hit;
 }
 
-function liveTextCachePut(rowId: string, entry: { text: string; entities: readonly MessageEntity[] }, cache: Map<string, LiveTextCacheEntry>): void {
-  cache.set(rowId, { ...entry, expires: Date.now() + LIVE_TEXT_TTL_MS });
+function liveTextCachePut(recordId: string, entry: { text: string; entities: readonly MessageEntity[] }, cache: Map<string, LiveTextCacheEntry>): void {
+  cache.set(recordId, { ...entry, expires: Date.now() + LIVE_TEXT_TTL_MS });
 }
 
-function liveTextCacheNeg(rowId: string, cache: Map<string, LiveTextCacheEntry>): void {
-  cache.set(rowId, { text: "", entities: [], expires: Date.now() + THUMB_NEGATIVE_TTL_MS });
+function liveTextCacheNeg(recordId: string, cache: Map<string, LiveTextCacheEntry>): void {
+  cache.set(recordId, { text: "", entities: [], expires: Date.now() + THUMB_NEGATIVE_TTL_MS });
 }
 
 /** 在线说明：从 Telegram 实时取回消息原始文本与实体（相册取全部成员的最长文本），原样返回。 */
@@ -553,7 +553,7 @@ async function fetchLiveCaptionText(
     });
   } catch (error) {
     if (isMissingPeer(error)) {
-      logger.debug("live caption peer missing for message " + record.rowId);
+      logger.debug("live caption peer missing for message " + record.recordId);
       return undefined;
     }
     throw error;
@@ -584,9 +584,9 @@ class HttpError extends Error {
   }
 }
 
-function rowIdOr(value: string): string {
+function recordIdOr(value: string): string {
   try {
-    return normalizeRowId(value);
+    return normalizeRecordId(value);
   } catch (error) {
     throw new HttpError(400, errorMessage(error));
   }

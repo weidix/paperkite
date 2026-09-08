@@ -927,11 +927,11 @@ test("archive console album with blocked first member lists the earliest visible
     res = await h.server.inject({ method: "GET", url: "/api/search" });
     const album = res.json().items.find((item: { kind: string }) => item.kind === "album");
     assert.ok(album !== undefined);
-    const memberIds = (album.rows as { rowId: string }[]).map((row) => row.rowId);
+    const memberIds = (album.rows as { recordId: string }[]).map((row) => row.recordId);
     assert.ok(!memberIds.includes("6"), "blocked first member must not be listed");
     assert.ok(memberIds.includes("7") && memberIds.includes("8"), "visible members still listed");
 
-    const listed = await h.server.inject({ method: "GET", url: `/api/messages/${album.rowId}/context?before=2&after=2` });
+    const listed = await h.server.inject({ method: "GET", url: `/api/messages/${album.recordId}/context?before=2&after=2` });
     assert.equal(listed.statusCode, 200);
     assert.equal(listed.json().anchor.kind, "album");
     assert.equal(listed.json().anchor.rows.length, 2);

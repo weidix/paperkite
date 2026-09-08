@@ -96,8 +96,8 @@ export function mediaLiveUrl(id: string): string {
 }
 
 /** 未落盘媒体按消息行取回：size=thumb 为 Telegram 原生缩略图，size=full 为整图在线取回。 */
-export function mediaRowUrl(rowId: string, size: "thumb" | "full" = "thumb"): string {
-  return `/api/messages/${rowId}/thumb?size=${size}`;
+export function mediaRowUrl(recordId: string, size: "thumb" | "full" = "thumb"): string {
+  return `/api/messages/${recordId}/thumb?size=${size}`;
 }
 
 export function mediaDownloadUrl(id: string, source: "file" | "live"): string {
@@ -123,18 +123,18 @@ export async function searchMessages(query: SearchQuery): Promise<ArchiveSearchR
   return request(`/api/search?${params}`);
 }
 
-export async function fetchMessage(rowId: string): Promise<MessageRecord> {
-  return request(`/api/messages/${rowId}`);
+export async function fetchMessage(recordId: string): Promise<MessageRecord> {
+  return request(`/api/messages/${recordId}`);
 }
 
 export async function fetchContext(
-  rowId: string,
+  recordId: string,
   before: number,
   after: number,
   beforeOffset = 0,
   afterOffset = 0
 ): Promise<ArchiveContextResult> {
-  return request(`/api/messages/${rowId}/context?before=${before}&after=${after}&beforeOffset=${beforeOffset}&afterOffset=${afterOffset}`);
+  return request(`/api/messages/${recordId}/context?before=${before}&after=${after}&beforeOffset=${beforeOffset}&afterOffset=${afterOffset}`);
 }
 
 export async function fetchChats(): Promise<ChatsResult> {
@@ -156,13 +156,13 @@ export async function fetchSenderSummary(senderId: string, chatId?: string): Pro
   return request(`/api/senders/${encodeURIComponent(senderId)}/summary${suffix}`);
 }
 
-export async function fetchReplyChain(rowId: string): Promise<ReplyChainResult> {
-  return request(`/api/messages/${rowId}/replies`);
+export async function fetchReplyChain(recordId: string): Promise<ReplyChainResult> {
+  return request(`/api/messages/${recordId}/replies`);
 }
 
 /** 在线说明：从 Telegram 实时取回原始文本与实体（归档缺实体时用于补显）。 */
-export async function fetchLiveText(rowId: string): Promise<{ text: string; entities?: readonly MessageEntity[] }> {
-  return request(`/api/messages/${rowId}/live-text`);
+export async function fetchLiveText(recordId: string): Promise<{ text: string; entities?: readonly MessageEntity[] }> {
+  return request(`/api/messages/${recordId}/live-text`);
 }
 
 export async function fetchMediaMeta(id: string): Promise<MediaMeta> {

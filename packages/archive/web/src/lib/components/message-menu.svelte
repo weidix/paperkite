@@ -13,11 +13,11 @@
     /** 相册场景：关键词来源用说明文字而非某一行文本。 */
     keywordSource = null,
     /** 相册锚点场景：以聚焦行判定「当前正查看的这条消息」。 */
-    navRowId = null
+    navRecordId = null
   } = $props<{
     record: MessageRecord;
     keywordSource?: string | null;
-    navRowId?: string | null;
+    navRecordId?: string | null;
   }>();
 
   const keywordText = $derived(keywordSource ?? record.text);
@@ -151,8 +151,8 @@
   function afterBlocked(): void {
     close();
     bumpBlocks();
-    const target = navRowId ?? record.rowId;
-    if (viewStore.current.kind === "message" && viewStore.current.rowId === target) {
+    const target = navRecordId ?? record.recordId;
+    if (viewStore.current.kind === "message" && viewStore.current.recordId === target) {
       navigate(backToSearch());
     }
   }

@@ -76,7 +76,7 @@ export interface StoredMediaFile {
 
 /** 同相册内的一条可预览消息（来自 messages 表）。 */
 export interface AlbumRow {
-  readonly rowId: string;
+  readonly recordId: string;
   readonly messageId: number;
   readonly chatId: string;
   readonly groupedId: string;
@@ -89,7 +89,7 @@ export interface AlbumRow {
 
 /** 检索返回的完整消息行（附媒体文件与相册行）。 */
 export interface MessageRecord {
-  readonly rowId: string;
+  readonly recordId: string;
   readonly messageId: number;
   readonly chatId: string;
   readonly groupedId?: string;
@@ -151,8 +151,8 @@ export interface AlbumContextEntry {
   readonly kind: "album";
   readonly rows: readonly MessageRecord[];
   readonly captionText: string;
-  readonly rowId: string;
-  readonly focusRowId?: string;
+  readonly recordId: string;
+  readonly focusRecordId?: string;
 }
 
 export type ContextEntry = MessageContextEntry | AlbumContextEntry;
@@ -229,14 +229,14 @@ export function uniqueGroupKeys(rows: readonly Record<string, unknown>[]): (read
   return keys;
 }
 
-export function albumEntryOf(rows: readonly MessageRecord[], focusRowId?: string): ContextEntry {
+export function albumEntryOf(rows: readonly MessageRecord[], focusRecordId?: string): ContextEntry {
   if (rows.length < 2) return { kind: "message", record: rows[0]! };
   return {
     kind: "album",
     rows,
     captionText: captionOf(rows),
-    rowId: rows[0]!.rowId,
-    ...(focusRowId !== undefined ? { focusRowId } : {})
+    recordId: rows[0]!.recordId,
+    ...(focusRecordId !== undefined ? { focusRecordId } : {})
   };
 }
 
@@ -248,7 +248,7 @@ export function buildContextEntries(
     if (row.groupedId === undefined) return { kind: "message", record: row };
     const rows = groupRows.get(groupKey(row.chatId, row.groupedId));
     if (rows === undefined || rows.length < 2) return { kind: "message", record: row };
-    return { kind: "album", rows, captionText: captionOf(rows), rowId: row.rowId };
+    return { kind: "album", rows, captionText: captionOf(rows), recordId: row.recordId };
   });
 }
 
@@ -312,19 +312,19 @@ export interface ArchiveStore {
   searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult>;
   listChatLedger(limit: number): Promise<ChatLedgerRow[]>;
   getMessageContext(
-    rowId: string,
+    recordId: string,
     beforeN: number,
     afterN: number,
     beforeOffset?: number,
     afterOffset?: number
   ): Promise<ArchiveContextResult>;
-  getMessageByRowId(rowId: string): Promise<MessageRecord | undefined>;
+  getMessageByRecordId(recordId: string): Promise<MessageRecord | undefined>;
   /** 用户维度检索：按发送者聚合（blocked = 0），支持名字/用户名/ID 匹配。 */
   searchSenders(query: SenderQuery): Promise<SenderSearchResult>;
   /** 用户聚合概要：不存在该用户（不看屏蔽）返回 undefined，路由映射 404。 */
   getSenderSummary(senderId: string, chatId?: string): Promise<SenderSummary | undefined>;
   /** 回复链：锚点不存在（含被屏蔽）返回 undefined，路由映射 404。 */
-  getReplyChain(rowId: string): Promise<ReplyChainResult | undefined>;
+  getReplyChain(recordId: string): Promise<ReplyChainResult | undefined>;
   getMediaFileById(id: string): Promise<StoredMediaFile | undefined>;
   /** 屏蔽词内存缓存快照，读路径不触表。 */
   listBlockwords(): Promise<BlockwordState>;
@@ -397,9 +397,9 @@ export function normalizeUserId(value: string): string | undefined {
   return text;
 }
 
-export function normalizeRowId(value: string): string {
+export function normalizeRecordId(value: string): string {
   const result = value.trim();
-  if (!/^\d+$/.test(result)) throw new Error(`invalid message row id: ${value}`);
+  if (!/^\d+$/.test(result)) throw new Error(`invalid message record id: ${value}`);
   return result;
 }
 

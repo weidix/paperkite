@@ -9,7 +9,7 @@
   import type { AlbumContextEntry, MessageRecord } from "$lib/model";
 
   let {
-    entry = { kind: "album", rows: [], captionText: "", rowId: "" },
+    entry = { kind: "album", rows: [], captionText: "", recordId: "" },
     anchor = false,
     inlineThumb = false,
     showChat = false,
@@ -62,7 +62,7 @@
   });
 
   function openRow(): void {
-    navigate({ kind: "message", rowId: entry.rowId });
+    navigate({ kind: "message", recordId: entry.recordId });
   }
 
   function onRowKeydown(event: KeyboardEvent): void {
@@ -78,13 +78,13 @@
     if (anchor === undefined) return;
     event.stopPropagation();
     try {
-      const chain = await fetchReplyChain(anchor.rowId);
+      const chain = await fetchReplyChain(anchor.recordId);
       if (chain.parent === undefined) {
         showToast("被回复的消息不存在或不可见");
         return;
       }
-      const rowId = chain.parent.kind === "album" ? chain.parent.rowId : chain.parent.record.rowId;
-      navigate({ kind: "message", rowId });
+      const recordId = chain.parent.kind === "album" ? chain.parent.recordId : chain.parent.record.recordId;
+      navigate({ kind: "message", recordId });
     } catch {
       showToast("无法取回被回复的消息");
     }
@@ -93,7 +93,7 @@
 
 <div
   class="group transition-colors {anchor ? 'bg-accent/70' : 'hover:bg-accent/50'}"
-  id="msg-{entry.rowId}"
+  id="msg-{entry.recordId}"
 >
   <div class="flex items-stretch">
     <div
@@ -160,7 +160,7 @@
     </div>
     {#if inlineThumb && thumbs.length > 0}
       <div class="flex shrink-0 items-center gap-1 pl-1">
-        {#each thumbs as item, i (item.row.rowId)}
+        {#each thumbs as item, i (item.row.recordId)}
           {@const spec = fileThumbOf(item.row)}
           <button
             type="button"
@@ -168,13 +168,13 @@
             aria-label="预览相册第 {i + 1} 行媒体"
             onclick={() => openAlbumLightbox(entry, item.index)}
           >
-            {#if spec.url && !failedKeys[item.row.rowId]}
+            {#if spec.url && !failedKeys[item.row.recordId]}
               <img
                 src={spec.url}
                 alt=""
                 loading="lazy"
                 class="h-full w-full object-cover"
-                onerror={() => (failedKeys[item.row.rowId] = true)}
+                onerror={() => (failedKeys[item.row.recordId] = true)}
               />
               {#if spec.kind === "video"}
                 <span class="absolute inset-0 flex items-center justify-center" aria-hidden="true">
@@ -201,7 +201,7 @@
         <MessageMenu
           record={first}
           keywordSource={entry.captionText}
-          navRowId={anchor ? (entry.focusRowId ?? entry.rowId) : null}
+          navRecordId={anchor ? (entry.focusRecordId ?? entry.recordId) : null}
         />
       {/if}
     </div>
