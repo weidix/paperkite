@@ -32,11 +32,11 @@ export function buildTargets(config: ArchiveConfig): ArchiveTarget[] {
     if (typeof source === "string" || typeof source === "number") {
       identifier = source;
     } else if (overrides) {
-      const raw = overrides.chat ?? overrides.identifier;
+      const raw = overrides.chat;
       if (typeof raw === "string" || typeof raw === "number") identifier = raw;
     }
     if (identifier === undefined || identifier === "") {
-      throw new Error("chats entry needs chat or identifier");
+      throw new Error("chats entry needs chat");
     }
     targets.push({
       chat: identifier,

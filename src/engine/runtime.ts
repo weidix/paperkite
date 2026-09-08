@@ -35,7 +35,7 @@ import { AppLogger } from "./logger.js";
 import { loadHook } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
 import { CapabilityRegistry } from "../extensions/registry.js";
-import type { SessionPool, SessionStateChange, SessionStateInfo } from "../telegram/pool.js";
+import type { SessionPool, SessionStateChange } from "../telegram/pool.js";
 
 export interface RuntimeOptions {
   readonly catalog: FlowCatalog;
@@ -66,10 +66,7 @@ export class Runtime {
 
   constructor(private readonly options: RuntimeOptions) {
     this.catalog = options.catalog;
-    const pool = options.sessions as unknown as { subscribe?: (listener: (change: SessionStateChange) => void) => Unsubscribe };
-    if (typeof pool.subscribe === "function") {
-      this.sessionUnsub = pool.subscribe((change) => this.handleSessionChange(change));
-    }
+    this.sessionUnsub = options.sessions.subscribe((change) => this.handleSessionChange(change));
   }
 
   private sessionUnsub: Unsubscribe | undefined;
@@ -229,21 +226,15 @@ export class Runtime {
   }
 
   async reconnectSession(name: string): Promise<void> {
-    const pool = this.options.sessions as unknown as { reconnectSession?: (value: string) => Promise<void> };
-    if (typeof pool.reconnectSession !== "function") throw new Error("session control is not available");
-    await pool.reconnectSession(name);
+    await this.options.sessions.reconnectSession(name);
   }
 
   async beginSessionLogin(name: string): Promise<SessionLoginReply> {
-    const pool = this.options.sessions as unknown as { beginSessionLogin?: (value: string) => Promise<SessionLoginReply> };
-    if (typeof pool.beginSessionLogin !== "function") throw new Error("session control is not available");
-    return pool.beginSessionLogin(name);
+    return this.options.sessions.beginSessionLogin(name);
   }
 
   async submitSessionLogin(name: string, value: string): Promise<SessionLoginReply> {
-    const pool = this.options.sessions as unknown as { submitSessionLogin?: (value: string, input: string) => Promise<SessionLoginReply> };
-    if (typeof pool.submitSessionLogin !== "function") throw new Error("session control is not available");
-    return pool.submitSessionLogin(name, value);
+    return this.options.sessions.submitSessionLogin(name, value);
   }
 
   async stopService(identifier: string): Promise<void> {
@@ -722,8 +713,7 @@ export class Runtime {
   }
 
   private sessionSnapshots(): SessionSnapshot[] {
-    const pool = this.options.sessions as unknown as { states?: () => SessionStateInfo[] };
-    const states = typeof pool.states === "function" ? pool.states() : [];
+    const states = this.options.sessions.states();
     return states.map((info) => ({
       name: info.name,
       state: info.state,
@@ -738,15 +728,11 @@ export class Runtime {
 
   private sessionState(name: string | undefined): SessionState | undefined {
     if (!name) return undefined;
-    const pool = this.options.sessions as unknown as { state?: (value: string) => SessionState | undefined };
-    if (typeof pool.state !== "function") return undefined;
-    return pool.state(name);
+    return this.options.sessions.state(name);
   }
 
   private sessionReason(name: string): string | undefined {
-    const pool = this.options.sessions as unknown as { states?: () => SessionStateInfo[] };
-    if (typeof pool.states !== "function") return undefined;
-    return pool.states().find((info) => info.name === name)?.reason;
+    return this.options.sessions.states().find((info) => info.name === name)?.reason;
   }
 
   private boundSession(definition: FlowDefinition): string | undefined {
@@ -877,11 +863,5 @@ function exportable(value: unknown): unknown {
 }
 
 function copyOf<T>(value: T): T {
-  try {
-    return structuredClone(value);
-  } catch {
-    return value;
-  }
+  return structuredClone(value);
 }
-
-export type { RuntimeSnapshot };

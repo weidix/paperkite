@@ -29,7 +29,7 @@ export interface SessionClient {
   disconnect(): Promise<unknown>;
   getMe(): Promise<unknown>;
   session: { save(): string };
-  [key: string]: unknown;
+  invoke(request: unknown): Promise<unknown>;
 }
 
 export interface SessionStateInfo {
@@ -312,7 +312,7 @@ export class SessionPool {
     if (this.closed || entry.health.state !== "isolated") return;
     const delay = Math.min(this.guard.backoffMaxMs, this.guard.backoffMinMs * 2 ** Math.max(0, entry.health.attempts - 1));
     const timer = setTimeout(() => void this.attempt(entry, "auto"), delay);
-    timer.unref?.();
+    timer.unref();
     entry.timer = timer;
   }
 
@@ -392,10 +392,7 @@ export class SessionPool {
   }
 
   private async checkAuthorized(client: SessionClient): Promise<void> {
-    const invoker = client as unknown as { invoke?: (request: unknown) => Promise<unknown> };
-    if (typeof invoker.invoke === "function") {
-      await invoker.invoke(new Api.updates.GetState());
-    }
+    await client.invoke(new Api.updates.GetState());
   }
 
   private async runLogin(entry: Entry, ask: (kind: LoginPromptKind) => Promise<string>): Promise<void> {
@@ -425,7 +422,7 @@ export class SessionPool {
           if (entry.login?.ask?.timer === timer) entry.login.ask = undefined;
           reject(new Error("login input timed out after " + LOGIN_INPUT_TIMEOUT_MS / 1_000 + "s"));
         }, LOGIN_INPUT_TIMEOUT_MS);
-        timer.unref?.();
+        timer.unref();
         const flow = entry.login;
         if (!flow) {
           clearTimeout(timer);
