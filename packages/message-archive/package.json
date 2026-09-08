@@ -43,11 +43,13 @@
       "capabilities": [
         {
           "kind": "action",
-          "name": "archive.sync"
+          "name": "archive.sync",
+          "handler": "ArchiveSyncAction"
         },
         {
           "kind": "service",
-          "name": "archive.console_web"
+          "name": "archive.console_web",
+          "handler": "ArchiveConsoleWebService"
         }
       ]
     }

@@ -38,9 +38,6 @@ export class CapabilityRegistry {
     return this.controlGrants.get(`${kind}:${name}`) === true;
   }
 
-  register(kind: "action", name: string, constructor: ActionConstructor, scope?: string, options?: CapabilityOptions): void;
-  register(kind: "trigger", name: string, constructor: TriggerConstructor, scope?: string, options?: CapabilityOptions): void;
-  register(kind: "service", name: string, constructor: ServiceConstructor, scope?: string, options?: CapabilityOptions): void;
   register(
     kind: CapabilityKind,
     name: string,

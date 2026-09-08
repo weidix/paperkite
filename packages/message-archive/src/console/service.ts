@@ -58,7 +58,7 @@ export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
 function normalizeConsolePort(value: number | undefined): number {
   const port = Number(value ?? 3379);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("archive.console_web port must be an integer between 1 and 65535");
+    throw new Error("archive console port must be an integer between 1 and 65535");
   }
   return port;
 }

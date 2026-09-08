@@ -514,25 +514,20 @@ export type ServiceConstructor = new (context: ServiceContext<any>) => Service<a
 export interface PluginCapability {
   readonly kind: CapabilityKind;
   readonly name: string;
+  readonly handler?: string;
+  readonly control?: boolean;
 }
 
-export interface PluginManifest {
+export interface PluginInfo {
   readonly name: string;
   readonly version?: string;
   readonly capabilities: readonly PluginCapability[];
-}
-
-export interface PluginInfo extends PluginManifest {
   readonly loaded: boolean;
 }
 
 export interface PluginModule {
-  readonly manifest: PluginManifest;
-  register(context: PluginContext): void | Promise<void>;
-}
-
-export function definePlugin(module: PluginModule): PluginModule {
-  return module;
+  readonly [handler: string]: unknown;
+  register?(context: PluginContext): void | Promise<void>;
 }
 
 function normalizeHookResult(result: unknown, current: unknown): { config: unknown; skip: boolean } {

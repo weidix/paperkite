@@ -41,7 +41,9 @@
       "capabilities": [
         {
           "kind": "service",
-          "name": "runtime.console_web"
+          "name": "runtime.console_web",
+          "handler": "RuntimeConsoleWebService",
+          "control": true
         }
       ]
     }

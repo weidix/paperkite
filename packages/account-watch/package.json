@@ -14,7 +14,7 @@
     "plugin": {
       "entry": "./src/index.ts",
       "capabilities": [
-        { "kind": "trigger", "name": "watch.session" }
+        { "kind": "trigger", "name": "watch.session", "handler": "SessionHealthTrigger", "control": true }
       ]
     }
   }

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { DateTime } from "luxon";
-import { Action, definePlugin, type PluginContext, type TriggerEmission } from "@paperkite/sdk";
+import { Action, type TriggerEmission } from "@paperkite/sdk";
 
 interface SendConfig {
   readonly mode?: "user" | "bot" | "personal";
@@ -27,7 +27,7 @@ interface TelegramClientLike {
   sendFile(peer: string | number, options: Record<string, unknown>): Promise<unknown>;
 }
 
-class SendMessageAction extends Action<SendConfig> {
+export class SendMessageAction extends Action<SendConfig> {
   protected async run(): Promise<void> {
     const peer = this.config.peer ?? this.config.to ?? this.config.chat;
     const message = render(this.config.text ?? this.config.message ?? "", this.emission);
@@ -37,8 +37,8 @@ class SendMessageAction extends Action<SendConfig> {
       await sendWithBot(this.config, message, this.emission, this.signal);
       return;
     }
-    if (peer === undefined || peer === "") throw new Error("messages.send needs peer");
-    if (!this.sessions || !this.session) throw new Error("messages.send needs a session");
+    if (peer === undefined || peer === "") throw new Error("send needs peer");
+    if (!this.sessions || !this.session) throw new Error("send needs a session");
     await this.sessions.run(async (client) => {
       const telegram = client as TelegramClientLike;
       if (this.config.file) {
@@ -52,7 +52,7 @@ class SendMessageAction extends Action<SendConfig> {
         });
         return;
       }
-      if (!message) throw new Error("messages.send needs text or file");
+      if (!message) throw new Error("send needs text or file");
       await telegram.sendMessage(peer, {
         message,
         replyTo: this.config.replyTo ?? (this.config.reply ? replyId(this.emission) : undefined),
@@ -63,18 +63,6 @@ class SendMessageAction extends Action<SendConfig> {
     });
   }
 }
-
-export const manifest = {
-  name: "@paperkite/plugin-telegram-messages",
-  version: "0.1.0",
-  capabilities: [{ kind: "action" as const, name: "messages.send" }]
-};
-
-export async function register(context: PluginContext): Promise<void> {
-  context.registerAction("messages.send", SendMessageAction);
-}
-
-export default definePlugin({ manifest, register });
 
 function render(value: string, emission: TriggerEmission | undefined): string {
   const values: Record<string, unknown> = {
@@ -111,7 +99,7 @@ async function waitForSendTime(
   let delay = Math.max(0, Number(delaySeconds ?? 0) * 1_000);
   if (sendAt) {
     const target = parseSendAt(sendAt);
-    if (!Number.isFinite(target)) throw new Error("messages.send sendAt must be an ISO timestamp");
+    if (!Number.isFinite(target)) throw new Error("sendAt must be an ISO timestamp");
     delay = Math.max(delay, target - Date.now());
   }
   if (!delay) return;
@@ -141,7 +129,7 @@ async function sendWithBot(
   const token = config.botToken;
   const chatId = config.chatId ?? config.chat;
   if (!token || chatId === undefined || chatId === "") throw new Error("bot mode needs botToken and chatId");
-  if (!config.file && !message) throw new Error("messages.send needs text or file");
+  if (!config.file && !message) throw new Error("send needs text or file");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
   const abort = (): void => controller.abort();
@@ -187,7 +175,7 @@ function parseSendAt(value: string): number {
   if (iso.isValid) return iso.toMillis();
   const short = DateTime.fromFormat(value, "HH:mm:ss.SSS");
   if (short.isValid) return DateTime.now().set({ hour: short.hour, minute: short.minute, second: short.second, millisecond: short.millisecond }).toMillis();
-  throw new Error("messages.send sendAt must be an ISO timestamp or HH:mm:ss.SSS");
+  throw new Error("sendAt must be an ISO timestamp or HH:mm:ss.SSS");
 }
 
 function replyId(emission: TriggerEmission | undefined): number | undefined {
