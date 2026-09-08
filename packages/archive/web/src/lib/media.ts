@@ -48,10 +48,10 @@ export function fileThumbOf(record: MessageRecord): RowThumb {
   return rowThumbOf(record);
 }
 
-export function rowThumbOf(row: { rowId: string; hasMedia: boolean; mediaType?: string; mimeType?: string }): RowThumb {
+export function rowThumbOf(row: { recordId: string; hasMedia: boolean; mediaType?: string; mimeType?: string }): RowThumb {
   const kind = kindOfRow(row);
   if (!row.hasMedia || (kind !== "image" && kind !== "video")) return { kind };
-  return { kind, url: mediaRowUrl(row.rowId) };
+  return { kind, url: mediaRowUrl(row.recordId) };
 }
 
 /** 预览 mime：库里缺 mime 时按媒体类型给占位，保证预览分支正确分流。 */
@@ -107,10 +107,10 @@ function itemForFile(file: StoredMediaFile): LightboxItem {
   };
 }
 
-function itemForRow(row: { rowId: string; messageId: number; mediaType?: string; mimeType?: string }): LightboxItem {
+function itemForRow(row: { recordId: string; messageId: number; mediaType?: string; mimeType?: string }): LightboxItem {
   const kind = kindOfRow(row);
   const mime = previewMimeOf(row);
-  const url = mediaRowUrl(row.rowId, "full");
+  const url = mediaRowUrl(row.recordId, "full");
   return {
     name: `media_${row.messageId}`,
     mime,

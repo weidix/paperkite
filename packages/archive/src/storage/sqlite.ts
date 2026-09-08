@@ -36,7 +36,7 @@ import {
   normalizeContextLimit,
   normalizeLimit,
   normalizeOffset,
-  normalizeRowId,
+  normalizeRecordId,
   normalizeTimeMode,
   normalizeUserId,
   parseEntities,
@@ -560,13 +560,13 @@ export class SqliteArchiveStore implements ArchiveStore {
     }));
   }
 
-  async getMessageByRowId(rowId: string): Promise<MessageRecord | undefined> {
+  async getMessageByRecordId(recordId: string): Promise<MessageRecord | undefined> {
     const row = this.database.prepare(`
       SELECT ${MESSAGE_COLUMNS}, ${MIME_SUBQUERY} AS mime_type
         FROM messages m
        WHERE m.id = ? AND m.blocked = 0
        LIMIT 1
-    `).get(Number(normalizeRowId(rowId))) as Record<string, unknown> | undefined;
+    `).get(Number(normalizeRecordId(recordId))) as Record<string, unknown> | undefined;
     return row ? this.attachMedia([row])[0] : undefined;
   }
 
@@ -664,8 +664,8 @@ export class SqliteArchiveStore implements ArchiveStore {
     };
   }
 
-  async getReplyChain(rowId: string): Promise<ReplyChainResult | undefined> {
-    const anchor = await this.getMessageByRowId(rowId);
+  async getReplyChain(recordId: string): Promise<ReplyChainResult | undefined> {
+    const anchor = await this.getMessageByRecordId(recordId);
     if (!anchor) return undefined;
     let parent: ReplyChainResult["parent"];
     if (anchor.replyToMessageId !== undefined) {
@@ -681,7 +681,7 @@ export class SqliteArchiveStore implements ArchiveStore {
         if (parentRecord?.groupedId !== undefined) {
           const group = await this.fetchGroupAttached(parentRecord.chatId, parentRecord.groupedId);
           parent = group.length > 1
-            ? albumEntryOf(group, parentRecord.rowId)
+            ? albumEntryOf(group, parentRecord.recordId)
             : { kind: "message", record: parentRecord };
         } else if (parentRecord !== undefined) {
           parent = { kind: "message", record: parentRecord };
@@ -709,7 +709,7 @@ export class SqliteArchiveStore implements ArchiveStore {
   }
 
   async getMessageContext(
-    rowId: string,
+    recordId: string,
     beforeN: number,
     afterN: number,
     beforeOffset = 0,
@@ -719,21 +719,21 @@ export class SqliteArchiveStore implements ArchiveStore {
     const afterLimit = normalizeContextLimit(afterN);
     const beforeOff = normalizeOffset(beforeOffset);
     const afterOff = normalizeOffset(afterOffset);
-    const anchorRecord = await this.getMessageByRowId(rowId);
+    const anchorRecord = await this.getMessageByRecordId(recordId);
     if (!anchorRecord) {
       return { anchor: undefined, before: [], after: [], beforeN: 0, afterN: 0 };
     }
 
-    let lower = { date: anchorRecord.date, id: Number(anchorRecord.rowId) };
+    let lower = { date: anchorRecord.date, id: Number(anchorRecord.recordId) };
     let upper = lower;
     let anchorGroup: readonly MessageRecord[] | undefined;
     if (anchorRecord.groupedId !== undefined) {
       const group = await this.fetchGroupAttached(anchorRecord.chatId, anchorRecord.groupedId);
       if (group.length > 1) {
         anchorGroup = group;
-        lower = { date: group[0]!.date, id: Number(group[0]!.rowId) };
+        lower = { date: group[0]!.date, id: Number(group[0]!.recordId) };
         const last = group[group.length - 1]!;
-        upper = { date: last.date, id: Number(last.rowId) };
+        upper = { date: last.date, id: Number(last.recordId) };
       }
     }
 
@@ -776,7 +776,7 @@ export class SqliteArchiveStore implements ArchiveStore {
     const before = buildContextEntries(await this.attachMedia([...beforeRows].reverse()), groupMap);
     const after = buildContextEntries(await this.attachMedia(afterRows), groupMap);
     const anchor = anchorGroup !== undefined
-      ? albumEntryOf(anchorGroup, anchorRecord.rowId)
+      ? albumEntryOf(anchorGroup, anchorRecord.recordId)
       : { kind: "message" as const, record: anchorRecord };
     return {
       anchor,
@@ -827,7 +827,7 @@ export class SqliteArchiveStore implements ArchiveStore {
               AND m.blocked = 1
          )
        LIMIT 1
-    `).get(Number(normalizeRowId(id))) as Record<string, unknown> | undefined;
+    `).get(Number(normalizeRecordId(id))) as Record<string, unknown> | undefined;
     return row ? toStoredMediaFile(row) : undefined;
   }
 
@@ -914,7 +914,7 @@ function toStoredMediaFile(row: Record<string, unknown>): StoredMediaFile {
 
 function toAlbumRow(row: Record<string, unknown>): AlbumRow {
   return {
-    rowId: String(row.row_id ?? row.id ?? ""),
+    recordId: String(row.row_id ?? row.id ?? ""),
     messageId: Number(row.message_id),
     chatId: String(row.chat_id),
     groupedId: String(row.grouped_id),
@@ -937,7 +937,7 @@ function toMessageRecord(
   const mediaFiles = mediaMap.get(mediaKey(chatId, messageId)) ?? [];
   const albumRows = groupedId !== undefined ? albumMap.get(groupKey(chatId, groupedId)) ?? [] : [];
   return {
-    rowId: String(row.row_id ?? row.id ?? ""),
+    recordId: String(row.row_id ?? row.id ?? ""),
     messageId,
     chatId,
     groupedId,

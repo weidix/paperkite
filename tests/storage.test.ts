@@ -171,10 +171,10 @@ test("message context returns the neighborhood around an anchor", async () => {
       messageRow(5, { text: "fifth" })
     ], []);
     const search = await store.searchStructured({ keyword: "second" });
-    const rowId = search.items[0]?.kind === "message" ? search.items[0].record.rowId : undefined;
-    assert.ok(rowId);
+    const recordId = search.items[0]?.kind === "message" ? search.items[0].record.recordId : undefined;
+    assert.ok(recordId);
 
-    const context = await store.getMessageContext(rowId, 1, 1);
+    const context = await store.getMessageContext(recordId, 1, 1);
     assert.equal(context.anchor?.kind, "message");
     assert.equal(context.anchor?.kind === "message" && context.anchor.record.text, "second");
     assert.deepEqual(
@@ -188,7 +188,7 @@ test("message context returns the neighborhood around an anchor", async () => {
     assert.equal(context.beforeN, 1);
     assert.equal(context.afterN, 3);
 
-    const paged = await store.getMessageContext(rowId, 1, 1, 1, 2);
+    const paged = await store.getMessageContext(recordId, 1, 1, 1, 2);
     assert.deepEqual(
       paged.before.map((entry) => (entry.kind === "message" ? entry.record.text : null)),
       []
@@ -213,12 +213,12 @@ test("message context folds album members into a single entry", async () => {
       messageRow(5, { date: "2026-08-30T10:04:00.000Z", text: "omega" })
     ], []);
 
-    // 锚点是相册中间的成员（rowId 3）：锚点条目为整个相册，窗口按条目计
+    // 锚点是相册中间的成员（recordId 3）：锚点条目为整个相册，窗口按条目计
     const viaMiddle = await store.getMessageContext("3", 5, 5);
     assert.equal(viaMiddle.anchor?.kind, "album");
     if (viaMiddle.anchor?.kind !== "album") throw new Error("expected album anchor");
     assert.equal(viaMiddle.anchor.captionText, "album caption");
-    assert.equal(viaMiddle.anchor.focusRowId, "3");
+    assert.equal(viaMiddle.anchor.focusRecordId, "3");
     assert.equal(viaMiddle.anchor.rows.length, 3);
     assert.deepEqual(viaMiddle.before.map((entry) => entry.kind), ["message"]);
     assert.deepEqual(viaMiddle.after.map((entry) => entry.kind), ["message"]);
@@ -234,7 +234,7 @@ test("message context folds album members into a single entry", async () => {
     assert.equal(album.captionText, "album caption");
     assert.equal(viaFirst.afterN, 2);
 
-    // 锚点为组内最后一条（rowId 4）：整组居中，两侧窗口不含本组
+    // 锚点为组内最后一条（recordId 4）：整组居中，两侧窗口不含本组
     const viaLast = await store.getMessageContext("4", 5, 5);
     assert.equal(viaLast.anchor?.kind, "album");
     assert.deepEqual(viaLast.before.map((entry) => entry.kind), ["message"]);

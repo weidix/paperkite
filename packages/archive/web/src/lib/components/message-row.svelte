@@ -55,7 +55,7 @@
   });
 
   function openRow(): void {
-    navigate({ kind: "message", rowId: record.rowId });
+    navigate({ kind: "message", recordId: record.recordId });
   }
 
   function onRowKeydown(event: KeyboardEvent): void {
@@ -71,13 +71,13 @@
     if (jumping) return;
     jumping = true;
     try {
-      const chain = await fetchReplyChain(record.rowId);
+      const chain = await fetchReplyChain(record.recordId);
       if (chain.parent === undefined) {
         showToast("被回复的消息不存在或不可见");
         return;
       }
-      const rowId = chain.parent.kind === "album" ? chain.parent.rowId : chain.parent.record.rowId;
-      navigate({ kind: "message", rowId });
+      const recordId = chain.parent.kind === "album" ? chain.parent.recordId : chain.parent.record.recordId;
+      navigate({ kind: "message", recordId });
     } catch {
       showToast("无法取回被回复的消息");
     } finally {
@@ -88,7 +88,7 @@
 
 <div
   class="group transition-colors {anchor ? 'bg-accent/70' : 'hover:bg-accent/50'}"
-  id="msg-{record.rowId}"
+  id="msg-{record.recordId}"
 >
   <div class="flex items-stretch">
     <div

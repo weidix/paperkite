@@ -24,7 +24,7 @@ export interface MessageEntity {
 
 /** 同相册内的一条可预览消息。 */
 export interface AlbumRow {
-  readonly rowId: string;
+  readonly recordId: string;
   readonly messageId: number;
   readonly chatId: string;
   readonly groupedId: string;
@@ -37,7 +37,7 @@ export interface AlbumRow {
 
 /** 检索返回的完整消息行（附媒体文件与相册行）。 */
 export interface MessageRecord {
-  readonly rowId: string;
+  readonly recordId: string;
   readonly messageId: number;
   readonly chatId: string;
   readonly groupedId?: string;
@@ -80,8 +80,8 @@ export interface AlbumContextEntry {
   readonly kind: "album";
   readonly rows: readonly MessageRecord[];
   readonly captionText: string;
-  readonly rowId: string;
-  readonly focusRowId?: string;
+  readonly recordId: string;
+  readonly focusRecordId?: string;
 }
 
 export type ContextEntry = MessageContextEntry | AlbumContextEntry;

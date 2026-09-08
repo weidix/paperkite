@@ -13,7 +13,7 @@
 
   const title = $derived(
     viewStore.current.kind === "message"
-      ? `消息 #${viewStore.current.rowId}`
+      ? `消息 #${viewStore.current.recordId}`
       : viewStore.current.kind === "overview"
         ? "总览"
         : "检索台"

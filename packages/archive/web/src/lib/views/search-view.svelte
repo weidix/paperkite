@@ -476,7 +476,7 @@
   }
 
   function entryKey(entry: ContextEntry): string {
-    return entry.kind === "album" ? entry.rowId : entry.record.rowId;
+    return entry.kind === "album" ? entry.recordId : entry.record.recordId;
   }
 
   function chatTitle(chatId: string): string {

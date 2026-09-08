@@ -23,7 +23,7 @@ export type View =
       users: readonly string[];
       forwardFrom: string;
     }
-  | { kind: "message"; rowId: string };
+  | { kind: "message"; recordId: string };
 
 class ViewStore {
   current: View = $state(emptySearch());
@@ -73,8 +73,8 @@ export function parseHash(hash: string): View {
   const raw = hash.replace(/^#/, "");
   if (raw === "" || raw === "/") return { kind: "overview" };
   if (raw.startsWith("/m/")) {
-    const rowId = raw.slice(3).split("?")[0] ?? "";
-    if (/^\d+$/.test(rowId)) return { kind: "message", rowId };
+    const recordId = raw.slice(3).split("?")[0] ?? "";
+    if (/^\d+$/.test(recordId)) return { kind: "message", recordId };
     return { kind: "overview" };
   }
   if (raw.startsWith("/q")) {
@@ -101,7 +101,7 @@ export function parseHash(hash: string): View {
 
 function hashOf(view: View): string {
   if (view.kind === "overview") return "#/";
-  if (view.kind === "message") return `#/m/${view.rowId}`;
+  if (view.kind === "message") return `#/m/${view.recordId}`;
   const query = new URLSearchParams();
   if (view.q) query.set("q", view.q);
   if (view.chats.length > 0) query.set("chat", view.chats.join(","));

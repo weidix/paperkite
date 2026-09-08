@@ -17,7 +17,7 @@
   const remembered = backToSearch();
   const terms = remembered.kind === "search" ? remembered.q.trim().split(/\s+/).filter(Boolean) : [];
 
-  let { rowId } = $props<{ rowId: string }>();
+  let { recordId } = $props<{ recordId: string }>();
 
   let anchor = $state<ContextEntry | null>(null);
   let before = $state<ContextEntry[]>([]);
@@ -77,8 +77,8 @@
   const remainingAfter = $derived(afterTotal - after.length);
 
   $effect(() => {
-    if (anchor !== null && anchorRowId(anchor) === rowId) return;
-    loadContext(rowId);
+    if (anchor !== null && anchorRecordId(anchor) === recordId) return;
+    loadContext(recordId);
   });
 
   $effect(() => {
@@ -102,7 +102,7 @@
   $effect(() => {
     void chainSeq;
     if (anchor === null) return;
-    const id = anchorRowId(anchor);
+    const id = anchorRecordId(anchor);
     chain = null;
     chainError = "";
     let cancelled = false;
@@ -128,7 +128,7 @@
   $effect(() => {
     if (anchor === null || archiveState?.session === null) return;
     if (/https?:\/\//.test(anchorText)) return;
-    const id = anchorRowId(anchor);
+    const id = anchorRecordId(anchor);
     liveCaptionText = "";
     liveCaptionEntities = undefined;
     liveCaptionBusy = true;
@@ -173,15 +173,15 @@
     if (!anchor || loadingBefore) return;
     loadingBefore = true;
     const token = generation;
-    const stick = document.getElementById(`msg-${entryRowId(anchor)}`)?.getBoundingClientRect().top;
+    const stick = document.getElementById(`msg-${entryRecordId(anchor)}`)?.getBoundingClientRect().top;
     try {
-      const ctx = await fetchContext(entryRowId(anchor), PAGE, 0, before.length, 0);
+      const ctx = await fetchContext(entryRecordId(anchor), PAGE, 0, before.length, 0);
       if (token !== generation) return;
       before = [...ctx.before, ...before];
       beforeTotal = ctx.beforeN;
       if (stick !== undefined) {
         await tick();
-        const now = document.getElementById(`msg-${entryRowId(anchor)}`)?.getBoundingClientRect().top;
+        const now = document.getElementById(`msg-${entryRecordId(anchor)}`)?.getBoundingClientRect().top;
         if (now !== undefined) {
           document.querySelector("main")?.scrollBy({ top: now - stick });
         }
@@ -198,7 +198,7 @@
     loadingAfter = true;
     const token = generation;
     try {
-      const ctx = await fetchContext(entryRowId(anchor), 0, PAGE, 0, after.length);
+      const ctx = await fetchContext(entryRecordId(anchor), 0, PAGE, 0, after.length);
       if (token !== generation) return;
       after = [...after, ...ctx.after];
       afterTotal = ctx.afterN;
@@ -284,14 +284,14 @@
   function liveTile(row: MessageRecord, label: string): StripTile {
     const kind = kindOfRow(row);
     return {
-      key: `live-${row.rowId}`,
+      key: `live-${row.recordId}`,
       kind,
       file: null,
       label,
       name: `media_${row.messageId}`,
       live: true,
       disabled: archiveState?.session === null,
-      thumbUrl: hasThumbKind(kind) && archiveState?.session !== null ? mediaRowUrl(row.rowId) : undefined
+      thumbUrl: hasThumbKind(kind) && archiveState?.session !== null ? mediaRowUrl(row.recordId) : undefined
     };
   }
 
@@ -299,12 +299,12 @@
     return kind === "image" || kind === "video";
   }
 
-  function entryRowId(entry: ContextEntry): string {
-    return entry.kind === "album" ? entry.rowId : entry.record.rowId;
+  function entryRecordId(entry: ContextEntry): string {
+    return entry.kind === "album" ? entry.recordId : entry.record.recordId;
   }
 
-  function anchorRowId(entry: ContextEntry): string {
-    return entry.kind === "album" ? (entry.focusRowId ?? entry.rowId) : entry.record.rowId;
+  function anchorRecordId(entry: ContextEntry): string {
+    return entry.kind === "album" ? (entry.focusRecordId ?? entry.recordId) : entry.record.recordId;
   }
 
   function ctxCount(loaded: number, total: number): string {
@@ -336,7 +336,7 @@
         </div>
         <div class="mt-0.5 font-mono text-[11px] text-muted-foreground">
           {#if messageAnchor}
-            #{messageAnchor.messageId} · 行 {messageAnchor.rowId} · {fmtTs(messageAnchor.date)} · {messageAnchor.messageType}
+            #{messageAnchor.messageId} · 行 {messageAnchor.recordId} · {fmtTs(messageAnchor.date)} · {messageAnchor.messageType}
           {:else if album}
             相册 {album.rows.length} 张 · #{album.rows[0]?.messageId} · {fmtTs(album.rows[0]?.date ?? "")}
           {:else}
@@ -364,7 +364,7 @@
     {#if anchor === null && error}
       <div class="rounded-lg border bg-card p-6 text-center shadow-sm">
         <p class="font-mono text-xs text-muted-foreground">{error}</p>
-        <Button variant="ghost" size="sm" class="mt-3" onclick={() => loadContext(rowId)}>重试</Button>
+        <Button variant="ghost" size="sm" class="mt-3" onclick={() => loadContext(recordId)}>重试</Button>
       </div>
     {:else if anchor === null}
       <div class="grid gap-4">
@@ -376,7 +376,7 @@
       {#if error}
         <div class="rounded-lg border bg-card p-4 text-center shadow-sm">
           <p class="font-mono text-xs text-muted-foreground">{error}</p>
-          <Button variant="ghost" size="sm" class="mt-2" onclick={() => loadContext(rowId)}>重试</Button>
+          <Button variant="ghost" size="sm" class="mt-2" onclick={() => loadContext(recordId)}>重试</Button>
         </div>
       {/if}
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -494,7 +494,7 @@
             <div class="border-b border-border/60 px-4 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground">
               回复者 · {fmtCount(chain.children.length)}
             </div>
-            {#each chain.children as entry (entryRowId(entry))}
+            {#each chain.children as entry (entryRecordId(entry))}
               {#if entry.kind === "album"}
                 <AlbumRow entry={entry} highlights={terms} />
               {:else}
@@ -517,7 +517,7 @@
           </Button>
         {/if}
       </div>
-      {#each before as entry (entryRowId(entry))}
+      {#each before as entry (entryRecordId(entry))}
         {#if entry.kind === "album"}
           <AlbumRow {entry} highlights={terms} />
         {:else}
@@ -540,7 +540,7 @@
           </Button>
         {/if}
       </div>
-      {#each after as entry (entryRowId(entry))}
+      {#each after as entry (entryRecordId(entry))}
         {#if entry.kind === "album"}
           <AlbumRow {entry} highlights={terms} />
         {:else}

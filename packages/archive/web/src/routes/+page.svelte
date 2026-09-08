@@ -64,7 +64,7 @@
 <svelte:head>
   <title>
     {viewStore.current.kind === "message"
-      ? `消息 #${viewStore.current.rowId} · 归档台`
+      ? `消息 #${viewStore.current.recordId} · 归档台`
       : viewStore.current.kind === "overview"
         ? "总览 · 归档台"
         : "归档台 · 纸鸢"}
@@ -106,7 +106,7 @@
     <main class="min-w-0 flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-5xl px-6 py-6">
         {#if viewStore.current.kind === "message"}
-          <MessageView rowId={viewStore.current.rowId} />
+          <MessageView recordId={viewStore.current.recordId} />
         {:else if viewStore.current.kind === "overview"}
           <OverviewView />
         {:else}

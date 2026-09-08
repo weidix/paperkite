@@ -97,12 +97,12 @@ class CountingStore implements ArchiveStore {
   }
   searchStructured(query: Parameters<ArchiveStore["searchStructured"]>[0]) { return this.inner.searchStructured(query); }
   listChatLedger(limit: number) { return this.inner.listChatLedger(limit); }
-  getMessageContext(rowId: string, beforeN: number, afterN: number) { return this.inner.getMessageContext(rowId, beforeN, afterN); }
-  getMessageByRowId(rowId: string) { return this.inner.getMessageByRowId(rowId); }
+  getMessageContext(recordId: string, beforeN: number, afterN: number) { return this.inner.getMessageContext(recordId, beforeN, afterN); }
+  getMessageByRecordId(recordId: string) { return this.inner.getMessageByRecordId(recordId); }
   getMediaFileById(id: string) { return this.inner.getMediaFileById(id); }
   searchSenders(query: Parameters<ArchiveStore["searchSenders"]>[0]) { return this.inner.searchSenders(query); }
   getSenderSummary(senderId: string, chatId?: string) { return this.inner.getSenderSummary(senderId, chatId); }
-  getReplyChain(rowId: string) { return this.inner.getReplyChain(rowId); }
+  getReplyChain(recordId: string) { return this.inner.getReplyChain(recordId); }
   listBlockwords() { return this.inner.listBlockwords(); }
   addBlockword(word: string) { return this.inner.addBlockword(word); }
   removeBlockword(word: string) { return this.inner.removeBlockword(word); }

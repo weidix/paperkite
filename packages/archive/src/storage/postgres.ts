@@ -33,7 +33,7 @@ import {
   normalizeContextLimit,
   normalizeLimit,
   normalizeOffset,
-  normalizeRowId,
+  normalizeRecordId,
   normalizeTimeMode,
   normalizeUserId,
   paramPlaceholders,
@@ -640,12 +640,12 @@ export class PostgresArchiveStore implements ArchiveStore {
     }));
   }
 
-  async getMessageByRowId(rowId: string): Promise<MessageRecord | undefined> {
+  async getMessageByRecordId(recordId: string): Promise<MessageRecord | undefined> {
     const result = await this.pool.query(
       `${messageSelect(this.table("messages"), this.table("media_files"))}
        WHERE m.id = $1::bigint AND m.blocked = FALSE
        LIMIT 1`,
-      [normalizeRowId(rowId)]
+      [normalizeRecordId(recordId)]
     );
     return result.rows.length ? (await this.attachMedia(result.rows))[0] : undefined;
   }
@@ -751,8 +751,8 @@ export class PostgresArchiveStore implements ArchiveStore {
     };
   }
 
-  async getReplyChain(rowId: string): Promise<ReplyChainResult | undefined> {
-    const anchor = await this.getMessageByRowId(rowId);
+  async getReplyChain(recordId: string): Promise<ReplyChainResult | undefined> {
+    const anchor = await this.getMessageByRecordId(recordId);
     if (!anchor) return undefined;
     let parent: ReplyChainResult["parent"];
     if (anchor.replyToMessageId !== undefined) {
@@ -768,7 +768,7 @@ export class PostgresArchiveStore implements ArchiveStore {
         if (parentRecord?.groupedId !== undefined) {
           const group = await this.fetchGroupAttached(parentRecord.chatId, parentRecord.groupedId);
           parent = group.length > 1
-            ? albumEntryOf(group, parentRecord.rowId)
+            ? albumEntryOf(group, parentRecord.recordId)
             : { kind: "message", record: parentRecord };
         } else if (parentRecord !== undefined) {
           parent = { kind: "message", record: parentRecord };
@@ -796,7 +796,7 @@ export class PostgresArchiveStore implements ArchiveStore {
   }
 
   async getMessageContext(
-    rowId: string,
+    recordId: string,
     beforeN: number,
     afterN: number,
     beforeOffset = 0,
@@ -806,21 +806,21 @@ export class PostgresArchiveStore implements ArchiveStore {
     const afterLimit = normalizeContextLimit(afterN);
     const beforeOff = normalizeOffset(beforeOffset);
     const afterOff = normalizeOffset(afterOffset);
-    const anchorRecord = await this.getMessageByRowId(rowId);
+    const anchorRecord = await this.getMessageByRecordId(recordId);
     if (!anchorRecord) {
       return { anchor: undefined, before: [], after: [], beforeN: 0, afterN: 0 };
     }
 
-    let lower = { date: anchorRecord.date, id: Number(anchorRecord.rowId) };
+    let lower = { date: anchorRecord.date, id: Number(anchorRecord.recordId) };
     let upper = lower;
     let anchorGroup: readonly MessageRecord[] | undefined;
     if (anchorRecord.groupedId !== undefined) {
       const group = await this.fetchGroupAttached(anchorRecord.chatId, anchorRecord.groupedId);
       if (group.length > 1) {
         anchorGroup = group;
-        lower = { date: group[0]!.date, id: Number(group[0]!.rowId) };
+        lower = { date: group[0]!.date, id: Number(group[0]!.recordId) };
         const last = group[group.length - 1]!;
-        upper = { date: last.date, id: Number(last.rowId) };
+        upper = { date: last.date, id: Number(last.recordId) };
       }
     }
 
@@ -871,7 +871,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const before = buildContextEntries(await this.attachMedia([...beforeResult.rows].reverse()), groupMap);
     const after = buildContextEntries(await this.attachMedia(afterResult.rows), groupMap);
     const anchor = anchorGroup !== undefined
-      ? albumEntryOf(anchorGroup, anchorRecord.rowId)
+      ? albumEntryOf(anchorGroup, anchorRecord.recordId)
       : { kind: "message" as const, record: anchorRecord };
     return {
       anchor,
@@ -925,7 +925,7 @@ export class PostgresArchiveStore implements ArchiveStore {
                AND m.blocked = TRUE
           )
         LIMIT 1`,
-      [normalizeRowId(id)]
+      [normalizeRecordId(id)]
     );
     return result.rows.length ? toStoredMediaFile(result.rows[0]) : undefined;
   }
@@ -1165,7 +1165,7 @@ function toStoredMediaFile(row: QueryResultRow): StoredMediaFile {
 
 function toAlbumRow(row: QueryResultRow): AlbumRow {
   return {
-    rowId: String(row.row_id),
+    recordId: String(row.row_id),
     messageId: Number(row.message_id),
     chatId: String(row.chat_id),
     groupedId: String(row.grouped_id),
@@ -1188,7 +1188,7 @@ function toMessageRecord(
   const mediaFiles = mediaMap.get(mediaKey(chatId, messageId)) ?? [];
   const albumRows = groupedId !== undefined ? albumMap.get(groupKey(chatId, groupedId)) ?? [] : [];
   return {
-    rowId: String(row.row_id),
+    recordId: String(row.row_id),
     messageId,
     chatId,
     groupedId,
