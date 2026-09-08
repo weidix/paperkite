@@ -670,9 +670,9 @@
         </div>
         {#each day.items as item (entryKey(item))}
           {#if item.kind === "album"}
-            <AlbumRow entry={item} highlights={terms} inlineThumb showChat={view !== null && view.chats.length === 0} />
+            <AlbumRow entry={item} highlights={terms} inlineThumb showChat={view !== null && view.chats.length !== 1} />
           {:else}
-            <MessageRow record={item.record} highlights={terms} inlineThumb showChat={view !== null && view.chats.length === 0} />
+            <MessageRow record={item.record} highlights={terms} inlineThumb showChat={view !== null && view.chats.length !== 1} />
           {/if}
         {/each}
       {/each}
