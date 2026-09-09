@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -146,6 +146,85 @@ test("reload restarts flows within the stop grace even when a service settles la
   await new Promise((resolve) => setTimeout(resolve, 1_000));
   assert.deepEqual(runtime.snapshot.activeServices, ["stubborn"], "late zombie cleanup must not drop the new instance");
   await runtime.stop();
+});
+
+test("flow reload reloads the action hook from disk", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-runtime-hook-"));
+  const flows = join(directory, "flows.yml");
+  const hook = join(directory, "hook.ts");
+  try {
+    await writeFile(hook, 'export default () => ({ text: "v1" });\n');
+    const catalog = fromMapping(
+      { schedules: [{ id: "daily", cron: "0 4 * * *", run: { capability: "demo.action", hook: "hook.ts", config: {} } }] },
+      flows
+    );
+    const { runtime } = await makeRuntime({ catalog });
+    await runtime.executeAction({ capability: "demo.action", hook: "hook.ts" });
+    assert.deepEqual(EchoAction.runs.at(-1)?.config, { text: "v1" });
+    await writeFile(hook, 'export default () => ({ text: "v2" });\n');
+    await runtime.executeAction({ capability: "demo.action", hook: "hook.ts" });
+    assert.deepEqual(EchoAction.runs.at(-1)?.config, { text: "v1" }, "hook content stays cached without a reload");
+    await runtime.reloadFlow("daily");
+    await runtime.executeAction({ capability: "demo.action", hook: "hook.ts" });
+    assert.deepEqual(EchoAction.runs.at(-1)?.config, { text: "v2" }, "flow reload refreshes the hook");
+    await runtime.stop();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("command runs reload the action hook on every execution", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-runtime-hook-"));
+  const flows = join(directory, "flows.yml");
+  const hook = join(directory, "hook.ts");
+  try {
+    await writeFile(hook, 'export default () => ({ text: "v1" });\n');
+    const catalog = fromMapping(
+      { commands: [{ id: "run-hook", title: "run-hook", run: { capability: "demo.action", hook: "hook.ts", config: {} } }] },
+      flows
+    );
+    const { runtime } = await makeRuntime({ catalog });
+    await runtime.runFlow("run-hook");
+    assert.deepEqual(EchoAction.runs.at(-1)?.config, { text: "v1" });
+    await writeFile(hook, 'export default () => ({ text: "v2" });\n');
+    await runtime.runFlow("run-hook");
+    assert.deepEqual(EchoAction.runs.at(-1)?.config, { text: "v2" }, "command hook is re-read on every run");
+    await runtime.stop();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reloadFlow stops a disabled schedule", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-runtime-schedule-"));
+  const flows = join(directory, "flows.yml");
+  try {
+    await writeFile(
+      flows,
+      ["schedules:", "  - id: tick", "    intervalSeconds: 1", "    run:", "      capability: demo.action", "      config: {}", ""].join(
+        "\n"
+      )
+    );
+    const catalog = fromMapping(
+      { schedules: [{ id: "tick", intervalSeconds: 1, run: { capability: "demo.action", config: {} } }] },
+      flows
+    );
+    const { runtime, events } = await makeRuntime({ catalog });
+    const fires = (): number =>
+      events.filter((event) => event.type === "flow.finished" && event.kind === "schedule" && event.id === "tick").length;
+    await runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    assert.ok(fires() >= 1, "schedule fires while enabled: " + fires());
+    assert.equal(await runtime.updateFlow("tick", { enabled: false }), true);
+    await runtime.reloadFlow("tick");
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const atDisable = fires();
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    assert.equal(fires(), atDisable, "schedule must stop after disable + reload");
+    await runtime.stop();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 class FakeSessionPool {

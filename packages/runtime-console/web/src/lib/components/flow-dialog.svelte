@@ -13,7 +13,7 @@
     X,
     Zap
   } from "lucide-svelte";
-  import { Dialog } from "bits-ui";
+  import { AlertDialog, Dialog } from "bits-ui";
   import { createDraft, parseDraft, type ActionDraft } from "$lib/action-draft";
   import { toast } from "$lib/toast-store.svelte";
   import ActionEditor from "$lib/components/action-editor.svelte";
@@ -28,6 +28,15 @@
   import { runtime } from "$lib/runtime.svelte";
   import type { ActionSpecInput, FlowKind, FlowPatch, FlowSnapshot } from "$lib/runtime";
   import { cn } from "$lib/utils";
+
+  const AlertDialogRoot = AlertDialog.Root;
+  const AlertDialogPortal = AlertDialog.Portal;
+  const AlertDialogOverlay = AlertDialog.Overlay;
+  const AlertDialogContent = AlertDialog.Content;
+  const AlertDialogTitle = AlertDialog.Title;
+  const AlertDialogDescription = AlertDialog.Description;
+  const AlertDialogAction = AlertDialog.Action;
+  const AlertDialogCancel = AlertDialog.Cancel;
 
   const KIND_LABEL: Record<FlowKind, string> = {
     trigger: "触发器",
@@ -71,6 +80,7 @@
   let actions: ActionDraft[] = $state([]);
   let expanded: boolean[] = $state([]);
   let prevOpen = $state(false);
+  let reloadPrompt = $state(false);
 
   $effect(() => {
     if (open && !prevOpen) {
@@ -223,6 +233,7 @@
       const result = await api.updateFlow(flow.id, patch as FlowPatch);
       toast.success(result.changed ? "已保存并写回 flows.yml" : "没有变更");
       await runtime.refresh();
+      if (result.changed && flow.kind !== "command") reloadPrompt = true;
     } catch (error) {
       toast.error(errorText(error));
     } finally {
@@ -241,6 +252,11 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function reloadAfterSave(): Promise<void> {
+    await reload();
+    reloadPrompt = false;
   }
 
   async function toggleService(): Promise<void> {
@@ -585,6 +601,35 @@
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>
+
+<AlertDialogRoot open={reloadPrompt} onOpenChange={(value) => (reloadPrompt = value)}>
+  <AlertDialogPortal>
+    <AlertDialogOverlay
+      class="fixed inset-0 z-50 bg-black/45 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
+    />
+    <AlertDialogContent
+      class="fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-card p-6 shadow-xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-1/2"
+    >
+      <AlertDialogTitle class="font-display text-lg font-semibold leading-none">配置已保存，立即重载？</AlertDialogTitle>
+      <AlertDialogDescription class="text-sm text-muted-foreground">
+        {KIND_LABEL[flow.kind]}的改动需要重载才会对运行中的实例生效。
+      </AlertDialogDescription>
+      <div class="flex justify-end gap-2">
+        <AlertDialogCancel
+          class="inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          稍后
+        </AlertDialogCancel>
+        <AlertDialogAction
+          class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
+          onclick={() => void reloadAfterSave()}
+        >
+          立即重载
+        </AlertDialogAction>
+      </div>
+    </AlertDialogContent>
+  </AlertDialogPortal>
+</AlertDialogRoot>
 
 {#snippet RowView({ label, value, mono = false }: { label: string; value: string; mono?: boolean })}
   <div class="flex items-start justify-between gap-3 px-3 py-2 text-xs">
