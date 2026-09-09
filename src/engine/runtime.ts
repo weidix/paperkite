@@ -31,7 +31,7 @@ import type {
 } from "../config/model.js";
 import { updateFlowItem } from "../config/loader.js";
 import { AppLogger } from "./logger.js";
-import { loadHook } from "./hooks.js";
+import { invalidateAllHooks, invalidateHook, loadHook } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
 import { CapabilityRegistry } from "../extensions/registry.js";
 import type { SessionPool, SessionStateChange } from "../telegram/pool.js";
@@ -154,6 +154,7 @@ export class Runtime {
     const wasStarted = this.started;
     await this.stopFlows();
     this.catalog = next;
+    invalidateAllHooks();
     if (wasStarted) {
       const sessions = collectSessions(this.catalog);
       if (sessions.size) await this.options.sessions.ensure(sessions);
@@ -185,6 +186,7 @@ export class Runtime {
     if (definition.kind === "schedule" && !definition.enabled) {
       throw new Error("schedule is disabled: " + definition.id);
     }
+    if (definition.kind === "command") this.invalidateFlowHooks(definition);
     const action: ActionSpec = {
       ...definition.action,
       session: definition.action.session ?? (definition.kind === "schedule" ? definition.session : undefined)
@@ -253,7 +255,9 @@ export class Runtime {
   async reloadFlow(identifier: string): Promise<boolean> {
     const item = this.catalog.find(identifier);
     if (!item) return false;
+    this.invalidateFlowHooks(item);
     if (item.kind === "schedule") {
+      this.scheduler.remove(item.id);
       if (this.started && item.enabled) this.startSchedule(item);
     } else if (item.kind === "trigger") {
       await this.stopFlow(`trigger:${item.id}`);
@@ -264,6 +268,16 @@ export class Runtime {
     }
     this.emit({ type: "flow.reloaded", id: item.id, kind: item.kind });
     return true;
+  }
+
+  private invalidateFlowHooks(item: FlowDefinition): void {
+    const references =
+      item.kind === "trigger"
+        ? item.actions.map((action) => action.hook)
+        : "action" in item
+          ? [item.action.hook]
+          : [];
+    for (const reference of references) invalidateHook(reference, this.catalog.path);
   }
 
   async stop(): Promise<void> {
