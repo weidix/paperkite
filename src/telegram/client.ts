@@ -1,9 +1,10 @@
-import { resolve } from "node:path";
+import { join } from "node:path";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { Logger as GramLogger, LogLevel } from "telegram/extensions/Logger.js";
 import type { RuntimeLogger } from "@paperkite/sdk";
 import type { AppSettings } from "../config/settings.js";
+import { paperkiteHome } from "../config/paths.js";
 
 export interface SessionClient {
   connect(): Promise<unknown>;
@@ -28,8 +29,8 @@ export function createGramClient(sessionName: string, content: string): SessionC
 }
 
 let currentSettings: AppSettings = {
-  telegram: { apiId: 0, apiHash: "", sessionsDir: resolve("data/accounts") },
-  logging: { level: "info", directory: resolve("data/logs") }
+  telegram: { apiId: 0, apiHash: "", sessionsDir: join(paperkiteHome(), "accounts") },
+  logging: { level: "info", directory: join(paperkiteHome(), "logs") }
 };
 
 let currentLogger: RuntimeLogger | undefined;

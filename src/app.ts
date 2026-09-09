@@ -1,6 +1,7 @@
-import { resolve } from "node:path";
+import { join } from "node:path";
 import { loadCatalog } from "./config/loader.js";
 import { loadSettings, type AppSettings } from "./config/settings.js";
+import { defaultFlowsFile, defaultSettingsFile, paperkiteHome } from "./config/paths.js";
 import { AppLogger } from "./engine/logger.js";
 import { Runtime } from "./engine/runtime.js";
 import { loadExtensions } from "./extensions/loader.js";
@@ -20,8 +21,8 @@ export interface PaperkiteApp {
 }
 
 export async function createApp(options: CreateAppOptions = {}): Promise<PaperkiteApp> {
-  const settings = await loadSettings(options.settingsFile ?? "data/settings.yml");
-  const flowsFile = options.flowsFile ?? "data/flows.yml";
+  const settings = await loadSettings(options.settingsFile ?? defaultSettingsFile());
+  const flowsFile = options.flowsFile ?? defaultFlowsFile();
   const catalog = await loadCatalog(flowsFile);
   const logger = new AppLogger(settings.logging.level, settings.logging.directory);
   configureTelegramClientFactory(settings, logger);
@@ -42,5 +43,5 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
 }
 
 export function defaultLockFile(): string {
-  return resolve(process.env.PAPERKITE_HOME?.trim() || "data/.paperkite", "paperkite.lock");
+  return join(paperkiteHome(), "paperkite.lock");
 }

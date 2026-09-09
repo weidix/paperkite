@@ -16,6 +16,8 @@ data/state/
 data/profiles/
 data/.paperkite/
 data/hooks/
+data/paperkite.lock
+data/control.sock
 *.session
 *.session-shm
 *.session-wal

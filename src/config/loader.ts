@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parse } from "yaml";
+import { defaultFlowsFile } from "./paths.js";
 import { updateItemInFile } from "./editor.js";
 import {
   FlowCatalog,
@@ -19,7 +20,7 @@ import {
   normalizeSession
 } from "./model.js";
 
-export const DEFAULT_FLOWS_PATH = "data/flows.yml";
+export const DEFAULT_FLOWS_PATH = defaultFlowsFile();
 
 export async function loadCatalog(path = DEFAULT_FLOWS_PATH): Promise<FlowCatalog> {
   const absolutePath = resolve(path);

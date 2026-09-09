@@ -203,7 +203,7 @@ async function readBundles(): Promise<string[]> {
   }
 }
 
-function coreRoot(): string {
+export function coreRoot(): string {
   let directory = dirname(fileURLToPath(import.meta.url));
   for (;;) {
     if (existsSync(join(directory, "package.json"))) return directory;
