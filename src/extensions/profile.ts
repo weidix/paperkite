@@ -1,9 +1,9 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { paperkiteHome } from "../config/paths.js";
 
 export function profileDirectory(profile = "default"): string {
-  const home = process.env.PAPERKITE_HOME?.trim() || join(process.cwd(), "data", ".paperkite");
-  return resolve(home, "profiles", profile);
+  return resolve(paperkiteHome(), "profiles", profile);
 }
 
 export async function ensureProfile(profile = "default"): Promise<string> {

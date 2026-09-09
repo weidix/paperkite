@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { parse } from "yaml";
 import { isRecord, normalizeSession } from "./model.js";
+import { defaultSettingsFile } from "./paths.js";
 
 export interface SessionGuardSettings {
   readonly windowMs: number;
@@ -23,7 +24,8 @@ export interface AppSettings {
   };
 }
 
-export async function loadSettings(path = "data/settings.yml"): Promise<AppSettings> {
+export async function loadSettings(path = defaultSettingsFile()): Promise<AppSettings> {
+  const base = dirname(resolve(path));
   const data = parse(await readFile(resolve(path), "utf8")) as unknown;
   if (!isRecord(data) || !isRecord(data.telegram)) {
     throw new Error("settings.yml needs a telegram section");
@@ -33,14 +35,14 @@ export async function loadSettings(path = "data/settings.yml"): Promise<AppSetti
   if (!Number.isInteger(apiId) || apiId <= 0 || !apiHash) {
     throw new Error("settings.yml needs telegram.apiId and telegram.apiHash");
   }
-  const sessionsDir = normalizeSession(data.telegram.sessionsDir) ?? "data/accounts";
+  const sessionsDir = normalizeSession(data.telegram.sessionsDir) ?? "accounts";
   const logging = isRecord(data.logging) ? data.logging : {};
   const guard = isRecord(data.telegram.sessionGuard) ? data.telegram.sessionGuard : {};
   return {
     telegram: {
       apiId,
       apiHash,
-      sessionsDir: resolve(sessionsDir),
+      sessionsDir: resolve(base, sessionsDir),
       sessionGuard: {
         windowMs: positiveNumber(guard.windowMs ?? 60_000, "sessionGuard.windowMs"),
         threshold: positiveNumber(guard.threshold ?? 5, "sessionGuard.threshold"),
@@ -50,7 +52,7 @@ export async function loadSettings(path = "data/settings.yml"): Promise<AppSetti
     },
     logging: {
       level: String(logging.level ?? "info").toLowerCase(),
-      directory: resolve(String(logging.directory ?? "data/logs"))
+      directory: resolve(base, String(logging.directory ?? "logs"))
     }
   };
 }

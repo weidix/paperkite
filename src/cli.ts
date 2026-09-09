@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { access, copyFile } from "node:fs/promises";
+import { access, copyFile, mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { loadCatalog } from "./config/loader.js";
+import { defaultFlowsFile, defaultSettingsFile, paperkiteHome } from "./config/paths.js";
+import { coreRoot } from "./extensions/loader.js";
 import { ensureProfile } from "./extensions/profile.js";
 import { managePlugins } from "./extensions/manager.js";
 import { createApp, defaultLockFile, type PaperkiteApp } from "./app.js";
@@ -20,8 +23,10 @@ program
   .option("--profile <name>", "profile name", "default")
   .action(async ({ profile }: { profile: string }) => {
     const directory = await ensureProfile(profile);
-    await copyIfMissing("data/settings.example.yml", "data/settings.yml");
-    await copyIfMissing("data/flows.example.yml", "data/flows.yml");
+    const examples = join(coreRoot(), "data");
+    const home = paperkiteHome();
+    await copyIfMissing(join(examples, "settings.example.yml"), join(home, "settings.yml"));
+    await copyIfMissing(join(examples, "flows.example.yml"), join(home, "flows.yml"));
     process.stdout.write(directory + "\n");
   });
 
@@ -38,7 +43,7 @@ program
 program
   .command("flows")
   .description("list configured flows")
-  .option("--flows <file>", "flows file", "data/flows.yml")
+  .option("--flows <file>", "flows file", defaultFlowsFile())
   .action(async (options: { flows: string }) => {
     const catalog = await loadCatalog(options.flows);
     const output = {
@@ -55,8 +60,8 @@ program
   .description("run one configured flow")
   .argument("<flow>", "command or schedule id")
   .option("--profile <name>", "profile name", "default")
-  .option("--settings <file>", "settings file", "data/settings.yml")
-  .option("--flows <file>", "flows file", "data/flows.yml")
+  .option("--settings <file>", "settings file", defaultSettingsFile())
+  .option("--flows <file>", "flows file", defaultFlowsFile())
   .action(async (flow: string, options: { profile: string; settings: string; flows: string }) => {
     const app = await createApp({ profile: options.profile, settingsFile: options.settings, flowsFile: options.flows });
     try {
@@ -73,7 +78,7 @@ const service = program
 service
   .command("list")
   .description("list configured services")
-  .option("--flows <file>", "flows file", "data/flows.yml")
+  .option("--flows <file>", "flows file", defaultFlowsFile())
   .action(async (options: { flows: string }) => {
     const catalog = await loadCatalog(options.flows);
     process.stdout.write(JSON.stringify(catalog.definitions("service"), null, 2) + "\n");
@@ -83,8 +88,8 @@ service
   .command("run <id>")
   .description("run one service in the foreground")
   .option("--profile <name>", "profile name", "default")
-  .option("--settings <file>", "settings file", "data/settings.yml")
-  .option("--flows <file>", "flows file", "data/flows.yml")
+  .option("--settings <file>", "settings file", defaultSettingsFile())
+  .option("--flows <file>", "flows file", defaultFlowsFile())
   .action(async (id: string, options: { profile: string; settings: string; flows: string }) => {
     const lock = await acquireProcessLock(defaultLockFile());
     let app: PaperkiteApp | undefined;
@@ -173,7 +178,7 @@ session
 session
   .command("login <id>")
   .description("log in a session without a running process")
-  .option("--settings <file>", "settings file", "data/settings.yml")
+  .option("--settings <file>", "settings file", defaultSettingsFile())
   .action(async (id: string, options: { settings: string }) => {
     await loginSession(id, options.settings);
     process.stdout.write("session login ok: " + id + "\n");
@@ -196,8 +201,8 @@ program
   .command("run")
   .description("start configured triggers, schedules, and services")
   .option("--profile <name>", "profile name", "default")
-  .option("--settings <file>", "settings file", "data/settings.yml")
-  .option("--flows <file>", "flows file", "data/flows.yml")
+  .option("--settings <file>", "settings file", defaultSettingsFile())
+  .option("--flows <file>", "flows file", defaultFlowsFile())
   .action(async (options: { profile: string; settings: string; flows: string }) => {
     const lock = await acquireProcessLock(defaultLockFile());
     let app: PaperkiteApp | undefined;
@@ -241,6 +246,7 @@ async function copyIfMissing(source: string, target: string): Promise<void> {
   try {
     await access(target);
   } catch {
+    await mkdir(dirname(target), { recursive: true });
     await copyFile(source, target);
   }
 }

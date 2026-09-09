@@ -1,7 +1,7 @@
 telegram:
   apiId: 123456
   apiHash: replace-with-your-api-hash
-  sessionsDir: data/accounts
+  sessionsDir: accounts
   sessionGuard:
     windowMs: 60000
     threshold: 5
@@ -10,4 +10,4 @@ telegram:
 
 logging:
   level: info
-  directory: data/logs
+  directory: logs

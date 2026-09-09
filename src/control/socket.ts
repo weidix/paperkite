@@ -1,8 +1,9 @@
 import { chmod, mkdir, unlink } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import type { ActionSpecInput, FlowPatch, RuntimeControl } from "@paperkite/sdk";
+import { paperkiteHome } from "../config/paths.js";
 import type { Runtime } from "../engine/runtime.js";
 
 export type { RuntimeControl };
@@ -20,8 +21,7 @@ export interface ControlServer {
 
 export function controlPath(): string {
   if (process.platform === "win32") return "\\\\.\\pipe\\paperkite-control";
-  const home = process.env.PAPERKITE_HOME?.trim();
-  return home ? resolve(home, "control.sock") : "data/.paperkite/control.sock";
+  return join(paperkiteHome(), "control.sock");
 }
 
 export async function startControlServer(runtime: RuntimeControl, path = controlPath()): Promise<ControlServer> {
