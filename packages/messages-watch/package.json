@@ -1,6 +1,6 @@
 {
   "name": "@paperkite/plugin-messages-watch",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "exports": {
     ".": {
@@ -16,8 +16,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@paperkite/sdk": "workspace:*",
     "telegram": "^2.26.22"
+  },
+  "peerDependencies": {
+    "@paperkite/sdk": "workspace:^"
+  },
+  "devDependencies": {
+    "@paperkite/sdk": "workspace:*"
   },
   "paperkite": {
     "plugin": {

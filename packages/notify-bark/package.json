@@ -1,6 +1,6 @@
 {
   "name": "@paperkite/plugin-notify-bark",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     ".": {
@@ -15,7 +15,10 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {
+  "peerDependencies": {
+    "@paperkite/sdk": "workspace:^"
+  },
+  "devDependencies": {
     "@paperkite/sdk": "workspace:*"
   },
   "paperkite": {
