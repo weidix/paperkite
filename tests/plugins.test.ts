@@ -63,3 +63,15 @@ test("bundles load through the extension loader and bind declared handlers", asy
   assert.equal(registry.grantsControl("service", "runtime.console"), true);
   assert.equal(registry.grantsControl("action", "notify.bark"), false);
 });
+
+test("manifest validator symbols resolve into callable config validators", async () => {
+  const { registry } = await loadExtensions(["messages.watch"]);
+  const validateConfig = registry.validatorOf("trigger", "messages.watch");
+  assert.equal(typeof validateConfig, "function");
+  assert.deepEqual(validateConfig?.({ chats: ["@channel_name", "https://t.me/+AAAAAEabcdefgh"] }), []);
+  assert.deepEqual(validateConfig?.({ chats: ["乱填"] }), [
+    "无法解析的聊天引用 乱填，请使用群数字 ID、@用户名或邀请链接"
+  ]);
+  assert.equal(typeof registry.validatorOf("trigger", "messages.poll"), "function");
+  assert.equal(registry.validatorOf("action", "notify.bark"), undefined);
+});
