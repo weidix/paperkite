@@ -2,6 +2,7 @@ import type {
   ActionConstructor,
   CapabilityKind,
   CapabilityOptions,
+  ConfigValidator,
   ServiceConstructor,
   TriggerConstructor
 } from "@paperkite/sdk";
@@ -12,6 +13,7 @@ export class CapabilityRegistry {
   readonly services = new Map<string, ServiceConstructor>();
   private readonly owners = new Map<string, string>();
   private readonly controlGrants = new Map<string, boolean>();
+  private readonly validators = new Map<string, ConfigValidator>();
 
   /** 返回拥有该能力的插件日志作用域（未登记时为 undefined）。 */
   scopeOf(kind: CapabilityKind, name: string): string | undefined {
@@ -21,6 +23,11 @@ export class CapabilityRegistry {
   /** 该能力是否声明需要运行时控制（未声明时上下文中不注入 RuntimeControl）。 */
   grantsControl(kind: CapabilityKind, name: string): boolean {
     return this.controlGrants.get(`${kind}:${name}`) === true;
+  }
+
+  /** 该能力的配置校验器（未声明时为 undefined）。 */
+  validatorOf(kind: CapabilityKind, name: string): ConfigValidator | undefined {
+    return this.validators.get(`${kind}:${name}`);
   }
 
   register(
@@ -38,6 +45,7 @@ export class CapabilityRegistry {
     target.set(normalized, constructor);
     if (scope) this.owners.set(`${kind}:${normalized}`, scope);
     if (options?.control === true) this.controlGrants.set(`${kind}:${normalized}`, true);
+    if (options?.validateConfig) this.validators.set(`${kind}:${normalized}`, options.validateConfig);
   }
 
   getAction(name: string): ActionConstructor {

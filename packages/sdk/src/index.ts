@@ -251,6 +251,14 @@ export interface ActionSpecView {
   readonly hook?: string;
 }
 
+export type StopReason = "error" | "stop" | "maxruns" | "finished";
+
+export interface FlowLastStop {
+  readonly reason: StopReason;
+  readonly error?: string;
+  readonly at: string;
+}
+
 export interface FlowSnapshot {
   readonly kind: FlowKind;
   readonly id: string;
@@ -271,6 +279,9 @@ export interface FlowSnapshot {
   readonly logFile: boolean;
   readonly startedAt?: string;
   readonly suspended?: FlowSuspension;
+  readonly lastStop?: FlowLastStop;
+  readonly warnings?: readonly string[];
+  readonly pendingReload?: boolean;
 }
 
 export interface FlowSuspension {
@@ -306,6 +317,8 @@ export interface RuntimeSnapshot {
   readonly running: boolean;
   readonly pid: number;
   readonly uptimeSeconds: number;
+  readonly configDirty: boolean;
+  readonly flowsFile?: string;
   readonly triggers: readonly string[];
   readonly services: readonly string[];
   readonly schedules: readonly string[];
@@ -362,7 +375,18 @@ export interface ServiceStoppedEvent {
   readonly id: string;
   readonly capability: string;
   readonly session?: string;
-  readonly reason: "stop" | "error" | "finished";
+  readonly reason: StopReason;
+  readonly error?: string;
+  readonly durationMs: number;
+  readonly at: string;
+}
+
+export interface TriggerStoppedEvent {
+  readonly type: "trigger.stopped";
+  readonly id: string;
+  readonly capability: string;
+  readonly session?: string;
+  readonly reason: StopReason;
   readonly error?: string;
   readonly durationMs: number;
   readonly at: string;
@@ -443,6 +467,7 @@ export type RuntimeEvent =
   | ActionFinishedEvent
   | ServiceStartedEvent
   | ServiceStoppedEvent
+  | TriggerStoppedEvent
   | FlowUpdatedEvent
   | FlowReloadedEvent
   | FlowFinishedEvent
@@ -486,8 +511,11 @@ export interface RuntimeControl {
   subscribe(listener: RuntimeEventListener): Unsubscribe;
 }
 
+export type ConfigValidator = (config: unknown) => readonly string[];
+
 export interface CapabilityOptions {
   readonly control?: boolean;
+  readonly validateConfig?: ConfigValidator;
 }
 
 export type ActionConstructor = new (context: ActionContext<any>) => Action<any>;
@@ -499,6 +527,8 @@ export interface PluginCapability {
   readonly name: string;
   readonly handler?: string;
   readonly control?: boolean;
+  /** 校验器本身，或插件模块导出的符号名（清单为 JSON 时只能写符号名）。 */
+  readonly validateConfig?: ConfigValidator | string;
 }
 
 export interface PluginInfo {
@@ -506,6 +536,8 @@ export interface PluginInfo {
   readonly version?: string;
   readonly capabilities: readonly PluginCapability[];
   readonly loaded: boolean;
+  /** 任一启用流程引用了该插件的能力。 */
+  readonly used: boolean;
 }
 
 export interface PluginModule {
