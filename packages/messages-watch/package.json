@@ -1,6 +1,6 @@
 {
   "name": "@paperkite/plugin-messages-watch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     ".": {
@@ -23,8 +23,18 @@
     "plugin": {
       "entry": "./dist/index.js",
       "capabilities": [
-        { "kind": "trigger", "name": "messages.watch", "handler": "LiveConversationTrigger" },
-        { "kind": "trigger", "name": "messages.poll", "handler": "PollConversationTrigger" }
+        {
+          "kind": "trigger",
+          "name": "messages.watch",
+          "handler": "LiveConversationTrigger",
+          "validateConfig": "validateConfig"
+        },
+        {
+          "kind": "trigger",
+          "name": "messages.poll",
+          "handler": "PollConversationTrigger",
+          "validateConfig": "validateConfig"
+        }
       ]
     }
   }
