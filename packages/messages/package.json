@@ -1,6 +1,6 @@
 {
   "name": "@paperkite/plugin-messages",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     ".": {
@@ -16,8 +16,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@paperkite/sdk": "workspace:*",
     "luxon": "^3.7.2"
+  },
+  "peerDependencies": {
+    "@paperkite/sdk": "workspace:^"
+  },
+  "devDependencies": {
+    "@paperkite/sdk": "workspace:*"
   },
   "paperkite": {
     "plugin": {

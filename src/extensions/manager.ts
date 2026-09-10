@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { profileDirectory, type ProfileManifest } from "./profile.js";
+import {
+  PROFILE_WORKSPACE,
+  defaultProfileManifest,
+  profileDirectory,
+  withSdkDependency,
+  type ProfileManifest
+} from "./profile.js";
 
 export function managePlugins(profile: string, args: readonly string[]): number {
   const directory = profileDirectory(profile);
@@ -32,28 +38,13 @@ export function managePlugins(profile: string, args: readonly string[]): number 
 
 function initProfileSync(directory: string, profile: string): void {
   mkdirSync(directory, { recursive: true });
-  const packagePath = join(directory, "package.json");
-  if (!existsSync(packagePath)) {
-    writeFileSync(
-      packagePath,
-      JSON.stringify(
-        {
-          name: "paperkite-profile-" + profile,
-          version: "0.0.0",
-          private: true,
-          type: "module",
-          dependencies: {},
-          paperkite: { profile: { plugins: [] } }
-        },
-        null,
-        2
-      ) + "\n",
-      "utf8"
-    );
-  }
+  const current = readProfileSync(directory);
+  const manifest = Object.keys(current).length ? current : defaultProfileManifest(profile);
+  const next = withSdkDependency(manifest);
+  if (next !== manifest) writeProfileSync(directory, next);
   const workspacePath = join(directory, "pnpm-workspace.yaml");
   if (!existsSync(workspacePath)) {
-    writeFileSync(workspacePath, "packages:\n  - .\n\nautoInstallPeers: false\n", "utf8");
+    writeFileSync(workspacePath, PROFILE_WORKSPACE, "utf8");
   }
 }
 

@@ -68,7 +68,7 @@ importers:
         version: 7.0.2
 
   packages/account-health:
-    dependencies:
+    devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -78,9 +78,6 @@ importers:
       '@fastify/static':
         specifier: ^10.1.3
         version: 10.1.3
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
       big-integer:
         specifier: ^1.6.52
         version: 1.6.52
@@ -106,6 +103,9 @@ importers:
       '@internationalized/date':
         specifier: ^3.8.1
         version: 3.12.4
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       '@sveltejs/adapter-static':
         specifier: ^3.0.10
         version: 3.0.10(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))
@@ -141,37 +141,39 @@ importers:
         version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
 
   packages/favorites-cleanup:
-    dependencies:
+    devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
 
   packages/messages:
     dependencies:
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
       luxon:
         specifier: ^3.7.2
         version: 3.7.2
-
-  packages/messages-watch:
-    dependencies:
+    devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
+
+  packages/messages-watch:
+    dependencies:
       telegram:
         specifier: ^2.26.22
         version: 2.26.22
+    devDependencies:
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
 
   packages/notify-bark:
-    dependencies:
+    devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
 
   packages/process-run:
-    dependencies:
+    devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -181,9 +183,6 @@ importers:
       '@fastify/static':
         specifier: ^10.1.3
         version: 10.1.3
-      '@paperkite/sdk':
-        specifier: workspace:*
-        version: link:../sdk
       fastify:
         specifier: ^5.12.1
         version: 5.12.1
@@ -218,6 +217,9 @@ importers:
       '@internationalized/date':
         specifier: ^3.8.1
         version: 3.12.4
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       '@sveltejs/adapter-static':
         specifier: ^3.0.10
         version: 3.0.10(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.57.0)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))(svelte@5.57.0)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)))
