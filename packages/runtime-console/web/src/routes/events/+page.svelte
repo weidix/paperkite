@@ -45,7 +45,8 @@
           ? { error: event.error, effectiveConfig: event.effectiveConfig, skipped: event.skipped }
           : undefined;
       case "service.stopped":
-        return { reason: event.reason, error: event.error };
+      case "trigger.stopped":
+        return { reason: event.reason, error: event.error, durationMs: event.durationMs };
       case "flows.reloaded":
         return event.error === undefined ? undefined : { error: event.error };
       default:

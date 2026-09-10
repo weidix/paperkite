@@ -9,9 +9,9 @@
     RotateCcw,
     Zap
   } from "lucide-svelte";
-  import { AlertDialog } from "bits-ui";
   import Badge from "$lib/components/ui/badge.svelte";
   import Button from "$lib/components/ui/button.svelte";
+  import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import LiveBadge from "$lib/components/ui/live-badge.svelte";
   import Status from "$lib/components/ui/status.svelte";
   import { api } from "$lib/api";
@@ -22,18 +22,9 @@
   import type { PluginInfo } from "$lib/runtime";
   import { cn } from "$lib/utils";
 
-  const AlertDialogRoot = AlertDialog.Root;
-  const AlertDialogTrigger = AlertDialog.Trigger;
-  const AlertDialogPortal = AlertDialog.Portal;
-  const AlertDialogOverlay = AlertDialog.Overlay;
-  const AlertDialogContent = AlertDialog.Content;
-  const AlertDialogTitle = AlertDialog.Title;
-  const AlertDialogDescription = AlertDialog.Description;
-  const AlertDialogAction = AlertDialog.Action;
-  const AlertDialogCancel = AlertDialog.Cancel;
-
   let now = $state(Date.now());
   let reloading = $state(false);
+  let reloadPrompt = $state(false);
   let plugins: PluginInfo[] | null = $state(null);
 
   $effect(() => {
@@ -114,43 +105,25 @@
         </div>
       </div>
 
-      <AlertDialogRoot>
-        <AlertDialogTrigger
-          class="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-          disabled={reloading}
-        >
-          <RotateCcw class={cn("size-4", reloading && "animate-spin")} aria-hidden="true" />
-          重载配置
-        </AlertDialogTrigger>
-        <AlertDialogPortal>
-          <AlertDialogOverlay
-            class="fixed inset-0 z-50 bg-black/45 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
-          />
-          <AlertDialogContent
-            class="fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-card p-6 shadow-xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-1/2"
-          >
-            <AlertDialogTitle class="font-display text-lg font-semibold leading-none">重载全部配置？</AlertDialogTitle>
-            <AlertDialogDescription class="text-sm text-muted-foreground">
-              运行时将停止现有流、重读 flows.yml 并按新配置重启，进程与会话池不会退出。
-            </AlertDialogDescription>
-            <div class="flex justify-end gap-2">
-              <AlertDialogCancel
-                class="inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                取消
-              </AlertDialogCancel>
-              <AlertDialogAction
-                class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
-                onclick={() => void reloadRuntime()}
-              >
-                重载
-              </AlertDialogAction>
-            </div>
-          </AlertDialogContent>
-        </AlertDialogPortal>
-      </AlertDialogRoot>
+      <Button
+        variant="outline"
+        class="h-9 gap-1.5 border-input bg-background px-4 shadow-sm"
+        disabled={reloading}
+        onclick={() => (reloadPrompt = true)}
+      >
+        <RotateCcw class={cn("size-4", reloading && "animate-spin")} aria-hidden="true" />
+        重载配置
+      </Button>
     </div>
   </div>
+
+  <ConfirmDialog
+    bind:open={reloadPrompt}
+    title="重载全部配置？"
+    description="运行时将停止现有流、重读 flows.yml 并按新配置重启，进程与会话池不会退出。"
+    confirmLabel="重载"
+    onConfirm={() => void reloadRuntime()}
+  />
 
   {#if snapshot}
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -7,21 +7,25 @@
     MoreHorizontal,
     RefreshCw,
     Rocket,
+    SquarePen,
+    TriangleAlert,
     Zap
   } from "lucide-svelte";
   import { DropdownMenu } from "bits-ui";
   import { toast } from "$lib/toast-store.svelte";
   import { isEmptyConfig } from "$lib/action-draft";
   import Badge from "$lib/components/ui/badge.svelte";
-  import Button from "$lib/components/ui/button.svelte";
+  import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import Status from "$lib/components/ui/status.svelte";
   import Switch from "$lib/components/ui/switch.svelte";
   import Tabs from "$lib/components/ui/tabs.svelte";
   import FlowDialog from "$lib/components/flow-dialog.svelte";
   import { api } from "$lib/api";
   import { errorText } from "$lib/format";
+  import { flowStatus } from "$lib/flow-status";
   import { runtime } from "$lib/runtime.svelte";
   import type { FlowKind, FlowSnapshot } from "$lib/runtime";
+  import { cn } from "$lib/utils";
 
   const MenuRoot = DropdownMenu.Root;
   const MenuTrigger = DropdownMenu.Trigger;
@@ -51,6 +55,7 @@
   let selected: FlowSnapshot | null = $state(null);
   let dialogOpen = $state(false);
   let pending = $state<string | null>(null);
+  let toggleTarget = $state<{ flow: FlowSnapshot; enabled: boolean } | null>(null);
 
   const snapshot = $derived(runtime.snapshot);
   const flows = $derived(snapshot?.flows ?? []);
@@ -97,6 +102,46 @@
     return { filled: slots.length - missing, total: slots.length, missing };
   }
 
+  /** 行内状态图标：错误优先，其次配额耗尽与配置警告；完整信息进 title。 */
+  function flowNotice(flow: FlowSnapshot): { tone: "error" | "warn"; title: string } | undefined {
+    const lines: string[] = [];
+    let tone: "error" | "warn" | undefined;
+    if (!flow.suspended) {
+      const reason = flow.lastStop?.reason;
+      if (reason === "error") {
+        tone = "error";
+        lines.push(`启动失败：${flow.lastStop?.error ?? "未知错误"}`);
+      } else if (reason === "maxruns") {
+        tone = "warn";
+        lines.push("已停用（配额耗尽）：触发次数已达 maxRuns，本次进程内停用");
+      }
+    }
+    for (const warning of flow.warnings ?? []) {
+      tone ??= "warn";
+      lines.push(warning);
+    }
+    return tone ? { tone, title: lines.join("\n") } : undefined;
+  }
+
+  function suspensionTitle(flow: FlowSnapshot): string {
+    const suspension = flow.suspended;
+    if (!suspension) return "";
+    const prefix = `会话 ${suspension.session ?? ""} 自 ${suspension.since} 起隔离`;
+    return suspension.error ? `${prefix}：${suspension.error}` : `${prefix}，待会话恢复自动重启`;
+  }
+
+  function toggleTitle(target: { flow: FlowSnapshot; enabled: boolean }): string {
+    return `确定${target.enabled ? "启用" : "停用"} ${target.flow.id}？`;
+  }
+
+  function toggleEffect(target: { flow: FlowSnapshot; enabled: boolean }): string {
+    const { flow, enabled } = target;
+    if (flow.kind === "trigger") return enabled ? "立即按新状态启动监听。" : "立即停止监听。";
+    if (flow.kind === "schedule") return enabled ? "立即挂上调度。" : "立即卸下调度。";
+    if (flow.autoStart) return enabled ? "自启服务立即启动。" : "自启服务立即停止。";
+    return "手动服务只写回配置，运行状态需另行「启动服务」。";
+  }
+
   async function run(flow: FlowSnapshot): Promise<void> {
     pending = flow.id;
     try {
@@ -136,14 +181,25 @@
     }
   }
 
-  async function setEnabled(flow: FlowSnapshot, enabled: boolean): Promise<void> {
+  async function applyToggle(target: { flow: FlowSnapshot; enabled: boolean }): Promise<void> {
+    const { flow, enabled } = target;
     pending = flow.id;
     try {
       const result = await api.updateFlow(flow.id, { enabled });
-      toast.success(result.changed ? `已${enabled ? "启用" : "停用"} ${flow.id}` : "没有变更");
+      if (!result.changed) {
+        toast.info("没有变更");
+        return;
+      }
+      try {
+        await api.reloadFlow(flow.id);
+        toast.success(`已${enabled ? "启用" : "停用"}并生效`);
+      } catch (error) {
+        toast.error(`配置已写回，重载失败：${errorText(error)}`);
+      }
       await runtime.refresh();
     } catch (error) {
       toast.error(errorText(error));
+      await runtime.refresh();
     } finally {
       pending = null;
     }
@@ -197,30 +253,59 @@
               {#each visible as flow (`${flow.kind}:${flow.id}`)}
                 {@const busy = pending === flow.id}
                 {@const summary = configSummary(flow)}
+                {@const notice = flowNotice(flow)}
+                {@const status = flowStatus(flow)}
                 <tr class="border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted cursor-pointer" onclick={() => openDialog(flow)}>
-                  <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
-                    {#if flow.suspended}
-                      <Status tone="bad"></Status>
-                    {:else if flow.active}
-                      <Status tone="ok" pulse></Status>
-                    {:else if flow.enabled || flow.kind === "command"}
-                      <Status tone="ok"></Status>
-                    {:else}
-                      <Status tone="idle"></Status>
-                    {/if}
+                  <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0" title={status.label}>
+                    <Status tone={status.tone} pulse={status.pulse}></Status>
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
-                    <button
-                      type="button"
-                      class="text-left font-mono text-sm underline-offset-4 hover:underline"
-                      onclick={(event) => {
-                        event.stopPropagation();
-                        openDialog(flow);
-                      }}
-                    >
-                      {flow.id}
-                    </button>
-                    <span class="ml-2 text-xs text-muted-foreground">{KIND_LABEL[flow.kind]}</span>
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <button
+                        type="button"
+                        class="text-left font-mono text-sm underline-offset-4 hover:underline"
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          openDialog(flow);
+                        }}
+                      >
+                        {flow.id}
+                      </button>
+                      <span class="text-xs text-muted-foreground">{KIND_LABEL[flow.kind]}</span>
+                      {#if notice}
+                        <span
+                          class={cn(
+                            "inline-flex shrink-0 cursor-help items-center",
+                            notice.tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400"
+                          )}
+                          role="img"
+                          aria-label={notice.title}
+                          title={notice.title}
+                        >
+                          {#if notice.tone === "error"}
+                            <CircleAlert class="size-3.5" aria-hidden="true" />
+                          {:else}
+                            <TriangleAlert class="size-3.5" aria-hidden="true" />
+                          {/if}
+                        </span>
+                      {/if}
+                      {#if flow.pendingReload}
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-md border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:pointer-events-none disabled:opacity-50 dark:text-amber-400"
+                          disabled={busy}
+                          title="按最新定义重载此条"
+                          aria-label={`重载 ${flow.id}`}
+                          onclick={(event) => {
+                            event.stopPropagation();
+                            void reload(flow);
+                          }}
+                        >
+                          <RefreshCw class={cn("size-3.5", busy && "animate-spin")} aria-hidden="true" />
+                          待重载
+                        </button>
+                      {/if}
+                    </div>
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
                     <span class="font-mono tracking-tight text-xs text-muted-foreground">{flow.capability}</span>
@@ -229,7 +314,7 @@
                     {#if flow.session}
                       <span class="font-mono tracking-tight text-xs text-muted-foreground">{flow.session}</span>
                       {#if flow.suspended}
-                        <Badge variant="destructive" class="ml-1">会话隔离</Badge>
+                        <Badge variant="destructive" class="ml-1" title={suspensionTitle(flow)}>会话隔离</Badge>
                       {/if}
                     {:else}
                       <span class="text-xs text-muted-foreground/60">-</span>
@@ -253,7 +338,8 @@
                     {#if flow.kind !== "command"}
                       <Switch
                         checked={flow.enabled}
-                        onCheckedChange={(value) => void setEnabled(flow, value)}
+                        controlled
+                        onCheckedChange={(value) => (toggleTarget = { flow, enabled: value })}
                         disabled={busy}
                         onclick={(event) => event.stopPropagation()}
                         aria-label={`切换 ${flow.id} 启用状态`}
@@ -275,6 +361,13 @@
                           sideOffset={4}
                           align="end"
                         >
+                          <MenuItem
+                            onSelect={() => openDialog(flow)}
+                            class="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent"
+                          >
+                            <SquarePen class="size-4" aria-hidden="true" />
+                            修改此条
+                          </MenuItem>
                           {#if flow.kind === "command" || flow.kind === "schedule"}
                             <MenuItem
                               onSelect={() => void run(flow)}
@@ -315,6 +408,23 @@
 
     {#if selected}
       <FlowDialog flow={selected} bind:open={dialogOpen} onOpenChange={(open) => !open && (selected = null)} />
+    {/if}
+
+    {#if toggleTarget}
+      <ConfirmDialog
+        open={toggleTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) toggleTarget = null;
+        }}
+        onCancel={() => void runtime.refresh()}
+        title={toggleTitle(toggleTarget)}
+        description={`${toggleEffect(toggleTarget)}确认后配置写回 flows.yml 并立即重载该条。`}
+        confirmLabel={toggleTarget.enabled ? "启用" : "停用"}
+        tone={toggleTarget.enabled ? "default" : "destructive"}
+        onConfirm={() => {
+          if (toggleTarget) void applyToggle(toggleTarget);
+        }}
+      />
     {/if}
   </div>
 {/if}
