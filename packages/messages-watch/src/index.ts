@@ -1,5 +1,8 @@
 import { NewMessage } from "telegram/events/index.js";
-import { Trigger, type TriggerEvent } from "@paperkite/sdk";
+import { Trigger, type SessionAccess, type TriggerEvent } from "@paperkite/sdk";
+import { resolveChat, type ResolveClient } from "./resolve.js";
+
+export { resolveChat, type ResolveClient } from "./resolve.js";
 
 interface WatchConfig {
   readonly chat?: string | number;
@@ -16,10 +19,24 @@ interface WatchConfig {
   readonly afterMessageId?: number;
 }
 
-interface EventClient {
+interface EventClient extends ResolveClient {
   addEventHandler(handler: (event: unknown) => void, builder: NewMessage): void;
   removeEventHandler(handler: (event: unknown) => void, builder: NewMessage): void;
   getMessages(chat: string | number, options: Record<string, unknown>): Promise<readonly unknown[]>;
+}
+
+const CHAT_REFERENCE =
+  /^(-?\d+|@[\w\d_]{4,32}|(?:https?:\/\/)?(?:www\.)?t\.me\/[\w\d_]{4,32}|(?:https?:\/\/)?(?:www\.)?t\.me\/(?:joinchat\/|\+)[\w-]{8,}|tg:\/\/join\?invite=[\w-]{8,})$/i;
+
+/** 校验 chats/chat 的引用格式，返回逐项警告；纯函数，不触网。 */
+export function validateConfig(config: unknown): readonly string[] {
+  const wrapper = isRecord(config) ? config : {};
+  const values = [...(Array.isArray(wrapper.chats) ? wrapper.chats : [])];
+  if (wrapper.chat !== undefined && wrapper.chat !== null) values.unshift(wrapper.chat);
+  return values
+    .map((value) => String(value).trim())
+    .filter((value) => !CHAT_REFERENCE.test(value))
+    .map((value) => `无法解析的聊天引用 ${value}，请使用群数字 ID、@用户名或邀请链接`);
 }
 
 export class LiveConversationTrigger extends Trigger<WatchConfig> {
@@ -31,8 +48,9 @@ export class LiveConversationTrigger extends Trigger<WatchConfig> {
     try {
       await this.sessions.run(async (rawClient) => {
         const client = rawClient as EventClient;
+        const resolved = await Promise.all(chats.map((chat) => resolveChat(client, chat)));
         const builder = new NewMessage({
-          chats: chats as never[],
+          chats: resolved as never[],
           fromUsers: this.config.fromUsers as never[] | undefined,
           incoming: this.config.incoming,
           outgoing: this.config.outgoing,
@@ -68,11 +86,12 @@ export class PollConversationTrigger extends Trigger<WatchConfig> {
     const interval = normalizeSeconds(this.config.intervalSeconds, 30);
     const limit = normalizeLimit(this.config.maxMessages);
     const matcher = makePattern(this.config);
+    const resolved = await resolveChats(this.sessions, chats);
     const cursors = new Map<string, number>();
-    for (const chat of chats) cursors.set(cursorKey(chat), this.config.afterMessageId ?? 0);
+    for (const chat of resolved) cursors.set(cursorKey(chat), this.config.afterMessageId ?? 0);
 
     while (!this.signal.aborted) {
-      for (const chat of chats) {
+      for (const chat of resolved) {
         if (this.signal.aborted) break;
         try {
           await runUntilAborted(
@@ -109,6 +128,13 @@ function listChats(config: WatchConfig): Array<string | number> {
   const result = [...new Map(values.map((value) => [String(value), value])).values()];
   if (!result.length) throw new Error("conversation watcher needs chat or chats");
   return result;
+}
+
+async function resolveChats(sessions: SessionAccess, chats: readonly (string | number)[]): Promise<Array<string | number>> {
+  return sessions.run(async (rawClient) => {
+    const client = rawClient as EventClient;
+    return Promise.all(chats.map((chat) => resolveChat(client, chat)));
+  });
 }
 
 function makePattern(config: WatchConfig): RegExp | undefined {
