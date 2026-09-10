@@ -1,18 +1,25 @@
 {
   "name": "@paperkite/plugin-account-health",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
     "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@paperkite/sdk": "workspace:*"
   },
   "paperkite": {
     "plugin": {
-      "entry": "./src/index.ts",
+      "entry": "./dist/index.js",
       "capabilities": [
         { "kind": "trigger", "name": "account.health", "handler": "SessionHealthTrigger", "control": true }
       ]

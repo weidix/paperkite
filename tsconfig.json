@@ -18,6 +18,6 @@
     "sourceMap": true,
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts", "packages/*/src/**/*.ts", "data/hooks/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "dist", "packages/message-archive/public"]
+  "include": ["src/**/*.ts", "data/hooks/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

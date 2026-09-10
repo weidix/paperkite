@@ -3,6 +3,8 @@
   "include": ["src/**/*.ts"],
   "compilerOptions": {
     "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"],
     "paths": {
       "@/*": ["./web/src/*"]
     }

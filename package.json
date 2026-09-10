@@ -1,7 +1,6 @@
 {
   "name": "paperkite",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
     "paperkite": "./dist/src/cli.js"
@@ -9,6 +8,7 @@
   "engines": {
     "node": ">=22.14"
   },
+  "files": ["dist", "!dist/tests", "data/settings.example.yml", "data/flows.example.yml"],
   "paperkite": {
     "bundles": [
       "@paperkite/plugin-messages",
@@ -22,10 +22,12 @@
     ]
   },
   "scripts": {
-    "dev": "tsx src/cli.ts",
-    "build": "tsc -p tsconfig.json && pnpm --filter @paperkite/plugin-runtime-console build:web && pnpm --filter @paperkite/plugin-archive build:web",
-    "start": "node --import tsx/esm dist/src/cli.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @paperkite/plugin-runtime-console typecheck:web && pnpm --filter @paperkite/plugin-archive typecheck:web",
+    "dev": "tsx --conditions=development src/cli.ts",
+    "build": "pnpm build:web && pnpm -r build && pnpm build:core",
+    "build:core": "tsc -p tsconfig.json",
+    "build:web": "pnpm --filter @paperkite/plugin-archive build:web && pnpm --filter @paperkite/plugin-runtime-console build:web",
+    "start": "node dist/src/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r typecheck",
     "test": "tsx --test tests/*.test.ts",
     "check": "pnpm typecheck && pnpm test"
   },
