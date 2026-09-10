@@ -19,13 +19,14 @@ import { CapabilityRegistry } from "./registry.js";
 import { profileDirectory, readProfile } from "./profile.js";
 
 interface PackagePluginMeta {
-  readonly plugin?: boolean | { readonly entry?: string; readonly capabilities?: readonly PluginCapability[] };
-  readonly entry?: string;
+  readonly plugin?: boolean | { readonly capabilities?: readonly PluginCapability[] };
   readonly capabilities?: readonly PluginCapability[];
 }
 
 interface PackageManifest {
   readonly version?: string;
+  readonly exports?: unknown;
+  readonly main?: string;
   readonly paperkite?: PackagePluginMeta;
 }
 
@@ -44,10 +45,11 @@ export async function loadExtensions(
   const configured = Array.isArray(profileManifest.paperkite?.profile?.plugins)
     ? profileManifest.paperkite.profile.plugins
     : [];
-  const pluginNames = unique([...configured, ...(await readBundles())]);
+  const bundles = new Set(await readBundles());
+  const pluginNames = unique([...configured, ...bundles]);
   const candidates: PluginCandidate[] = [];
   for (const name of pluginNames) {
-    const candidate = await inspectPlugin(name, profile);
+    const candidate = await inspectPlugin(name, profile, bundles.has(name));
     if (candidate) candidates.push(candidate);
   }
 
@@ -137,33 +139,78 @@ function assertConstructorKind(
 interface PluginCandidate {
   readonly name: string;
   readonly version?: string;
-  readonly packageDirectory: string;
-  readonly entry: string;
+  readonly moduleUrl: string;
   readonly capabilities: readonly PluginCapability[];
 }
 
-async function inspectPlugin(name: string, profile: string): Promise<PluginCandidate | undefined> {
-  const packageFile = resolvePackageJson(name, profile);
+async function inspectPlugin(name: string, profile: string, bundled: boolean): Promise<PluginCandidate | undefined> {
+  const packageFile = bundled ? resolveCorePackageJson(name) : resolvePackageJson(name, profile);
   if (!packageFile) return undefined;
   const manifest = JSON.parse(await readFile(packageFile, "utf8")) as PackageManifest;
   const metadata = manifest.paperkite;
   if (!metadata?.plugin) return undefined;
   const pluginObject = typeof metadata.plugin === "object" ? metadata.plugin : {};
-  const entry = pluginObject.entry ?? metadata.entry ?? "./dist/index.js";
   const capabilities = pluginObject.capabilities ?? metadata.capabilities ?? [];
   if (!Array.isArray(capabilities)) throw new Error("invalid capability metadata in " + name);
   return {
     name,
     version: typeof manifest.version === "string" ? manifest.version : undefined,
-    packageDirectory: dirname(packageFile),
-    entry,
+    moduleUrl: resolvePluginModule(manifest, dirname(packageFile), name),
     capabilities
   };
 }
 
 async function importPlugin(candidate: PluginCandidate): Promise<PluginModule> {
-  const modulePath = resolve(candidate.packageDirectory, candidate.entry);
-  return (await import(pathToFileURL(modulePath).href)) as PluginModule;
+  try {
+    return (await import(candidate.moduleUrl)) as PluginModule;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error("failed to load plugin " + candidate.name + ": " + detail);
+  }
+}
+
+function resolvePluginModule(manifest: PackageManifest, packageDirectory: string, name: string): string {
+  const entry = resolveEntry(manifest);
+  if (!entry) {
+    throw new Error("plugin " + name + " declares no resolvable entry under the current conditions");
+  }
+  return pathToFileURL(resolve(packageDirectory, entry)).href;
+}
+
+function resolveEntry(manifest: PackageManifest): string | undefined {
+  if (typeof manifest.exports === "object" && manifest.exports !== null) {
+    const entry = resolveConditionalEntry((manifest.exports as Record<string, unknown>)["."], runConditions());
+    if (entry) return entry;
+  }
+  return manifest.main ?? "./index.js";
+}
+
+const EXACT_CONDITIONS = ["development", "node", "import", "default"] as const;
+
+function runConditions(): readonly string[] {
+  return developmentRequested() ? EXACT_CONDITIONS : EXACT_CONDITIONS.filter((condition) => condition !== "development");
+}
+
+function developmentRequested(): boolean {
+  const tokens = [...process.argv, ...(process.env.NODE_OPTIONS ?? "").split(/\s+/)];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--conditions=development") return true;
+    if (token === "--conditions" && tokens[index + 1] === "development") return true;
+  }
+  return false;
+}
+
+function resolveConditionalEntry(value: unknown, conditions: readonly string[]): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  for (let index = 0; index < conditions.length; index += 1) {
+    const condition = conditions[index];
+    if (!condition || !(condition in value)) continue;
+    const match = resolveConditionalEntry((value as Record<string, unknown>)[condition], conditions.slice(index + 1));
+    if (match) return match;
+  }
+  return undefined;
 }
 
 function resolvePackageJson(name: string, profile: string): string | undefined {
@@ -176,6 +223,15 @@ function resolvePackageJson(name: string, profile: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** bundled 插件固定从运行时根解析，profile 与工作区链接不可覆盖。 */
+function resolveCorePackageJson(name: string): string | undefined {
+  try {
+    return createRequire(join(coreRoot(), "package.json")).resolve(name + "/package.json");
+  } catch {
+    return undefined;
+  }
 }
 
 function unique(values: readonly string[]): string[] {

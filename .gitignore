@@ -27,3 +27,6 @@ packages/runtime-console/public/
 .pnpm-store/
 data/downloads/
 viz/
+docs/
+
+out/
