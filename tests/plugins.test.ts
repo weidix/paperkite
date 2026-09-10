@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadExtensions } from "../src/extensions/loader.js";
+import { loadExtensions, isCapabilityHandler } from "../src/extensions/loader.js";
 
 const pluginDirectories = [
   "messages",
@@ -74,4 +74,16 @@ test("manifest validator symbols resolve into callable config validators", async
   ]);
   assert.equal(typeof registry.validatorOf("trigger", "messages.poll"), "function");
   assert.equal(registry.validatorOf("action", "notify.bark"), undefined);
+});
+
+test("handler checks accept classes from another sdk copy", () => {
+  class Trigger {}
+  class Service {}
+  class HealthTrigger extends Trigger {}
+  class ConsoleService extends Service {}
+
+  assert.equal(isCapabilityHandler(HealthTrigger, "trigger"), true);
+  assert.equal(isCapabilityHandler(ConsoleService, "service"), true);
+  assert.equal(isCapabilityHandler(HealthTrigger, "action"), false);
+  assert.equal(isCapabilityHandler(class {}, "trigger"), false);
 });
