@@ -2,7 +2,9 @@ import type {
   ActionContext,
   ActionSpecInput,
   ActionSpecView,
+  ConfigValidator,
   FlowKind,
+  FlowLastStop,
   FlowPatch,
   FlowRef,
   FlowSnapshot,
@@ -15,11 +17,13 @@ import type {
   ServiceContext,
   SessionSnapshot,
   SessionState,
+  StopReason,
   TriggerContext,
   TriggerEmission,
   Unsubscribe
 } from "@paperkite/sdk";
 import { SessionUnavailableError } from "@paperkite/sdk";
+import { statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type {
   ActionSpec,
@@ -42,6 +46,7 @@ export interface RuntimeOptions {
   readonly sessions: SessionPool;
   readonly logger: AppLogger;
   readonly installed: readonly PluginInfo[];
+  readonly markUsed?: (references: ReadonlySet<string>) => readonly PluginInfo[];
   readonly reloadCatalog?: () => Promise<FlowCatalog>;
   readonly stopGraceMs?: number;
 }
@@ -56,7 +61,10 @@ export class Runtime {
   private readonly serviceStartedAt = new Map<string, number>();
   private readonly activeActionEntries = new Map<string, ActiveActionEntry>();
   private readonly suspended = new Map<string, Suspension>();
+  private readonly lastStops = new Map<string, FlowLastStop>();
+  private readonly pendingReload = new Set<string>();
   private catalog: FlowCatalog;
+  private configBaseline: ConfigBaseline | undefined;
   private lifecycle = new AbortController();
   private started = false;
   private startedAt = 0;
@@ -65,6 +73,7 @@ export class Runtime {
 
   constructor(private readonly options: RuntimeOptions) {
     this.catalog = options.catalog;
+    this.configBaseline = readBaseline(options.catalog.path);
     this.sessionUnsub = options.sessions.subscribe((change) => this.handleSessionChange(change));
   }
 
@@ -75,6 +84,8 @@ export class Runtime {
       running: this.started,
       pid: process.pid,
       uptimeSeconds: this.started ? (Date.now() - this.startedAt) / 1000 : 0,
+      configDirty: this.configDirty(),
+      flowsFile: this.catalog.path,
       triggers: this.catalog.enabled("trigger").map((item) => item.id),
       services: this.catalog.enabled("service").map((item) => item.id),
       schedules: this.catalog.enabled("schedule").map((item) => item.id),
@@ -95,7 +106,8 @@ export class Runtime {
   }
 
   listPlugins(): readonly PluginInfo[] {
-    return this.options.installed;
+    const markUsed = this.options.markUsed;
+    return markUsed ? markUsed(this.catalog.capabilityRefs()) : this.options.installed;
   }
 
   subscribe(listener: RuntimeEventListener): Unsubscribe {
@@ -154,6 +166,9 @@ export class Runtime {
     const wasStarted = this.started;
     await this.stopFlows();
     this.catalog = next;
+    this.configBaseline = readBaseline(next.path);
+    this.pendingReload.clear();
+    this.clearStops();
     invalidateAllHooks();
     if (wasStarted) {
       const sessions = collectSessions(this.catalog);
@@ -247,8 +262,12 @@ export class Runtime {
     const next = await updateFlowItem(this.catalog, identifier, patch as Record<string, unknown>);
     if (!next) return false;
     this.catalog = next;
+    this.configBaseline = readBaseline(next.path);
     const item = next.find(identifier);
-    if (item) this.emit({ type: "flow.updated", id: item.id, kind: item.kind });
+    if (item) {
+      if (item.kind !== "command") this.pendingReload.add(item.id);
+      this.emit({ type: "flow.updated", id: item.id, kind: item.kind });
+    }
     return true;
   }
 
@@ -256,6 +275,7 @@ export class Runtime {
     const item = this.catalog.find(identifier);
     if (!item) return false;
     this.invalidateFlowHooks(item);
+    this.pendingReload.delete(item.id);
     if (item.kind === "schedule") {
       this.scheduler.remove(item.id);
       if (this.started && item.enabled) this.startSchedule(item);
@@ -431,15 +451,37 @@ export class Runtime {
   private startTrigger(definition: TriggerDefinition): void {
     const key = `trigger:${definition.id}`;
     const controller = new AbortController();
+    const startedAt = Date.now();
+    let depleted = false;
     this.controllers.set(key, controller);
-    const task = this.runTrigger(definition, controller).catch((error) => {
+    let failure: unknown;
+    const task = this.runTrigger(definition, controller, () => {
+      depleted = true;
+    }).catch((error) => {
+      failure = error;
       if (!controller.signal.aborted) this.options.logger.error("trigger stopped: " + definition.id, error);
     }).finally(() => {
+      const owned = this.owns(key, task);
       if (this.controllers.get(key) === controller) this.controllers.delete(key);
-      if (this.runs.get(key) === task) this.runs.delete(key);
+      if (owned) this.runs.delete(key);
+      if (depleted) this.depleteTrigger(definition);
+      if (!owned) return;
+      const error = failure instanceof Error ? failure.message : undefined;
+      const reason = this.stopReason(failure, controller, depleted);
+      this.recordStop(key, reason, error);
+      this.emit({
+        type: "trigger.stopped",
+        id: definition.id,
+        capability: definition.capability,
+        session: definition.session,
+        reason,
+        error,
+        durationMs: Date.now() - startedAt
+      });
     });
     this.runs.set(key, task);
     this.track(task);
+    this.clearStop(key, task);
   }
 
   private launchService(definition: ServiceDefinition): void {
@@ -452,28 +494,73 @@ export class Runtime {
       failure = error;
       if (!controller.signal.aborted) this.options.logger.error("service stopped: " + definition.id, error);
     }).finally(() => {
+      const owned = this.owns(key, task);
       if (this.controllers.get(key) === controller) this.controllers.delete(key);
-      if (this.runs.get(key) === task) this.runs.delete(key);
+      if (owned) this.runs.delete(key);
+      if (!owned) return;
       const startedAt = this.serviceStartedAt.get(key);
       this.serviceStartedAt.delete(key);
+      const error = failure instanceof Error ? failure.message : undefined;
+      const reason = this.stopReason(failure, controller, false);
+      this.recordStop(key, reason, error);
       this.emit({
         type: "service.stopped",
         id: definition.id,
         capability: definition.capability,
         session: definition.session,
-        reason: failure !== undefined ? "error" : controller.signal.aborted ? "stop" : "finished",
-        error: failure instanceof Error ? failure.message : undefined,
+        reason,
+        error,
         durationMs: startedAt === undefined ? 0 : Date.now() - startedAt
       });
     });
     this.runs.set(key, task);
     this.track(task);
+    this.clearStop(key, task);
     this.emit({
       type: "service.started",
       id: definition.id,
       capability: definition.capability,
       session: definition.session
     });
+  }
+
+  /** 重载后上一轮的停止注解全部作废，运行中的实例重新给出结论。 */
+  private clearStops(): void {
+    this.lastStops.clear();
+  }
+
+  /** 新实例接管后清除上一轮的停止注解；被替换的旧实例不得覆盖新实例的状态。 */
+  private clearStop(key: string, task: Promise<void>): void {
+    if (this.owns(key, task)) this.lastStops.delete(key);
+  }
+
+  /** 该实例是否仍是对应 flow 的当前实例；被替换的旧实例不再写入契约。 */
+  private owns(key: string, task: Promise<void>): boolean {
+    return this.runs.get(key) === task;
+  }
+
+  /** 耗尽配额后仅在本进程内停用：改写内存 catalog，磁盘文件与脏状态基线不变。 */
+  private depleteTrigger(definition: TriggerDefinition): void {
+    this.catalog = this.catalog.replace("trigger", { ...definition, enabled: false });
+  }
+
+  /** 用户中断与自然结束不留注解，耗尽记配额，其余视为启动失败。 */
+  private stopReason(failure: unknown, controller: AbortController, depleted: boolean): StopReason {
+    if (depleted) return "maxruns";
+    if (controller.signal.aborted) return "stop";
+    return failure === undefined ? "finished" : "error";
+  }
+
+  private recordStop(key: string, reason: StopReason, error: string | undefined): void {
+    if (reason === "maxruns") {
+      this.lastStops.set(key, { reason, at: new Date().toISOString() });
+      return;
+    }
+    if (reason === "stop" || reason === "finished") {
+      this.lastStops.delete(key);
+      return;
+    }
+    this.lastStops.set(key, { reason, error, at: new Date().toISOString() });
   }
 
   private startSchedule(definition: ScheduleDefinition): void {
@@ -508,7 +595,11 @@ export class Runtime {
     return this.lifecycle.signal;
   }
 
-  private async runTrigger(definition: TriggerDefinition, controller: AbortController): Promise<void> {
+  private async runTrigger(
+    definition: TriggerDefinition,
+    controller: AbortController,
+    onDepleted: () => void
+  ): Promise<void> {
     const Constructor = this.options.registry.getTrigger(definition.capability);
     let emitted = 0;
     const context: TriggerContext = {
@@ -562,7 +653,10 @@ export class Runtime {
           ok,
           durationMs: Date.now() - startedAt
         });
-        if (definition.maxRuns && emitted >= definition.maxRuns) controller.abort();
+        if (definition.maxRuns && emitted >= definition.maxRuns) {
+          onDepleted();
+          controller.abort();
+        }
       }
     };
     const trigger = new Constructor(context);
@@ -681,11 +775,14 @@ export class Runtime {
           : false,
       session: "session" in definition ? definition.session : undefined,
       logFile: "logFile" in definition ? definition.logFile : false,
-      suspended: this.suspensionOf(definition)
+      suspended: this.suspensionOf(definition),
+      pendingReload: this.pendingReload.has(definition.id),
+      warnings: this.warningsOf(definition)
     };
     if (definition.kind === "trigger") {
       return {
         ...base,
+        lastStop: this.lastStops.get(`trigger:${definition.id}`),
         maxRuns: definition.maxRuns,
         config: copyOf(definition.config),
         actions: definition.actions.map((action) => actionView(action))
@@ -694,6 +791,7 @@ export class Runtime {
     if (definition.kind === "service") {
       return {
         ...base,
+        lastStop: this.lastStops.get(`service:${definition.id}`),
         autoStart: definition.autoStart,
         config: copyOf(definition.config),
         startedAt:
@@ -712,6 +810,34 @@ export class Runtime {
       hook: definition.action.hook,
       config: copyOf(definition.action.config)
     };
+  }
+
+  /** 逐条 flow 调用能力自带的校验器，core 只透传结果。 */
+  private warningsOf(definition: FlowDefinition): readonly string[] | undefined {
+    const warnings: string[] = [];
+    if (definition.kind === "trigger") {
+      collectWarnings(this.validator("trigger", definition.capability), definition.config, warnings);
+      for (const action of definition.actions) {
+        collectWarnings(this.validator("action", action.capability), action.config, warnings);
+      }
+    } else if (definition.kind === "service") {
+      collectWarnings(this.validator("service", definition.capability), definition.config, warnings);
+    } else {
+      collectWarnings(this.validator("action", definition.action.capability), definition.action.config, warnings);
+    }
+    return warnings.length ? warnings : undefined;
+  }
+
+  private validator(kind: "action" | "trigger" | "service", name: string): ConfigValidator | undefined {
+    return this.options.registry.validatorOf(kind, name);
+  }
+
+  private configDirty(): boolean {
+    const path = this.catalog.path;
+    if (!path) return false;
+    const current = readBaseline(path);
+    const baseline = this.configBaseline;
+    return !current || !baseline || current.mtimeMs !== baseline.mtimeMs || current.size !== baseline.size;
   }
 
   private suspensionOf(definition: FlowDefinition): FlowSuspension | undefined {
@@ -848,6 +974,34 @@ interface ActiveActionEntry {
   readonly session?: string;
   readonly flow?: FlowRef;
   readonly startedAt: number;
+}
+
+interface ConfigBaseline {
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+function readBaseline(path: string | undefined): ConfigBaseline | undefined {
+  if (!path) return undefined;
+  try {
+    const stats = statSync(path);
+    return { mtimeMs: stats.mtimeMs, size: stats.size };
+  } catch {
+    return undefined;
+  }
+}
+
+function collectWarnings(
+  validator: ConfigValidator | undefined,
+  config: unknown,
+  target: string[]
+): void {
+  if (!validator) return;
+  try {
+    target.push(...validator(config));
+  } catch (error) {
+    target.push("配置校验失败：" + messageOf(error));
+  }
 }
 
 interface Suspension {

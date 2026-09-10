@@ -4,7 +4,7 @@ import { loadSettings, type AppSettings } from "./config/settings.js";
 import { defaultFlowsFile, defaultSettingsFile, paperkiteHome } from "./config/paths.js";
 import { AppLogger } from "./engine/logger.js";
 import { Runtime } from "./engine/runtime.js";
-import { loadExtensions } from "./extensions/loader.js";
+import { loadExtensions, createUsageMarker } from "./extensions/loader.js";
 import { configureTelegramClientFactory } from "./telegram/client.js";
 import { SessionPool } from "./telegram/pool.js";
 
@@ -37,6 +37,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
       sessions,
       logger,
       installed: extensions.installed,
+      markUsed: createUsageMarker(extensions.installed),
       reloadCatalog: () => loadCatalog(flowsFile)
     })
   };

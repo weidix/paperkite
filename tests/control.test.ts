@@ -9,6 +9,7 @@ const EMPTY_SNAPSHOT = {
   running: false,
   pid: process.pid,
   uptimeSeconds: 0,
+  configDirty: false,
   triggers: [],
   services: ["console"],
   schedules: [],
@@ -40,7 +41,8 @@ test("local control socket dispatches runtime, flow, session, and action operati
           name: "@paperkite/plugin-notify-bark",
           version: "1.0.0",
           capabilities: [{ kind: "action", name: "notify.bark" }],
-          loaded: true
+          loaded: true,
+          used: true
         }
       ];
     },
@@ -59,7 +61,8 @@ test("local control socket dispatches runtime, flow, session, and action operati
       name: "@paperkite/plugin-notify-bark",
       version: "1.0.0",
       capabilities: [{ kind: "action", name: "notify.bark" }],
-      loaded: true
+      loaded: true,
+      used: true
     }
   ]);
   assert.deepEqual(calls, [

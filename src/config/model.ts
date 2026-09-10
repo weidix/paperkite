@@ -98,6 +98,13 @@ export class FlowCatalog {
     if (matches.length > 1) throw new Error(`flow id is ambiguous: ${identifier}`);
     return matches[0];
   }
+
+  /** 以同 id 的新定义替换内存中的某条 flow，磁盘文件保持不变。 */
+  replace(kind: FlowKind, definition: FlowDefinition): FlowCatalog {
+    const next = { ...this.definitionsByKind };
+    next[kind] = next[kind].map((item) => (item.id === definition.id ? definition : item)) as never;
+    return new FlowCatalog(next, this.path);
+  }
 }
 
 export function normalizeKind(kind: string): FlowKind {

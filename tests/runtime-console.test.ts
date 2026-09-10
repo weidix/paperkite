@@ -23,7 +23,8 @@ const PLUGINS = [
     name: "@paperkite/plugin-runtime-console",
     version: "0.1.0",
     capabilities: [{ kind: "service" as const, name: "runtime.console" }],
-    loaded: true
+    loaded: true,
+    used: true
   }
 ];
 
@@ -40,6 +41,7 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       running: true,
       pid: process.pid,
       uptimeSeconds: 12,
+      configDirty: false,
       triggers: ["messages.watch"],
       services: ["console"],
       schedules: [],

@@ -9,6 +9,7 @@ import {
   Trigger,
   type ActionConstructor,
   type CapabilityKind,
+  type ConfigValidator,
   type PluginCapability,
   type PluginInfo,
   type PluginModule,
@@ -34,6 +35,29 @@ export interface LoadedExtensions {
   readonly registry: CapabilityRegistry;
   readonly packages: readonly string[];
   readonly installed: readonly PluginInfo[];
+}
+
+/** 按运行清单实际引用的能力标注插件使用状态，相同引用集合不重复计算。 */
+export function createUsageMarker(
+  installed: readonly PluginInfo[]
+): (references: ReadonlySet<string>) => readonly PluginInfo[] {
+  let signature: string | undefined;
+  let marked = installed;
+  return (references) => {
+    const next = hashOf(references);
+    if (next !== signature) {
+      signature = next;
+      marked = installed.map((plugin) => ({
+        ...plugin,
+        used: plugin.capabilities.some((capability) => references.has(capability.name))
+      }));
+    }
+    return marked;
+  };
+}
+
+function hashOf(values: ReadonlySet<string>): string {
+  return [...values].sort().join("\u0000");
 }
 
 export async function loadExtensions(
@@ -90,7 +114,8 @@ export async function loadExtensions(
       name: candidate.name,
       version: candidate.version,
       capabilities: candidate.capabilities,
-      loaded: selected.has(candidate.name)
+      loaded: selected.has(candidate.name),
+      used: false
     }));
   return { registry, packages: [...selected.keys()], installed };
 }
@@ -113,13 +138,32 @@ function bindCapability(
     );
   }
   assertConstructorKind(constructor, capability.kind, candidate.name, capability.name);
+  const validateConfig = resolveValidator(module, capability, candidate.name);
   registry.register(
     capability.kind,
     capability.name,
     constructor as ActionConstructor | TriggerConstructor | ServiceConstructor,
     scope,
-    { control: capability.control }
+    { control: capability.control, validateConfig }
   );
+}
+
+/** 校验器按符号名从插件模块取出，与 handler 同一解析路径。 */
+function resolveValidator(
+  module: PluginModule,
+  capability: PluginCapability,
+  pluginName: string
+): ConfigValidator | undefined {
+  const declared = capability.validateConfig;
+  if (declared === undefined) return undefined;
+  const validator = typeof declared === "string" ? module[declared] : declared;
+  if (typeof validator !== "function") {
+    throw new Error(
+      "plugin " + pluginName + " does not export validator " + String(declared) +
+      " for capability " + capability.name
+    );
+  }
+  return validator as ConfigValidator;
 }
 
 function assertConstructorKind(
