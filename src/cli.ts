@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { readFileSync } from "node:fs";
 import { access, copyFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { loadCatalog } from "./config/loader.js";
@@ -12,10 +13,12 @@ import { acquireProcessLock } from "./control/process-lock.js";
 import { requestControl, startControlServer, type ControlServer } from "./control/socket.js";
 import { loginSession } from "./telegram/login.js";
 
+const manifest = JSON.parse(readFileSync(join(coreRoot(), "package.json"), "utf8")) as { version: string };
+
 const program = new Command()
   .name("paperkite")
   .description("A focused TypeScript automation runtime for Telegram workflows")
-  .version("0.1.0");
+  .version(manifest.version);
 
 program
   .command("init")
