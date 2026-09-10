@@ -6,6 +6,7 @@
 
   let {
     checked = $bindable(false),
+    controlled = false,
     disabled = false,
     onCheckedChange,
     class: className = "",
@@ -14,6 +15,8 @@
     "aria-label": ariaLabel
   }: {
     checked?: boolean;
+    /** 受控模式：状态只由父级驱动，点击不回写本地外观。 */
+    controlled?: boolean;
     disabled?: boolean;
     onCheckedChange?: (checked: boolean) => void;
     class?: string;
@@ -23,8 +26,8 @@
   } = $props();
 
   function handleChange(next: boolean): void {
+    if (!controlled) checked = next;
     onCheckedChange?.(next);
-    checked = next;
   }
 </script>
 

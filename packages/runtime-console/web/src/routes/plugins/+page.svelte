@@ -3,7 +3,8 @@
   import Badge from "$lib/components/ui/badge.svelte";
   import { api } from "$lib/api";
   import { errorText } from "$lib/format";
-  import type { PluginCapability } from "$lib/runtime";
+  import { runtime } from "$lib/runtime.svelte";
+  import type { PluginCapability, PluginInfo } from "$lib/runtime";
 
   const KIND_LABEL: Record<PluginCapability["kind"], string> = {
     action: "动作",
@@ -11,8 +12,11 @@
     service: "服务"
   };
 
-  let plugins: readonly import("$lib/runtime").PluginInfo[] | null = $state(null);
+  let plugins: readonly PluginInfo[] | null = $state(null);
   let error = $state<string | null>(null);
+
+  const snapshot = $derived(runtime.snapshot);
+  const refCounts = $derived(capabilityRefCounts(snapshot?.flows ?? []));
 
   $effect(() => {
     let cancelled = false;
@@ -28,6 +32,17 @@
       cancelled = true;
     };
   });
+
+  function capabilityRefCounts(flows: readonly import("$lib/runtime").FlowSnapshot[]): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const flow of flows) {
+      if (flow.kind !== "command" && !flow.enabled) continue;
+      const names = new Set<string>([flow.capability]);
+      for (const action of flow.actions ?? []) names.add(action.capability);
+      for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+  }
 </script>
 
 {#if !plugins && !error}
@@ -59,8 +74,8 @@
           <tr class="border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted">
             <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0">插件</th>
             <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0">版本</th>
-            <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 hidden md:table-cell">能力</th>
-            <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-24 text-center">状态</th>
+            <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0">能力</th>
+            <th class="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-32 text-center">状态</th>
           </tr>
         </thead>
         <tbody class="[&_tr:last-child]:border-0">
@@ -80,12 +95,10 @@
               <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden md:table-cell">
                 <div class="flex flex-wrap gap-1">
                   {#each plugin.capabilities as item (item.name)}
+                    {@const refs = refCounts.get(item.name) ?? 0}
                     <Badge
-                      variant={item.kind === "action"
-                        ? "default"
-                        : item.kind === "trigger"
-                          ? "outline"
-                          : "secondary"}
+                      variant={refs > 0 ? "default" : "outline"}
+                      title={refs > 0 ? `被 ${refs} 个流程引用` : "没有启用的流程引用该能力"}
                     >
                       <span class="font-mono">{item.name}</span>
                       <span class="text-[10px] opacity-70">· {KIND_LABEL[item.kind]}</span>
@@ -94,11 +107,18 @@
                 </div>
               </td>
               <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-center">
-                {#if plugin.loaded}
-                  <Badge variant="secondary">已加载</Badge>
-                {:else}
-                  <Badge variant="outline" class="text-muted-foreground">未加载</Badge>
-                {/if}
+                <div class="flex flex-wrap items-center justify-center gap-1">
+                  {#if plugin.loaded}
+                    <Badge variant="secondary">已加载</Badge>
+                  {:else}
+                    <Badge variant="outline" class="text-muted-foreground">未加载</Badge>
+                  {/if}
+                  {#if plugin.used}
+                    <Badge variant="outline" title="启用流程正在使用该插件的能力">被引用</Badge>
+                  {:else}
+                    <Badge variant="ghost" title="装了但没有启用流程使用该插件的能力">未被引用</Badge>
+                  {/if}
+                </div>
               </td>
             </tr>
           {/each}

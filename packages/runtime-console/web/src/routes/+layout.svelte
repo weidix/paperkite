@@ -8,19 +8,25 @@
     Moon,
     Puzzle,
     Radio,
+    RefreshCw,
     Sun,
+    TriangleAlert,
     Users,
     Workflow,
-    Zap,
-    } from "lucide-svelte";
+    X,
+    Zap
+  } from "lucide-svelte";
   import Button from "$lib/components/ui/button.svelte";
   import LiveBadge from "$lib/components/ui/live-badge.svelte";
   import Sheet from "$lib/components/ui/sheet.svelte";
   import Toaster from "$lib/toast.svelte";
+  import { api } from "$lib/api";
+  import { errorText } from "$lib/format";
+  import { toast } from "$lib/toast-store.svelte";
   import { runtime } from "$lib/runtime.svelte";
   import { theme } from "$lib/theme.svelte";
   import { cn } from "$lib/utils";
-  
+
   interface NavItem {
     value: string;
     label: string;
@@ -38,6 +44,8 @@
   ];
 
   let navOpen = $state(false);
+  let dismissedDirty = $state(false);
+  let reloading = $state(false);
   let { children } = $props();
 
   $effect(() => {
@@ -52,6 +60,31 @@
   const current = $derived(NAV.find((item) => item.value === page.url.pathname) ?? NAV[0]!);
   const snapshot = $derived(runtime.snapshot);
   const connected = $derived(runtime.connected);
+  const dirtyBanner = $derived(!dismissedDirty && snapshot?.configDirty === true);
+
+  async function reloadConfig(): Promise<void> {
+    reloading = true;
+    try {
+      await api.reloadRuntime();
+      await runtime.refresh();
+      dismissedDirty = false;
+      toast.success(await settledByReload() ? "已按 flows.yml 重新加载" : "重载已受理，配置就绪后横幅消失");
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      reloading = false;
+    }
+  }
+
+  /** 重载接口先应答后执行，此处短轮询等待脏标识归位。 */
+  async function settledByReload(): Promise<boolean> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (runtime.snapshot?.configDirty === false) return true;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await runtime.refresh();
+    }
+    return runtime.snapshot?.configDirty === false;
+  }
 </script>
 
 <svelte:head>
@@ -152,6 +185,25 @@
     </header>
 
     <main class="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+      {#if dirtyBanner}
+        <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3">
+          <TriangleAlert class="size-4 shrink-0 text-destructive" aria-hidden="true" />
+          <div class="flex min-w-0 flex-col">
+            <span class="text-sm font-medium">flows.yml 已修改，当前运行的是旧配置</span>
+            {#if snapshot?.flowsFile}
+              <span class="truncate font-mono text-xs text-muted-foreground" title={snapshot.flowsFile}>{snapshot.flowsFile}</span>
+            {/if}
+          </div>
+          <span class="flex-1"></span>
+          <Button size="sm" onclick={() => void reloadConfig()} disabled={reloading}>
+            <RefreshCw class={cn("size-3.5", reloading && "animate-spin")} aria-hidden="true" />
+            立即重载
+          </Button>
+          <Button variant="ghost" size="icon" class="size-7" onclick={() => (dismissedDirty = true)} aria-label="关闭提示">
+            <X class="size-3.5" aria-hidden="true" />
+          </Button>
+        </div>
+      {/if}
       {@render children()}
     </main>
   </div>

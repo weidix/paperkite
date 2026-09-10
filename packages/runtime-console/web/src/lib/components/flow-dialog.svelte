@@ -9,34 +9,29 @@
     Rocket,
     RotateCw,
     Trash2,
+    TriangleAlert,
     Wand2,
     X,
     Zap
   } from "lucide-svelte";
-  import { AlertDialog, Dialog } from "bits-ui";
+  import { Dialog } from "bits-ui";
   import { createDraft, parseDraft, type ActionDraft } from "$lib/action-draft";
   import { toast } from "$lib/toast-store.svelte";
   import ActionEditor from "$lib/components/action-editor.svelte";
   import Button from "$lib/components/ui/button.svelte";
   import CollapsibleJson from "$lib/components/ui/collapsible-json.svelte";
+  import ConfirmDialog from "$lib/components/confirm-dialog.svelte";
   import JsonEditor from "$lib/components/json-editor.svelte";
   import Label from "$lib/components/ui/label.svelte";
   import Status from "$lib/components/ui/status.svelte";
   import Switch from "$lib/components/ui/switch.svelte";
   import { api } from "$lib/api";
+  import { STOP_REASON_LABEL } from "$lib/events";
   import { parseJson, prettyJson, tryFormatJson, errorText } from "$lib/format";
+  import { flowStatus } from "$lib/flow-status";
   import { runtime } from "$lib/runtime.svelte";
   import type { ActionSpecInput, FlowKind, FlowPatch, FlowSnapshot } from "$lib/runtime";
   import { cn } from "$lib/utils";
-
-  const AlertDialogRoot = AlertDialog.Root;
-  const AlertDialogPortal = AlertDialog.Portal;
-  const AlertDialogOverlay = AlertDialog.Overlay;
-  const AlertDialogContent = AlertDialog.Content;
-  const AlertDialogTitle = AlertDialog.Title;
-  const AlertDialogDescription = AlertDialog.Description;
-  const AlertDialogAction = AlertDialog.Action;
-  const AlertDialogCancel = AlertDialog.Cancel;
 
   const KIND_LABEL: Record<FlowKind, string> = {
     trigger: "触发器",
@@ -117,6 +112,7 @@
   });
 
   const allowed = $derived(PATCHABLE_FIELDS[flow.kind]);
+  const status = $derived(flowStatus(flow));
 
   interface PatchDraft {
     enabled?: boolean;
@@ -153,29 +149,29 @@
     configError = null;
   }
 
-  async function save(): Promise<void> {
+  async function save(): Promise<boolean> {
     const patch: PatchDraft = {};
     if (flow.kind === "command") {
-      if (!run) return;
+      if (!run) return false;
       const result = parseDraft(run);
       if (result.error) {
         formError = result.error;
-        return;
+        return false;
       }
       patch.title = title.trim() || flow.id;
       patch.symbol = symbol.trim() || undefined;
       patch.run = result.spec;
     } else if (flow.kind === "schedule") {
-      if (!run) return;
+      if (!run) return false;
       if (cron.trim() && intervalSeconds.trim()) {
         formError = "cron 与 intervalSeconds 只能保留其一";
-        return;
+        return false;
       }
       if (intervalSeconds.trim()) {
         const parsed = Number(intervalSeconds);
         if (!Number.isInteger(parsed) || parsed <= 0) {
           formError = "intervalSeconds 须为正整数";
-          return;
+          return false;
         }
         patch.intervalSeconds = parsed;
       }
@@ -183,7 +179,7 @@
       const result = parseDraft(run);
       if (result.error) {
         formError = result.error;
-        return;
+        return false;
       }
       patch.enabled = enabled;
       patch.session = session.trim() || undefined;
@@ -196,21 +192,21 @@
       patch.maxRuns = maxRuns.trim() === "" || maxRuns.trim() === "-1" ? undefined : Number(maxRuns);
       if (patch.maxRuns !== undefined && (!Number.isInteger(patch.maxRuns) || patch.maxRuns <= 0)) {
         formError = "maxRuns 须为正整数或留空";
-        return;
+        return false;
       }
       try {
         const parsed = parseJson(configText);
         if (parsed !== undefined) patch.config = parsed;
       } catch {
         configError = "config 不是合法 JSON";
-        return;
+        return false;
       }
       const specs: ActionSpecInput[] = [];
       for (const draft of actions) {
         const result = parseDraft(draft);
         if (result.error) {
           formError = `动作 ${specs.length + 1}：${result.error}`;
-          return;
+          return false;
         }
         specs.push(result.spec as ActionSpecInput);
       }
@@ -225,7 +221,7 @@
         if (parsed !== undefined) patch.config = parsed;
       } catch {
         configError = "config 不是合法 JSON";
-        return;
+        return false;
       }
     }
     busy = true;
@@ -233,30 +229,43 @@
       const result = await api.updateFlow(flow.id, patch as FlowPatch);
       toast.success(result.changed ? "已保存并写回 flows.yml" : "没有变更");
       await runtime.refresh();
-      if (result.changed && flow.kind !== "command") reloadPrompt = true;
+      return result.changed;
     } catch (error) {
       toast.error(errorText(error));
+      return false;
     } finally {
       busy = false;
     }
   }
 
-  async function reload(): Promise<void> {
+  async function reload(): Promise<boolean> {
     busy = true;
     try {
       await api.reloadFlow(flow.id);
       toast.success("已按最新定义重载");
       await runtime.refresh();
+      return true;
     } catch (error) {
       toast.error(errorText(error));
+      return false;
     } finally {
       busy = false;
     }
   }
 
+  /** 保存已写回，两种选择都回到列表；取消时该行由「待重载」标识承接。 */
   async function reloadAfterSave(): Promise<void> {
-    await reload();
+    if (await reload()) close();
+  }
+
+  function close(): void {
+    open = false;
+    onOpenChange?.(false);
     reloadPrompt = false;
+  }
+
+  async function saveAndReload(): Promise<void> {
+    if (await save() && flow.kind !== "command") reloadPrompt = true;
   }
 
   async function toggleService(): Promise<void> {
@@ -300,22 +309,15 @@
           </span>
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span class="font-mono text-lg font-semibold tracking-tight">{flow.id}</span>
-            {#if flow.active}
-              <span class="flex items-center gap-1.5 text-xs text-foreground">
-                <Status tone="ok" pulse></Status>
-                运行中
-              </span>
-            {:else if flow.enabled}
-              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Status tone="ok"></Status>
-                已启用
-              </span>
-            {:else}
-              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Status tone="idle"></Status>
-                已停用
-              </span>
-            {/if}
+            <span
+              class={cn(
+                "flex items-center gap-1.5 text-xs",
+                status.tone === "ok" && status.pulse ? "text-foreground" : "text-muted-foreground"
+              )}
+            >
+              <Status tone={status.tone} pulse={status.pulse}></Status>
+              {status.label}
+            </span>
             <span class="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
               能力 <span class="font-mono tracking-tight">{flow.capability}</span>
             </span>
@@ -351,6 +353,33 @@
           <X class="size-4" aria-hidden="true" />
         </Button>
       </header>
+
+      {#if flow.warnings?.length || flow.suspended || flow.lastStop || flow.pendingReload}
+        <div class="flex shrink-0 flex-col gap-0.5 border-b border-destructive/40 bg-destructive/10 px-5 py-2.5">
+          {#if flow.suspended}
+            <span class="flex items-start gap-2 text-xs text-destructive">
+              <TriangleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              会话隔离 · {flow.suspended.session ?? "-"} · 自 {flow.suspended.since}
+              {#if flow.suspended.error}：{flow.suspended.error}{/if}
+            </span>
+          {/if}
+          {#if flow.lastStop}
+            <span class="flex items-start gap-2 text-xs text-destructive">
+              <TriangleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {STOP_REASON_LABEL[flow.lastStop.reason]} · {flow.lastStop.at}{#if flow.lastStop.error}：{flow.lastStop.error}{/if}
+            </span>
+          {/if}
+          {#if flow.pendingReload}
+            <span class="text-xs text-amber-700 dark:text-amber-400">配置已写回 flows.yml，运行实例待重载</span>
+          {/if}
+          {#each flow.warnings ?? [] as warning, index (index)}
+            <span class="flex items-start gap-2 text-xs text-destructive">
+              <TriangleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {warning}
+            </span>
+          {/each}
+        </div>
+      {/if}
 
       <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
         <aside class="shrink-0 overflow-y-auto border-b px-5 py-4 lg:w-80 lg:border-b-0 lg:border-r">
@@ -595,41 +624,22 @@
         </div>
         <div class="flex items-center gap-2">
           <Button variant="ghost" onclick={() => (open = false)}>关闭</Button>
-          <Button onclick={save} disabled={busy || configError !== null}>保存</Button>
+          <Button onclick={() => void saveAndReload()} disabled={busy || configError !== null}>保存</Button>
         </div>
       </footer>
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>
 
-<AlertDialogRoot open={reloadPrompt} onOpenChange={(value) => (reloadPrompt = value)}>
-  <AlertDialogPortal>
-    <AlertDialogOverlay
-      class="fixed inset-0 z-50 bg-black/45 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
-    />
-    <AlertDialogContent
-      class="fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-card p-6 shadow-xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-1/2"
-    >
-      <AlertDialogTitle class="font-display text-lg font-semibold leading-none">配置已保存，立即重载？</AlertDialogTitle>
-      <AlertDialogDescription class="text-sm text-muted-foreground">
-        {KIND_LABEL[flow.kind]}的改动需要重载才会对运行中的实例生效。
-      </AlertDialogDescription>
-      <div class="flex justify-end gap-2">
-        <AlertDialogCancel
-          class="inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          稍后
-        </AlertDialogCancel>
-        <AlertDialogAction
-          class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
-          onclick={() => void reloadAfterSave()}
-        >
-          立即重载
-        </AlertDialogAction>
-      </div>
-    </AlertDialogContent>
-  </AlertDialogPortal>
-</AlertDialogRoot>
+<ConfirmDialog
+  bind:open={reloadPrompt}
+  title="已保存，立即重载生效？"
+  description={`不重载则改动暂不生效，可在列表重载此条。${KIND_LABEL[flow.kind]}的运行实例按新定义重启。`}
+  confirmLabel="立即重载"
+  cancelLabel="稍后"
+  onConfirm={() => void reloadAfterSave()}
+  onCancel={close}
+/>
 
 {#snippet RowView({ label, value, mono = false }: { label: string; value: string; mono?: boolean })}
   <div class="flex items-start justify-between gap-3 px-3 py-2 text-xs">

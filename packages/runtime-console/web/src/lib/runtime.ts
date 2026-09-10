@@ -30,6 +30,14 @@ export interface FlowSuspension {
   readonly error?: string;
 }
 
+export type StopReason = "error" | "stop" | "maxruns" | "finished";
+
+export interface FlowLastStop {
+  readonly reason: StopReason;
+  readonly error?: string;
+  readonly at: string;
+}
+
 export interface FlowSnapshot {
   readonly kind: FlowKind;
   readonly id: string;
@@ -50,6 +58,9 @@ export interface FlowSnapshot {
   readonly logFile: boolean;
   readonly startedAt?: string;
   readonly suspended?: FlowSuspension;
+  readonly lastStop?: FlowLastStop;
+  readonly warnings?: readonly string[];
+  readonly pendingReload?: boolean;
 }
 
 export interface ActiveActionView {
@@ -69,6 +80,8 @@ export interface RuntimeSnapshot {
   readonly running: boolean;
   readonly pid: number;
   readonly uptimeSeconds: number;
+  readonly configDirty: boolean;
+  readonly flowsFile?: string;
   readonly triggers: readonly string[];
   readonly services: readonly string[];
   readonly schedules: readonly string[];
@@ -89,6 +102,7 @@ export interface PluginInfo {
   readonly version?: string;
   readonly capabilities: readonly PluginCapability[];
   readonly loaded: boolean;
+  readonly used?: boolean;
 }
 
 export interface ActionSpecInput {
@@ -152,7 +166,18 @@ export interface ServiceStoppedEvent {
   readonly id: string;
   readonly capability: string;
   readonly session?: string;
-  readonly reason: "stop" | "error" | "finished";
+  readonly reason: StopReason;
+  readonly error?: string;
+  readonly durationMs: number;
+  readonly at: string;
+}
+
+export interface TriggerStoppedEvent {
+  readonly type: "trigger.stopped";
+  readonly id: string;
+  readonly capability: string;
+  readonly session?: string;
+  readonly reason: StopReason;
   readonly error?: string;
   readonly durationMs: number;
   readonly at: string;
@@ -233,6 +258,7 @@ export type RuntimeEvent =
   | ActionFinishedEvent
   | ServiceStartedEvent
   | ServiceStoppedEvent
+  | TriggerStoppedEvent
   | FlowUpdatedEvent
   | FlowReloadedEvent
   | FlowFinishedEvent
@@ -248,6 +274,7 @@ export const RUNTIME_EVENT_TYPES = [
   "action.finished",
   "service.started",
   "service.stopped",
+  "trigger.stopped",
   "flow.updated",
   "flow.reloaded",
   "flow.finished",

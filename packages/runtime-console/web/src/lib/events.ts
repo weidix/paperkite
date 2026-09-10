@@ -1,9 +1,20 @@
-import type { RuntimeEvent } from "$lib/runtime";
+import type { RuntimeEvent, StopReason } from "$lib/runtime";
 
 export interface EventPresentation {
   readonly tone: "ok" | "bad" | "warn" | "info";
   readonly title: string;
   readonly detail: string;
+}
+
+export const STOP_REASON_LABEL: Record<StopReason, string> = {
+  error: "启动失败",
+  stop: "已停止",
+  maxruns: "配额耗尽",
+  finished: "已结束"
+};
+
+export function stopReasonLabel(reason: StopReason): string {
+  return STOP_REASON_LABEL[reason];
 }
 
 export function describeEvent(event: RuntimeEvent): EventPresentation {
@@ -25,10 +36,13 @@ export function describeEvent(event: RuntimeEvent): EventPresentation {
     case "service.started":
       return { tone: "ok", title: event.capability, detail: `#${event.id}${event.session ? ` · ${event.session}` : ""}` };
     case "service.stopped":
+    case "trigger.stopped":
       return {
-        tone: event.reason === "error" ? "bad" : event.reason === "stop" ? "warn" : "ok",
+        tone: event.reason === "error" || event.reason === "maxruns" ? "bad" : event.reason === "stop" ? "warn" : "ok",
         title: event.capability,
-        detail: [`#${event.id}`, event.reason, `${event.durationMs}ms`, event.error].filter(Boolean).join(" · ")
+        detail: [`#${event.id}`, stopReasonLabel(event.reason), `${event.durationMs}ms`, event.error]
+          .filter(Boolean)
+          .join(" · ")
       };
     case "flow.updated":
       return { tone: "info", title: `流程已更新 · ${event.kind}`, detail: `#${event.id}` };
