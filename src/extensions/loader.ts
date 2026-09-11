@@ -14,6 +14,7 @@ import type {
 } from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
 import { profileDirectory, readProfile } from "./profile.js";
+import { evaluateCompatibility, sdkDeclarations } from "./abi.js";
 
 interface PackagePluginMeta {
   readonly plugin?: boolean | { readonly capabilities?: readonly PluginCapability[] };
@@ -24,6 +25,9 @@ interface PackageManifest {
   readonly version?: string;
   readonly exports?: unknown;
   readonly main?: string;
+  readonly dependencies?: Record<string, unknown>;
+  readonly devDependencies?: Record<string, unknown>;
+  readonly peerDependencies?: Record<string, unknown>;
   readonly paperkite?: PackagePluginMeta;
 }
 
@@ -31,6 +35,7 @@ export interface LoadedExtensions {
   readonly registry: CapabilityRegistry;
   readonly packages: readonly string[];
   readonly installed: readonly PluginInfo[];
+  readonly warnings: readonly string[];
 }
 
 /** 按运行清单实际引用的能力标注插件使用状态，相同引用集合不重复计算。 */
@@ -113,7 +118,8 @@ export async function loadExtensions(
       loaded: selected.has(candidate.name),
       used: false
     }));
-  return { registry, packages: [...selected.keys()], installed };
+  const warnings = candidates.flatMap((candidate) => (candidate.warning ? [candidate.warning] : []));
+  return { registry, packages: [...selected.keys()], installed, warnings };
 }
 
 function bindCapability(
@@ -181,6 +187,7 @@ interface PluginCandidate {
   readonly version?: string;
   readonly moduleUrl: string;
   readonly capabilities: readonly PluginCapability[];
+  readonly warning?: string;
 }
 
 async function inspectPlugin(name: string, profile: string, bundled: boolean): Promise<PluginCandidate | undefined> {
@@ -192,11 +199,19 @@ async function inspectPlugin(name: string, profile: string, bundled: boolean): P
   const pluginObject = typeof metadata.plugin === "object" ? metadata.plugin : {};
   const capabilities = pluginObject.capabilities ?? metadata.capabilities ?? [];
   if (!Array.isArray(capabilities)) throw new Error("invalid capability metadata in " + name);
+  const compatibility = evaluateCompatibility(sdkDeclarations(manifest));
+  if (compatibility.verdict === "reject") {
+    throw new Error("plugin " + name + " is incompatible: " + compatibility.detail);
+  }
   return {
     name,
     version: typeof manifest.version === "string" ? manifest.version : undefined,
     moduleUrl: resolvePluginModule(manifest, dirname(packageFile), name),
-    capabilities
+    capabilities,
+    warning:
+      compatibility.verdict === "warn"
+        ? "plugin " + name + " compatibility warning: " + compatibility.detail
+        : undefined
   };
 }
 

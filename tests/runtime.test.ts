@@ -15,6 +15,7 @@ import type {
 } from "@paperkite/sdk";
 import { fromMapping } from "../src/config/loader.js";
 import type { FlowCatalog } from "../src/config/model.js";
+import { CORE_ABI } from "../src/extensions/abi.js";
 import { CapabilityRegistry } from "../src/extensions/registry.js";
 import { AppLogger } from "../src/engine/logger.js";
 import { Runtime } from "../src/engine/runtime.js";
@@ -73,6 +74,21 @@ test("executeAction runs an action once and emits start/finish events", async ()
   assert.equal(events.filter((event) => event.type === "action.started").length, 1);
   const finished = events.find((event) => event.type === "action.finished");
   assert.equal(finished?.type, "action.finished");
+  await runtime.stop();
+});
+
+test("action contexts carry the current ABI", async () => {
+  const seen: number[] = [];
+  class AbiAction implements ActionHandler {
+    async run(ctx: ActionContext): Promise<void> {
+      seen.push(ctx.abi);
+    }
+  }
+  const { runtime } = await makeRuntime({
+    register: (registry) => registry.register("action", "demo.abi", AbiAction, "plugin-demo")
+  });
+  await runtime.executeAction({ capability: "demo.abi" });
+  assert.deepEqual(seen, [CORE_ABI]);
   await runtime.stop();
 });
 

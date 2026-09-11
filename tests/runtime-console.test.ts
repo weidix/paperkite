@@ -342,6 +342,7 @@ test("runtime console serves the SPA shell for direct deep links", async () => {
   const controller = new AbortController();
   const context: ServiceContext<Record<string, unknown>> = {
     id: "console-web",
+    abi: 0,
     capability: "runtime.console",
     config: { host: "127.0.0.1", port, publicDir },
     signal: controller.signal,
