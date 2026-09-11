@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/plugin-process-run",
   "version": "0.1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/process-run"
+  },
   "type": "module",
   "exports": {
     ".": {

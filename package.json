@@ -1,6 +1,10 @@
 {
   "name": "paperkite",
   "version": "0.1.3",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git"
+  },
   "type": "module",
   "bin": {
     "paperkite": "./dist/src/cli.js"

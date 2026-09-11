@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/sdk",
   "version": "0.2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/sdk"
+  },
   "type": "module",
   "exports": {
     ".": {

@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/plugin-messages-watch",
   "version": "0.1.2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/messages-watch"
+  },
   "type": "module",
   "exports": {
     ".": {
