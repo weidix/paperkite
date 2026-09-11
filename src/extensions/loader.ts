@@ -1,18 +1,16 @@
 import { createRequire } from "node:module";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  type ActionConstructor,
-  type CapabilityKind,
-  type ConfigValidator,
-  type PluginCapability,
-  type PluginInfo,
-  type PluginModule,
-  type RuntimeLogger,
-  type ServiceConstructor,
-  type TriggerConstructor
+import type {
+  ActionConstructor,
+  ConfigValidator,
+  PluginCapability,
+  PluginInfo,
+  PluginModule,
+  ServiceConstructor,
+  TriggerConstructor
 } from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
 import { profileDirectory, readProfile } from "./profile.js";
@@ -60,7 +58,7 @@ function hashOf(values: ReadonlySet<string>): string {
 
 export async function loadExtensions(
   references: Iterable<string>,
-  options: { profile?: string; logger?: RuntimeLogger } = {}
+  options: { profile?: string } = {}
 ): Promise<LoadedExtensions> {
   const profile = profileDirectory(options.profile ?? "default");
   const profileManifest = await readProfile(profile);
@@ -99,18 +97,12 @@ export async function loadExtensions(
   }
 
   const registry = new CapabilityRegistry();
-  const skews: string[] = [];
   for (const candidate of [...selected.values()].sort((left, right) => left.name.localeCompare(right.name))) {
     const module = await importPlugin(candidate);
     const scope = shortPluginName(candidate.name);
-    const skew = sdkSkewOf(candidate);
-    if (skew) skews.push(skew);
     for (const capability of candidate.capabilities) {
       bindCapability(registry, candidate, module, capability, scope);
     }
-  }
-  if (skews.length) {
-    options.logger?.warn("plugin sdk version differs from the runtime", { skews });
   }
   const installed: PluginInfo[] = [...candidates]
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -134,19 +126,13 @@ function bindCapability(
   if (!capability.handler) {
     throw new Error("plugin " + candidate.name + " capability " + capability.name + " has no handler symbol");
   }
-  const constructor = module[capability.handler];
-  if (typeof constructor !== "function") {
-    throw new Error(
-      "plugin " + candidate.name + " does not export handler " + capability.handler +
-      " for capability " + capability.name
-    );
-  }
-  assertConstructorKind(constructor, capability.kind, candidate.name, capability.name);
+  const handler = module[capability.handler];
+  assertHandlerShape(handler, candidate.name, capability.handler, capability.name);
   const validateConfig = resolveValidator(module, capability, candidate.name);
   registry.register(
     capability.kind,
     capability.name,
-    constructor as ActionConstructor | TriggerConstructor | ServiceConstructor,
+    handler as ActionConstructor | TriggerConstructor | ServiceConstructor,
     scope,
     { control: capability.control, validateConfig }
   );
@@ -170,58 +156,24 @@ function resolveValidator(
   return validator as ConfigValidator;
 }
 
-/**
- * 插件解析到的 SDK 版本与运行时自身 SDK 版本不一致时给出可读描述。
- * 安装树允许存在多份 SDK，版本偏斜会让插件的基类实现（hook、maxRuns 等）与运行时版本分叉。
- */
-function sdkSkewOf(candidate: PluginCandidate): string | undefined {
-  const pluginVersion = sdkVersionFrom(candidate.moduleUrl);
-  const runtimeVersion = sdkVersionFrom(join(coreRoot(), "package.json"));
-  if (!pluginVersion || !runtimeVersion || pluginVersion === runtimeVersion) return undefined;
-  return candidate.name + " resolves @paperkite/sdk " + pluginVersion + ", runtime uses " + runtimeVersion;
-}
-
-function sdkVersionFrom(fromFile: string): string | undefined {
-  try {
-    const manifest = createRequire(fromFile).resolve("@paperkite/sdk/package.json");
-    const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { version?: unknown };
-    return typeof parsed.version === "string" ? parsed.version : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function assertConstructorKind(
-  constructor: Function,
-  kind: CapabilityKind,
+function assertHandlerShape(
+  handler: unknown,
   pluginName: string,
+  handlerName: string,
   capabilityName: string
 ): void {
-  if (!isCapabilityHandler(constructor, kind)) {
-    throw new Error(
-      "plugin " + pluginName + " handler for capability " + capabilityName + " must extend " + kind
-    );
-  }
+  if (isHandlerConstructor(handler)) return;
+  throw new Error(
+    "plugin " + pluginName + " handler " + handlerName + " for capability " + capabilityName +
+    " must be a class whose prototype exposes run"
+  );
 }
 
-const BASE_CLASS_NAMES: Record<CapabilityKind, string> = {
-  action: "Action",
-  trigger: "Trigger",
-  service: "Service"
-};
-
-/**
- * 按基类名判定 handler 类别。
- * 安装树里允许存在多份 SDK（打包安装与 profile 安装各自解析），
- * 基类名比对与副本数量、安装拓扑无关。
- */
-export function isCapabilityHandler(constructor: Function, kind: CapabilityKind): boolean {
-  const expected = BASE_CLASS_NAMES[kind];
-  for (let proto = constructor.prototype; proto; proto = Object.getPrototypeOf(proto)) {
-    const name = (proto as { constructor?: { name?: string } }).constructor?.name;
-    if (name === expected) return true;
-  }
-  return false;
+/** handler 类别由结构判定：导出符号为函数，其原型带有 run。 */
+export function isHandlerConstructor(value: unknown): value is Function {
+  if (typeof value !== "function") return false;
+  const prototype = (value as { prototype?: { run?: unknown } }).prototype;
+  return typeof prototype?.run === "function";
 }
 
 interface PluginCandidate {

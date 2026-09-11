@@ -40,13 +40,13 @@
     "@paperkite/plugin-process-run": "workspace:*",
     "@paperkite/plugin-favorites-cleanup": "workspace:*",
     "@paperkite/plugin-messages": "workspace:*",
-    "@paperkite/sdk": "workspace:*",
     "commander": "^15.0.0",
     "cron-parser": "^5.10.0",
     "telegram": "^2.26.22",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@paperkite/sdk": "workspace:*",
     "@types/luxon": "^3.6.2",
     "@types/node": "^24.3.0",
     "@types/pg": "^8.15.5",

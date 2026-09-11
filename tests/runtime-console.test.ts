@@ -348,8 +348,7 @@ test("runtime console serves the SPA shell for direct deep links", async () => {
     control: stubRuntime().runtime,
     logger
   };
-  const service = new RuntimeConsoleWebService(context);
-  const running = service.run();
+  const running = new RuntimeConsoleWebService().run(context);
   const base = `http://127.0.0.1:${port}`;
   try {
     await waitForHttp(base + "/api/plugins");

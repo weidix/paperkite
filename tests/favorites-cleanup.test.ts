@@ -91,8 +91,7 @@ test("deletes only expired forwarded files and keeps everything else", async () 
   client.probes.set(2, "expired");
   client.probes.set(3, "error");
 
-  const action = new FavoritesCleanupAction(contextFor(client));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client));
 
   assert.equal(client.probeCount, 3);
   assert.equal(client.deleteCount, 1);
@@ -104,8 +103,7 @@ test("deletes expired files together with their album group", async () => {
   client.messages.push(forwardedFile(10, "MessageMediaDocument", 7), forwardedFile(11, "MessageMediaDocument", 7), forwardedFile(12, "MessageMediaDocument", 7));
   client.probes.set(10, "expired");
 
-  const action = new FavoritesCleanupAction(contextFor(client));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client));
 
   assert.deepEqual(client.deleted, [10, 11, 12]);
 });
@@ -118,8 +116,7 @@ test("deletes forwarded placeholders of banned channels", async () => {
     { id: 22, fwdFrom: {}, message: "This channel CAN'T be displayed because it violated Telegram's Terms of Service." }
   );
 
-  const action = new FavoritesCleanupAction(contextFor(client));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client));
 
   assert.equal(client.probeCount, 0);
   assert.equal(client.deleteCount, 1);
@@ -130,8 +127,7 @@ test("keeps ordinary forwarded text", async () => {
   const client = new FakeClient();
   client.messages.push({ id: 31, fwdFrom: {}, message: "普通文字转发" });
 
-  const action = new FavoritesCleanupAction(contextFor(client));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client));
 
   assert.equal(client.probeCount, 0);
   assert.equal(client.deleteCount, 0);
@@ -143,8 +139,7 @@ test("dry run reports expired files without deleting", async () => {
   client.messages.push(forwardedFile(2, "MessageMediaDocument"));
   client.probes.set(2, "expired");
 
-  const action = new FavoritesCleanupAction(contextFor(client, { dryRun: true }));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client, { dryRun: true }));
 
   assert.equal(client.probeCount, 1);
   assert.equal(client.deleteCount, 0);
@@ -155,8 +150,7 @@ test("scans at most maxMessages from the newest message", async () => {
   const client = new FakeClient();
   client.messages.push(forwardedFile(1, "MessageMediaDocument"), forwardedFile(2, "MessageMediaDocument"), forwardedFile(3, "MessageMediaDocument"));
 
-  const action = new FavoritesCleanupAction(contextFor(client, { maxMessages: 2 }));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client, { maxMessages: 2 }));
 
   assert.equal(client.lastLimit, 2);
   assert.equal(client.probeCount, 2);
@@ -164,15 +158,16 @@ test("scans at most maxMessages from the newest message", async () => {
 
 test("defaults the scan limit to 500", async () => {
   const client = new FakeClient();
-  const action = new FavoritesCleanupAction(contextFor(client));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client));
   assert.equal(client.lastLimit, 500);
 });
 
 test("rejects a negative scan limit", async () => {
   const client = new FakeClient();
-  const action = new FavoritesCleanupAction(contextFor(client, { maxMessages: -1 }));
-  await assert.rejects(() => action.execute(), /maxMessages must be a non-negative integer/);
+  await assert.rejects(
+    () => new FavoritesCleanupAction().run(contextFor(client, { maxMessages: -1 })),
+    /maxMessages must be a non-negative integer/
+  );
 });
 
 test("stops immediately when aborted", async () => {
@@ -182,8 +177,7 @@ test("stops immediately when aborted", async () => {
   const controller = new AbortController();
   controller.abort();
 
-  const action = new FavoritesCleanupAction(contextFor(client, {}, controller.signal));
-  await action.execute();
+  await new FavoritesCleanupAction().run(contextFor(client, {}, controller.signal));
 
   assert.equal(client.probeCount, 0);
   assert.equal(client.deleteCount, 0);

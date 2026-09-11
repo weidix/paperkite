@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SessionUnavailableError } from "@paperkite/sdk";
+import { SessionUnavailableError } from "../src/engine/errors.js";
 import { SessionPool } from "../src/telegram/pool.js";
 import { createGramLogger, type SessionClient } from "../src/telegram/client.js";
 import { writeSessionFile } from "../src/telegram/session-files.js";

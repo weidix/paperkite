@@ -22,7 +22,6 @@ import type {
   TriggerEmission,
   Unsubscribe
 } from "@paperkite/sdk";
-import { SessionUnavailableError } from "@paperkite/sdk";
 import { statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type {
@@ -35,7 +34,8 @@ import type {
 } from "../config/model.js";
 import { updateFlowItem } from "../config/loader.js";
 import { AppLogger } from "./logger.js";
-import { invalidateAllHooks, invalidateHook, loadHook } from "./hooks.js";
+import { SessionUnavailableError } from "./errors.js";
+import { invalidateAllHooks, invalidateHook, loadHook, normalizeHookResult } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
 import { CapabilityRegistry } from "../extensions/registry.js";
 import type { SessionPool, SessionStateChange } from "../telegram/pool.js";
@@ -611,7 +611,6 @@ export class Runtime {
       sessions: this.options.sessions.access(definition.session),
       control: this.options.registry.grantsControl("trigger", definition.capability) ? this : undefined,
       logger: this.capabilityLogger("trigger", definition.capability),
-      maxRuns: definition.maxRuns,
       emit: async (event) => {
         if (controller.signal.aborted) return;
         emitted += 1;
@@ -659,8 +658,7 @@ export class Runtime {
         }
       }
     };
-    const trigger = new Constructor(context);
-    await trigger.run();
+    await new Constructor().run(context);
   }
 
   private async runService(definition: ServiceDefinition, controller: AbortController): Promise<void> {
@@ -675,7 +673,7 @@ export class Runtime {
       control: this.options.registry.grantsControl("service", definition.capability) ? this : undefined,
       logger: this.capabilityLogger("service", definition.capability)
     };
-    await new Constructor(context).run();
+    await new Constructor().run(context);
   }
 
   private async runAction(
@@ -710,17 +708,18 @@ export class Runtime {
     }
     const Constructor = this.options.registry.getAction(capability);
     const hook = await loadHook(specification.hook, this.catalog.path);
+    const decision = hook
+      ? normalizeHookResult(await hook({ config: specification.config, emission, signal }), specification.config)
+      : undefined;
     const context: ActionContext = {
       id,
-      config: specification.config,
+      config: decision ? decision.config : specification.config,
       session,
       signal,
       sessions: this.options.sessions.access(session),
       control: this.options.registry.grantsControl("action", capability) ? this : undefined,
       logger: this.capabilityLogger("action", capability),
       emission,
-      hook,
-      outcome: undefined,
       spawn: (task) => this.track(task.then(() => undefined))
     };
     const startedAt = Date.now();
@@ -736,7 +735,7 @@ export class Runtime {
     });
     let failure: unknown;
     try {
-      await new Constructor(context).execute();
+      if (decision?.skip !== true) await new Constructor().run(context);
     } catch (error) {
       failure = error;
       throw error;
@@ -749,10 +748,10 @@ export class Runtime {
         session,
         flow,
         ok: failure === undefined,
-        skipped: context.outcome?.skipped === true,
+        skipped: decision?.skip === true,
         durationMs: Date.now() - startedAt,
         error: failure instanceof Error ? failure.message : failure === undefined ? undefined : String(failure),
-        effectiveConfig: exportable(context.outcome?.effectiveConfig)
+        effectiveConfig: exportable(decision?.config)
       });
     }
     return { skipped: false };

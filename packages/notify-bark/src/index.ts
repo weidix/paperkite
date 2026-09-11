@@ -1,4 +1,4 @@
-import { Action, type TriggerEmission } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler, TriggerEmission } from "@paperkite/sdk";
 
 interface BarkConfig {
   /** Bark 服务入口；缺省用官方 api.day.app，自建部署时如 https://bark.example:444。 */
@@ -18,19 +18,20 @@ interface BarkConfig {
   readonly method?: "get" | "post";
 }
 
-export class BarkAction extends Action<BarkConfig> {
-  protected async run(): Promise<void> {
-    const server = this.config.server?.trim() || "https://api.day.app";
-    const key = this.config.key?.trim();
+export class BarkAction implements ActionHandler<BarkConfig> {
+  async run(ctx: ActionContext<BarkConfig>): Promise<void> {
+    const config = ctx.config;
+    const server = config.server?.trim() || "https://api.day.app";
+    const key = config.key?.trim();
     if (!key) throw new Error("push needs key");
-    const title = render(this.config.title ?? "Paperkite", this.emission);
-    const body = render(this.config.body ?? "", this.emission);
-    const method = (this.config.method ?? "post").toUpperCase() as "GET" | "POST";
+    const title = render(config.title ?? "Paperkite", ctx.emission);
+    const body = render(config.body ?? "", ctx.emission);
+    const method = (config.method ?? "post").toUpperCase() as "GET" | "POST";
     if (method === "POST" && !body) throw new Error("push needs body");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), normalizeTimeout(this.config.timeoutMs));
+    const timer = setTimeout(() => controller.abort(), normalizeTimeout(config.timeoutMs));
     const onAbort = (): void => controller.abort();
-    this.signal.addEventListener("abort", onAbort, { once: true });
+    ctx.signal.addEventListener("abort", onAbort, { once: true });
     try {
       const response = await fetch(
         method === "POST"
@@ -38,11 +39,11 @@ export class BarkAction extends Action<BarkConfig> {
           : buildBarkUrl(server, key, {
               title,
               body,
-              group: this.config.group,
-              level: this.config.level,
-              icon: this.config.icon,
-              click: this.config.click,
-              copy: this.config.copy
+              group: config.group,
+              level: config.level,
+              icon: config.icon,
+              click: config.click,
+              copy: config.copy
             }),
         {
           method,
@@ -52,11 +53,11 @@ export class BarkAction extends Action<BarkConfig> {
                 body: JSON.stringify({
                   title,
                   body,
-                  group: this.config.group,
-                  level: this.config.level,
-                  icon: this.config.icon,
-                  url: this.config.click,
-                  copy: this.config.copy
+                  group: config.group,
+                  level: config.level,
+                  icon: config.icon,
+                  url: config.click,
+                  copy: config.copy
                 })
               }
             : {}),
@@ -66,7 +67,7 @@ export class BarkAction extends Action<BarkConfig> {
       if (!response.ok) throw new Error(`Bark request failed with HTTP ${response.status}`);
     } finally {
       clearTimeout(timer);
-      this.signal.removeEventListener("abort", onAbort);
+      ctx.signal.removeEventListener("abort", onAbort);
     }
   }
 }

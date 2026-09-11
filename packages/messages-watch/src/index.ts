@@ -1,5 +1,5 @@
 import { NewMessage } from "telegram/events/index.js";
-import { Trigger, type SessionAccess, type TriggerEvent } from "@paperkite/sdk";
+import type { SessionAccess, TriggerContext, TriggerEvent, TriggerHandler } from "@paperkite/sdk";
 import { resolveChat, type ResolveClient } from "./resolve.js";
 
 export { resolveChat, type ResolveClient } from "./resolve.js";
@@ -39,63 +39,69 @@ export function validateConfig(config: unknown): readonly string[] {
     .map((value) => `无法解析的聊天引用 ${value}，请使用群数字 ID、@用户名或邀请链接`);
 }
 
-export class LiveConversationTrigger extends Trigger<WatchConfig> {
-  async run(): Promise<void> {
-    const chats = listChats(this.config);
-    if (!this.sessions || !this.session) throw new Error("live conversation watcher needs a session");
-    const matcher = makePattern(this.config);
+export class LiveConversationTrigger implements TriggerHandler<WatchConfig> {
+  async run(ctx: TriggerContext<WatchConfig>): Promise<void> {
+    const config = ctx.config;
+    const chats = listChats(config);
+    const sessions = ctx.sessions;
+    if (!sessions || !ctx.session) throw new Error("live conversation watcher needs a session");
+    const matcher = makePattern(config);
     const registrations: Array<{ client: EventClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
     try {
-      await this.sessions.run(async (rawClient) => {
+      await sessions.run(async (rawClient) => {
         const client = rawClient as EventClient;
         const resolved = await Promise.all(chats.map((chat) => resolveChat(client, chat)));
         const builder = new NewMessage({
           chats: resolved as never[],
-          fromUsers: this.config.fromUsers as never[] | undefined,
-          incoming: this.config.incoming,
-          outgoing: this.config.outgoing,
-          forwards: this.config.forwards,
+          fromUsers: config.fromUsers as never[] | undefined,
+          incoming: config.incoming,
+          outgoing: config.outgoing,
+          forwards: config.forwards,
           pattern: matcher ? new RegExp(matcher.source, matcher.flags) : undefined
         });
         const handler = (input: unknown): void => {
-          void this.handleEvent(input, matcher).catch((error) => this.contextError(error));
+          void emitEvent(ctx, input, matcher).catch((error: unknown) => {
+            ctx.logger.error("live conversation watcher failed", error);
+          });
         };
         client.addEventHandler(handler, builder);
         registrations.push({ client, handler, builder });
       });
-      await waitForAbort(this.signal);
+      await waitForAbort(ctx.signal);
     } finally {
       for (const { client, handler, builder } of registrations) client.removeEventHandler(handler, builder);
     }
   }
-
-  private async handleEvent(input: unknown, matcher: RegExp | undefined): Promise<void> {
-    const event = toTriggerEvent(getEventMessage(input));
-    if (matches(event, this.config, matcher)) await this.emit(event);
-  }
-
-  private contextError(error: unknown): void {
-    this.context.logger.error("live conversation watcher failed", error);
-  }
 }
 
-export class PollConversationTrigger extends Trigger<WatchConfig> {
-  async run(): Promise<void> {
-    const chats = listChats(this.config);
-    if (!this.sessions || !this.session) throw new Error("poll conversation watcher needs a session");
-    const interval = normalizeSeconds(this.config.intervalSeconds, 30);
-    const limit = normalizeLimit(this.config.maxMessages);
-    const matcher = makePattern(this.config);
-    const resolved = await resolveChats(this.sessions, chats);
-    const cursors = new Map<string, number>();
-    for (const chat of resolved) cursors.set(cursorKey(chat), this.config.afterMessageId ?? 0);
+async function emitEvent(
+  ctx: TriggerContext<WatchConfig>,
+  input: unknown,
+  matcher: RegExp | undefined
+): Promise<void> {
+  const event = toTriggerEvent(getEventMessage(input));
+  if (matches(event, ctx.config, matcher)) await ctx.emit?.(event);
+}
 
-    while (!this.signal.aborted) {
+export class PollConversationTrigger implements TriggerHandler<WatchConfig> {
+  async run(ctx: TriggerContext<WatchConfig>): Promise<void> {
+    const config = ctx.config;
+    const chats = listChats(config);
+    const sessions = ctx.sessions;
+    if (!sessions || !ctx.session) throw new Error("poll conversation watcher needs a session");
+    const interval = normalizeSeconds(config.intervalSeconds, 30);
+    const limit = normalizeLimit(config.maxMessages);
+    const matcher = makePattern(config);
+    const resolved = await resolveChats(sessions, chats);
+    const cursors = new Map<string, number>();
+    for (const chat of resolved) cursors.set(cursorKey(chat), config.afterMessageId ?? 0);
+
+    while (!ctx.signal.aborted) {
       for (const chat of resolved) {
-        if (this.signal.aborted) break;
+        if (ctx.signal.aborted) break;
         try {
           await runUntilAborted(
-            this.sessions.run(async (rawClient) => {
+            sessions.run(async (rawClient) => {
               const client = rawClient as EventClient;
               const messages = await client.getMessages(chat, {
                 limit,
@@ -107,17 +113,17 @@ export class PollConversationTrigger extends Trigger<WatchConfig> {
                 if (event.id && event.id > (cursors.get(cursorKey(chat)) ?? 0)) {
                   cursors.set(cursorKey(chat), event.id);
                 }
-                if (matches(event, this.config, matcher)) await this.emit(event);
+                if (matches(event, config, matcher)) await ctx.emit?.(event);
               }
             }),
-            this.signal
+            ctx.signal
           );
         } catch (error) {
-          if (this.signal.aborted) break;
-          this.context.logger.warn("conversation polling failed", { chat, error });
+          if (ctx.signal.aborted) break;
+          ctx.logger.warn("conversation polling failed", { chat, error });
         }
       }
-      await waitForSeconds(interval, this.signal);
+      await waitForSeconds(interval, ctx.signal);
     }
   }
 }
