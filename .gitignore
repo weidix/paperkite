@@ -30,3 +30,4 @@ viz/
 docs/
 
 out/
+pnpm-publish-summary.json

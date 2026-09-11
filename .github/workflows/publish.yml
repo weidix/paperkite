@@ -1,0 +1,162 @@
+# 发布流程
+#
+# 标签推送触发，标签名决定发布范围：
+#   v0.1.3                      全部包（sdk、插件、主程序）
+#   core-v0.1.3                 主程序
+#   sdk-v0.2.0                  @paperkite/sdk
+#   plugins-v0.1.2              全部插件
+#   plugin-archive-v0.1.2       单个插件
+#
+# npm 侧走 Trusted publishing，OIDC 直接换取短期令牌，仓库里不存任何 npm 凭据。
+
+name: 发布
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "core-v*"
+      - "sdk-v*"
+      - "plugins-v*"
+      - "plugin-*-v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 发布目标：all、core、plugins、sdk 或单个插件名（例如 archive）
+        type: string
+        default: all
+      dry-run:
+        description: 走完构建与打包，不推送到 npm
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出
+        uses: actions/checkout@v7
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.25.0
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建
+        run: pnpm build
+
+      - name: 类型检查与测试
+        run: pnpm check
+
+      - name: 解析发布范围
+        id: scope
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$TARGET" in
+              all) ref=v ;;
+              core) ref=core-v ;;
+              plugins) ref=plugins-v ;;
+              sdk) ref=sdk-v ;;
+              *) ref="plugin-$TARGET-v" ;;
+            esac
+          else
+            ref="$GITHUB_REF_NAME"
+          fi
+          case "$ref" in
+            core-v*) filter=paperkite ;;
+            sdk-v*) filter='@paperkite/sdk' ;;
+            plugins-v*) filter='@paperkite/plugin-*' ;;
+            plugin-*-v*)
+              name="${ref#plugin-}"
+              filter="@paperkite/plugin-${name%-v*}"
+              ;;
+            v*) filter='paperkite...' ;;
+            *)
+              echo "无法识别的发布引用：$ref" >&2
+              exit 1
+              ;;
+          esac
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "filter=$filter" >> "$GITHUB_OUTPUT"
+          echo "| 项 | 值 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 引用 | \`$ref\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 范围 | \`$filter\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 核对标签与包版本
+        if: github.event_name == 'push'
+        env:
+          REF: ${{ steps.scope.outputs.ref }}
+        run: |
+          set -euo pipefail
+          case "$REF" in
+            v*) dir=.; expected="${REF#v}" ;;
+            core-v*) dir=.; expected="${REF##*-v}" ;;
+            sdk-v*) dir=packages/sdk; expected="${REF##*-v}" ;;
+            plugin-*-v*)
+              name="${REF#plugin-}"
+              dir="packages/${name%-v*}"
+              expected="${REF##*-v}"
+              ;;
+            *)
+              echo "本次包含多个独立版本，跳过核对" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
+          actual="$(node -p "require('./$dir/package.json').version")"
+          if [ "$actual" != "$expected" ]; then
+            echo "标签 $REF 与 $dir/package.json 的版本 $actual 不一致" >&2
+            exit 1
+          fi
+          echo "版本核对通过：$dir 为 $actual" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 发布
+        env:
+          FILTER: ${{ steps.scope.outputs.filter }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          args=(--no-git-checks --access public --report-summary)
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          pnpm -r --filter "$FILTER" publish "${args[@]}"
+
+      - name: 汇总
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f pnpm-publish-summary.json ]; then
+            echo "本次运行没有生成发布汇总" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$(jq '.publishedPackages | length' pnpm-publish-summary.json)" -eq 0 ]; then
+            echo "没有需要发布的包" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "| 包 | 版本 |"
+            echo "| --- | --- |"
+            jq -r '.publishedPackages[] | "| \(.name) | \(.version) |"' pnpm-publish-summary.json
+          } >> "$GITHUB_STEP_SUMMARY"
