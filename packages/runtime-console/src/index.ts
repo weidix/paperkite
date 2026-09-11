@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { Service, type RuntimeLogger } from "@paperkite/sdk";
+import type { RuntimeLogger, ServiceContext, ServiceHandler } from "@paperkite/sdk";
 import { createRuntimeConsoleServer } from "./console/server.js";
 
 interface ConsoleWebConfig {
@@ -12,21 +12,22 @@ interface ConsoleWebConfig {
   readonly publicDir?: string;
 }
 
-export class RuntimeConsoleWebService extends Service<ConsoleWebConfig> {
-  async run(): Promise<void> {
-    if (!this.control) throw new Error("runtime console needs the runtime control contract");
-    const server = createRuntimeConsoleServer(this.control, { logger: this.context.logger });
+export class RuntimeConsoleWebService implements ServiceHandler<ConsoleWebConfig> {
+  async run(ctx: ServiceContext<ConsoleWebConfig>): Promise<void> {
+    if (!ctx.control) throw new Error("runtime console needs the runtime control contract");
+    const config = ctx.config;
+    const server = createRuntimeConsoleServer(ctx.control, { logger: ctx.logger });
     try {
       await server.register(fastifyStatic, {
-        root: await publicDirectory(this.config?.publicDir),
+        root: await publicDirectory(config?.publicDir),
         index: "index.html"
       });
       server.setNotFoundHandler(spaFallback);
-      const host = this.config?.host ?? "127.0.0.1";
-      const port = normalizePort(this.config?.port);
-      await listenRetrying(server, host, port, this.context.logger);
-      this.context.logger.info("runtime web console listening", { host, port });
-      await waitForAbort(this.signal);
+      const host = config?.host ?? "127.0.0.1";
+      const port = normalizePort(config?.port);
+      await listenRetrying(server, host, port, ctx.logger);
+      ctx.logger.info("runtime web console listening", { host, port });
+      await waitForAbort(ctx.signal);
     } finally {
       await server.close().catch(() => undefined);
     }

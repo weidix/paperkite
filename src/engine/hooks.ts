@@ -2,9 +2,19 @@ import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ActionHook } from "@paperkite/sdk";
+import type { ActionHook, ActionHookResult } from "@paperkite/sdk";
 
 const loaded = new Map<string, ActionHook>();
+
+export function normalizeHookResult(result: unknown, current: unknown): { config: unknown; skip: boolean } {
+  if (isHookResult(result)) {
+    return {
+      config: result.config === undefined ? current : mergeConfig(current, result.config),
+      skip: result.skip === true
+    };
+  }
+  return { config: result === undefined ? current : mergeConfig(current, result), skip: false };
+}
 
 export async function loadHook(reference: string | undefined, configFile: string | undefined): Promise<ActionHook | undefined> {
   if (!reference) return undefined;
@@ -37,4 +47,17 @@ async function importHook(file: string): Promise<ActionHook> {
   const module = (await import(url)) as { default?: unknown };
   if (typeof module.default !== "function") throw new Error("hook must export a default function: " + file);
   return module.default as ActionHook;
+}
+
+function isHookResult(value: unknown): value is ActionHookResult {
+  return typeof value === "object" && value !== null && ("config" in value || "skip" in value);
+}
+
+function mergeConfig(current: unknown, next: unknown): unknown {
+  if (isRecord(current) && isRecord(next)) return { ...current, ...next };
+  return next;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

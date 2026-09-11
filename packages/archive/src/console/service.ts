@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
-import { Service, type RuntimeLogger } from "@paperkite/sdk";
+import type { RuntimeLogger, ServiceContext, ServiceHandler } from "@paperkite/sdk";
 import { createArchiveConsoleServer } from "./server.js";
 import { createArchiveStore, resolveBackend } from "../storage/index.js";
 
@@ -17,9 +17,9 @@ export interface ArchiveConsoleWebConfig {
   readonly publicDir?: string;
 }
 
-export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
-  async run(): Promise<void> {
-    const config = this.config ?? {};
+export class ArchiveConsoleWebService implements ServiceHandler<ArchiveConsoleWebConfig> {
+  async run(ctx: ServiceContext<ArchiveConsoleWebConfig>): Promise<void> {
+    const config = ctx.config ?? {};
     const store = createArchiveStore({
       url: config.url,
       schema: config.schema
@@ -28,9 +28,9 @@ export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
       store,
       backend: resolveBackend(config.url),
       mediaDir: config.mediaDir,
-      session: this.session,
-      sessions: this.sessions,
-      logger: this.context.logger
+      session: ctx.session,
+      sessions: ctx.sessions,
+      logger: ctx.logger
     });
     try {
       await store.init();
@@ -40,9 +40,9 @@ export class ArchiveConsoleWebService extends Service<ArchiveConsoleWebConfig> {
       });
       const host = config.host ?? "127.0.0.1";
       const port = normalizeConsolePort(config.port);
-      await listenRetrying(server, host, port, this.context.logger);
-      this.context.logger.info("archive console listening", { host, port });
-      await waitForAbort(this.signal);
+      await listenRetrying(server, host, port, ctx.logger);
+      ctx.logger.info("archive console listening", { host, port });
+      await waitForAbort(ctx.signal);
     } finally {
       await server.close().catch(() => undefined);
       await store.close();

@@ -1,4 +1,4 @@
-import { Action, type RuntimeLogger } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler, RuntimeLogger } from "@paperkite/sdk";
 
 interface CleanupConfig {
   readonly maxMessages?: number;
@@ -34,59 +34,61 @@ class ProbeWriter {
   close(): void {}
 }
 
-export class FavoritesCleanupAction extends Action<CleanupConfig> {
-  protected async run(): Promise<void> {
-    if (!this.sessions || !this.session) throw new Error("favorites cleanup needs a session");
-    await this.sessions.run((client) => this.cleanup(client as FavoritesClient));
+export class FavoritesCleanupAction implements ActionHandler<CleanupConfig> {
+  async run(ctx: ActionContext<CleanupConfig>): Promise<void> {
+    const sessions = ctx.sessions;
+    if (!sessions || !ctx.session) throw new Error("favorites cleanup needs a session");
+    await sessions.run((client) => cleanup(ctx, client as FavoritesClient));
+  }
+}
+
+async function cleanup(ctx: ActionContext<CleanupConfig>, client: FavoritesClient): Promise<void> {
+  const config = ctx.config;
+  const dryRun = config.dryRun === true;
+  const candidates: Candidate[] = [];
+  const groups = new Map<string, number[]>();
+  let scanned = 0;
+
+  for await (const raw of client.iterMessages("me", { limit: scanLimit(config.maxMessages) })) {
+    if (ctx.signal.aborted) return;
+    scanned += 1;
+    const message = recordOf(raw);
+    const id = positiveId(message?.id);
+    if (!message || id === undefined) continue;
+    if (!forwardOf(message)) continue;
+    const groupedId = groupedIdOf(message);
+    candidates.push({ id, raw: message, ...(groupedId !== undefined ? { groupedId } : {}) });
+    if (groupedId !== undefined) pushGroup(groups, groupedId, id);
   }
 
-  private async cleanup(client: FavoritesClient): Promise<void> {
-    const dryRun = this.config.dryRun === true;
-    const candidates: Candidate[] = [];
-    const groups = new Map<string, number[]>();
-    let scanned = 0;
-
-    for await (const raw of client.iterMessages("me", { limit: scanLimit(this.config.maxMessages) })) {
-      if (this.signal.aborted) return;
-      scanned += 1;
-      const message = recordOf(raw);
-      const id = positiveId(message?.id);
-      if (!message || id === undefined) continue;
-      if (!forwardOf(message)) continue;
-      const groupedId = groupedIdOf(message);
-      candidates.push({ id, raw: message, ...(groupedId !== undefined ? { groupedId } : {}) });
-      if (groupedId !== undefined) pushGroup(groups, groupedId, id);
+  const expired: number[] = [];
+  const counts = { valid: 0, failed: 0, unavailable: 0 };
+  for (const candidate of candidates) {
+    if (ctx.signal.aborted) return;
+    if (fileMediaOf(candidate.raw.media)) {
+      const result = await probeFile(client, candidate.raw, ctx.logger);
+      if (result === "expired") expired.push(candidate.id);
+      else if (result === "valid") counts.valid += 1;
+      else counts.failed += 1;
+      continue;
     }
-
-    const expired: number[] = [];
-    const counts = { valid: 0, failed: 0, unavailable: 0 };
-    for (const candidate of candidates) {
-      if (this.signal.aborted) return;
-      if (fileMediaOf(candidate.raw.media)) {
-        const result = await probeFile(client, candidate.raw, this.context.logger);
-        if (result === "expired") expired.push(candidate.id);
-        else if (result === "valid") counts.valid += 1;
-        else counts.failed += 1;
-        continue;
-      }
-      if (unavailableOf(candidate.raw)) {
-        counts.unavailable += 1;
-        expired.push(candidate.id);
-      }
+    if (unavailableOf(candidate.raw)) {
+      counts.unavailable += 1;
+      expired.push(candidate.id);
     }
-
-    const deleteIds = collectDeleteIds(expired, groups);
-    if (!dryRun && deleteIds.length > 0) {
-      await client.deleteMessages("me", deleteIds, { revoke: true });
-    }
-
-    this.context.logger.info(
-      `favorites cleanup${dryRun ? " (dry run)" : ""}: scanned=${scanned} ` +
-      `forwarded=${candidates.length} valid=${counts.valid} expired=${expired.length} ` +
-      `unavailable=${counts.unavailable} failed=${counts.failed} deleted=${deleteIds.length}` +
-      (expired.length > 0 ? ` expiredIds=${expired.join(",")}` : "")
-    );
   }
+
+  const deleteIds = collectDeleteIds(expired, groups);
+  if (!dryRun && deleteIds.length > 0) {
+    await client.deleteMessages("me", deleteIds, { revoke: true });
+  }
+
+  ctx.logger.info(
+    `favorites cleanup${dryRun ? " (dry run)" : ""}: scanned=${scanned} ` +
+    `forwarded=${candidates.length} valid=${counts.valid} expired=${expired.length} ` +
+    `unavailable=${counts.unavailable} failed=${counts.failed} deleted=${deleteIds.length}` +
+    (expired.length > 0 ? ` expiredIds=${expired.join(",")}` : "")
+  );
 }
 
 async function probeFile(

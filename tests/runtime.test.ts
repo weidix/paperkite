@@ -3,7 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Action, Service, Trigger, type RuntimeEvent, type RuntimeSnapshot } from "@paperkite/sdk";
+import type {
+  ActionContext,
+  ActionHandler,
+  RuntimeEvent,
+  RuntimeSnapshot,
+  ServiceContext,
+  ServiceHandler,
+  TriggerContext,
+  TriggerHandler
+} from "@paperkite/sdk";
 import { fromMapping } from "../src/config/loader.js";
 import type { FlowCatalog } from "../src/config/model.js";
 import { CapabilityRegistry } from "../src/extensions/registry.js";
@@ -11,11 +20,11 @@ import { AppLogger } from "../src/engine/logger.js";
 import { Runtime } from "../src/engine/runtime.js";
 import type { SessionPool } from "../src/telegram/pool.js";
 
-class EchoAction extends Action {
+class EchoAction implements ActionHandler {
   static runs: { id: string; config: unknown }[] = [];
 
-  async run(): Promise<void> {
-    EchoAction.runs.push({ id: this.id, config: this.config });
+  async run(ctx: ActionContext): Promise<void> {
+    EchoAction.runs.push({ id: ctx.id, config: ctx.config });
   }
 }
 
@@ -88,27 +97,27 @@ test("runFlow executes a schedule action once and reload swaps the catalog", asy
   await runtime.stop();
 });
 
-class SlowStopService extends Service {
+class SlowStopService implements ServiceHandler {
   static runs = 0;
 
-  async run(): Promise<void> {
+  async run(ctx: ServiceContext): Promise<void> {
     SlowStopService.runs += 1;
     await new Promise<void>((resolve) => {
       const finish = (): void => {
         setTimeout(() => resolve(), 600);
       };
-      if (this.signal.aborted) finish();
-      else this.signal.addEventListener("abort", finish, { once: true });
+      if (ctx.signal.aborted) finish();
+      else ctx.signal.addEventListener("abort", finish, { once: true });
     });
   }
 }
 
-class WaitTrigger extends Trigger {
+class WaitTrigger implements TriggerHandler {
   static runs = 0;
 
-  async run(): Promise<void> {
+  async run(ctx: TriggerContext): Promise<void> {
     WaitTrigger.runs += 1;
-    await new Promise<void>((resolve) => this.signal.addEventListener("abort", () => resolve(), { once: true }));
+    await new Promise<void>((resolve) => ctx.signal.addEventListener("abort", () => resolve(), { once: true }));
   }
 }
 
@@ -189,6 +198,24 @@ test("command runs reload the action hook on every execution", async () => {
     await writeFile(hook, 'export default () => ({ text: "v2" });\n');
     await runtime.runFlow("run-hook");
     assert.deepEqual(EchoAction.runs.at(-1)?.config, { text: "v2" }, "command hook is re-read on every run");
+    await runtime.stop();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a hook that skips the run keeps the action from executing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-runtime-hook-"));
+  const flows = join(directory, "flows.yml");
+  const hook = join(directory, "hook.ts");
+  try {
+    await writeFile(hook, 'export default () => ({ skip: true, config: { text: "v1" } });\n');
+    const { runtime, events } = await makeRuntime({ catalog: fromMapping({}, flows) });
+    await runtime.executeAction({ capability: "demo.action", hook: "hook.ts", config: {} });
+    assert.deepEqual(EchoAction.runs, [], "a skipped hook never reaches the handler");
+    const finished = events.find((event) => event.type === "action.finished");
+    assert.equal(finished?.type === "action.finished" ? finished.skipped : undefined, true);
+    assert.deepEqual(finished?.type === "action.finished" ? finished.effectiveConfig : undefined, { text: "v1" });
     await runtime.stop();
   } finally {
     await rm(directory, { recursive: true, force: true });

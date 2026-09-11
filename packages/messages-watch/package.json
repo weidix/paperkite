@@ -18,9 +18,6 @@
   "dependencies": {
     "telegram": "^2.26.22"
   },
-  "peerDependencies": {
-    "@paperkite/sdk": "workspace:^"
-  },
   "devDependencies": {
     "@paperkite/sdk": "workspace:*"
   },

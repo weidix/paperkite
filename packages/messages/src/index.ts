@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { DateTime } from "luxon";
-import { Action, type TriggerEmission } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler, TriggerEmission } from "@paperkite/sdk";
 
 interface SendConfig {
   readonly mode?: "user" | "bot" | "personal";
@@ -24,27 +24,29 @@ interface TelegramClientLike {
   sendFile(peer: string | number, options: Record<string, unknown>): Promise<unknown>;
 }
 
-export class SendMessageAction extends Action<SendConfig> {
-  protected async run(): Promise<void> {
-    const peer = this.config.peer;
-    const message = render(this.config.text ?? "", this.emission);
-    await waitForSendTime(this.config.sendAt, this.config.delaySeconds, this.signal);
-    if (this.signal.aborted) return;
-    if (this.config.mode === "bot") {
-      await sendWithBot(this.config, message, this.emission, this.signal);
+export class SendMessageAction implements ActionHandler<SendConfig> {
+  async run(ctx: ActionContext<SendConfig>): Promise<void> {
+    const config = ctx.config;
+    const peer = config.peer;
+    const message = render(config.text ?? "", ctx.emission);
+    await waitForSendTime(config.sendAt, config.delaySeconds, ctx.signal);
+    if (ctx.signal.aborted) return;
+    if (config.mode === "bot") {
+      await sendWithBot(config, message, ctx.emission, ctx.signal);
       return;
     }
+    const sessions = ctx.sessions;
     if (peer === undefined || peer === "") throw new Error("send needs peer");
-    if (!this.sessions || !this.session) throw new Error("send needs a session");
-    await this.sessions.run(async (client) => {
+    if (!sessions || !ctx.session) throw new Error("send needs a session");
+    await sessions.run(async (client) => {
       const telegram = client as TelegramClientLike;
-      if (this.config.file) {
+      if (config.file) {
         await telegram.sendFile(peer, {
-          file: this.config.file,
-          caption: render(this.config.caption ?? message, this.emission),
-          replyTo: this.config.replyTo ?? (this.config.replyToEvent ? replyId(this.emission) : undefined),
-          silent: this.config.silent,
-          parseMode: this.config.parseMode,
+          file: config.file,
+          caption: render(config.caption ?? message, ctx.emission),
+          replyTo: config.replyTo ?? (config.replyToEvent ? replyId(ctx.emission) : undefined),
+          silent: config.silent,
+          parseMode: config.parseMode,
           forceDocument: false
         });
         return;
@@ -52,10 +54,10 @@ export class SendMessageAction extends Action<SendConfig> {
       if (!message) throw new Error("send needs text or file");
       await telegram.sendMessage(peer, {
         message,
-        replyTo: this.config.replyTo ?? (this.config.replyToEvent ? replyId(this.emission) : undefined),
-        silent: this.config.silent,
-        parseMode: this.config.parseMode,
-        linkPreview: this.config.linkPreview
+        replyTo: config.replyTo ?? (config.replyToEvent ? replyId(ctx.emission) : undefined),
+        silent: config.silent,
+        parseMode: config.parseMode,
+        linkPreview: config.linkPreview
       });
     });
   }

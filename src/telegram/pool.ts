@@ -1,11 +1,6 @@
 import { Api } from "telegram/tl/api.js";
-import {
-  SessionUnavailableError,
-  type RuntimeLogger,
-  type SessionAccess,
-  type SessionState,
-  type Unsubscribe
-} from "@paperkite/sdk";
+import type { RuntimeLogger, SessionAccess, SessionState, Unsubscribe } from "@paperkite/sdk";
+import { SessionUnavailableError } from "../engine/errors.js";
 import type { AppSettings } from "../config/settings.js";
 import { createGramClient, type SessionClient } from "./client.js";
 import { classifySessionFailure } from "./failure.js";

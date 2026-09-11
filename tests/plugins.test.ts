@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadExtensions, isCapabilityHandler } from "../src/extensions/loader.js";
+import { loadExtensions, isHandlerConstructor } from "../src/extensions/loader.js";
 
 const pluginDirectories = [
   "messages",
@@ -19,15 +19,19 @@ test("each actual plugin owns one manifest and shared packages stay ordinary", a
   for (const directory of pluginDirectories) {
     const manifest = JSON.parse(await readFile(join(process.cwd(), "packages", directory, "package.json"), "utf8")) as {
       name: string;
+      peerDependencies?: Record<string, string>;
       paperkite?: { plugin?: unknown };
     };
     assert.ok(manifest.paperkite?.plugin, directory);
+    assert.equal(manifest.peerDependencies, undefined, directory);
   }
   for (const directory of ["sdk"]) {
     const manifest = JSON.parse(await readFile(join(process.cwd(), "packages", directory, "package.json"), "utf8")) as {
+      exports?: Record<string, unknown>;
       paperkite?: unknown;
     };
     assert.equal(manifest.paperkite, undefined, directory);
+    assert.deepEqual(manifest.exports?.["."], { types: "./dist/index.d.ts" }, directory);
   }
 });
 
@@ -76,14 +80,13 @@ test("manifest validator symbols resolve into callable config validators", async
   assert.equal(registry.validatorOf("action", "notify.bark"), undefined);
 });
 
-test("handler checks accept classes from another sdk copy", () => {
-  class Trigger {}
-  class Service {}
-  class HealthTrigger extends Trigger {}
-  class ConsoleService extends Service {}
+test("handler checks accept any class whose prototype exposes run", () => {
+  class Handler {
+    async run(): Promise<void> {}
+  }
 
-  assert.equal(isCapabilityHandler(HealthTrigger, "trigger"), true);
-  assert.equal(isCapabilityHandler(ConsoleService, "service"), true);
-  assert.equal(isCapabilityHandler(HealthTrigger, "action"), false);
-  assert.equal(isCapabilityHandler(class {}, "trigger"), false);
+  assert.equal(isHandlerConstructor(Handler), true);
+  assert.equal(isHandlerConstructor(class {}), false);
+  assert.equal(isHandlerConstructor({ run() {} }), false);
+  assert.equal(isHandlerConstructor((): void => undefined), false);
 });

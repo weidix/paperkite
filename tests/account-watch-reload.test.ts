@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Action, type TriggerEmission } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler, TriggerEmission } from "@paperkite/sdk";
 import { SessionHealthTrigger } from "../packages/account-health/src/index.js";
 import { fromMapping } from "../src/config/loader.js";
 import { CapabilityRegistry } from "../src/extensions/registry.js";
@@ -11,11 +11,11 @@ import { AppLogger } from "../src/engine/logger.js";
 import { Runtime } from "../src/engine/runtime.js";
 import type { SessionPool } from "../src/telegram/pool.js";
 
-class CaptureAction extends Action {
+class CaptureAction implements ActionHandler {
   static emissions: TriggerEmission[] = [];
 
-  protected async run(): Promise<void> {
-    if (this.emission) CaptureAction.emissions.push(this.emission);
+  async run(ctx: ActionContext): Promise<void> {
+    if (ctx.emission) CaptureAction.emissions.push(ctx.emission);
   }
 }
 

@@ -1,4 +1,4 @@
-import { isSessionUnavailable } from "@paperkite/sdk";
+import { isSessionUnavailable } from "../engine/errors.js";
 
 export type SessionFailureKind = "auth" | "account" | "action" | "none";
 

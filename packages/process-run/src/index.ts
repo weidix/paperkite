@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { Action } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler } from "@paperkite/sdk";
 
 interface CommandConfig {
   readonly program?: string;
@@ -13,22 +13,23 @@ interface CommandConfig {
   readonly maxOutputBytes?: number;
 }
 
-export class ProcessRunAction extends Action<CommandConfig> {
-  protected async run(): Promise<void> {
-    const [program, args] = commandParts(this.config);
-    const shell = this.config.shell === true;
-    const timeoutMs = normalizeTimeout(this.config.timeoutMs);
-    const maxOutputBytes = normalizeOutputLimit(this.config.maxOutputBytes);
-    const child = shell && this.config.command
-      ? spawn(this.config.command, {
-          cwd: this.config.cwd ? resolve(this.config.cwd) : process.cwd(),
-          env: { ...process.env, ...this.config.env },
+export class ProcessRunAction implements ActionHandler<CommandConfig> {
+  async run(ctx: ActionContext<CommandConfig>): Promise<void> {
+    const config = ctx.config;
+    const [program, args] = commandParts(config);
+    const shell = config.shell === true;
+    const timeoutMs = normalizeTimeout(config.timeoutMs);
+    const maxOutputBytes = normalizeOutputLimit(config.maxOutputBytes);
+    const child = shell && config.command
+      ? spawn(config.command, {
+          cwd: config.cwd ? resolve(config.cwd) : process.cwd(),
+          env: { ...process.env, ...config.env },
           shell: true,
           stdio: ["ignore", "pipe", "pipe"]
         })
       : spawn(program, args, {
-          cwd: this.config.cwd ? resolve(this.config.cwd) : process.cwd(),
-          env: { ...process.env, ...this.config.env },
+          cwd: config.cwd ? resolve(config.cwd) : process.cwd(),
+          env: { ...process.env, ...config.env },
           shell,
           stdio: ["ignore", "pipe", "pipe"]
         });
@@ -43,14 +44,14 @@ export class ProcessRunAction extends Action<CommandConfig> {
       stderr = appendOutput(stderr, chunk, maxOutputBytes);
     });
 
-    const result = await waitForProcess(child, timeoutMs, this.signal);
+    const result = await waitForProcess(child, timeoutMs, ctx.signal);
     if (result.error) throw result.error;
     if (result.timedOut) throw new Error(`command timed out after ${timeoutMs}ms: ${program}`);
     if (result.aborted) return;
     if (result.code !== 0) {
       throw new Error(`command exited with ${String(result.code)}: ${stderr.trim() || stdout.trim()}`);
     }
-    this.context.logger.info("command completed", {
+    ctx.logger.info("command completed", {
       program,
       stdout: stdout.trim(),
       stderr: stderr.trim()

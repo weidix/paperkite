@@ -749,8 +749,7 @@ test("archive console service boots over http and stops on abort", async () => {
     signal: controller.signal,
     logger
   };
-  const service = new ArchiveConsoleWebService(context);
-  const running = service.run();
+  const running = new ArchiveConsoleWebService().run(context);
 
   const base = `http://127.0.0.1:${port}`;
   await waitForHttp(base + "/api/state");

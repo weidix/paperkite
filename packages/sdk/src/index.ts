@@ -30,157 +30,27 @@ export interface TriggerEmission {
 
 export type SessionState = "starting" | "connected" | "isolated" | "waiting-auth";
 
-export class SessionUnavailableError extends Error {
-  constructor(
-    readonly session: string,
-    readonly state: SessionState,
-    reason?: string
-  ) {
-    super("session " + session + " is " + state + (reason ? ": " + reason : ""));
-  }
-}
-
-export function isSessionUnavailable(error: unknown): error is SessionUnavailableError {
-  return error instanceof SessionUnavailableError;
+/** 会话不可用的数据描述；判别按 `code` 字段进行。 */
+export interface SessionUnavailable {
+  readonly code: "session_unavailable";
+  readonly session: string;
+  readonly state: SessionState;
 }
 
 export interface SessionAccess {
   run<T>(operation: (client: unknown) => T | Promise<T>): Promise<T>;
 }
 
-export interface ActionOutcome {
-  readonly skipped: boolean;
-  readonly effectiveConfig?: unknown;
-}
-
 export interface ActionContext<P = unknown> {
   readonly id: string;
-  config: P;
+  readonly config: P;
   readonly session?: string;
   readonly signal: AbortSignal;
   readonly sessions?: SessionAccess;
   readonly control?: RuntimeControl;
   readonly logger: RuntimeLogger;
-  emission: TriggerEmission | undefined;
-  readonly hook?: ActionHook;
+  readonly emission: TriggerEmission | undefined;
   spawn(task: Promise<unknown>): void;
-  outcome?: ActionOutcome;
-}
-
-export interface ActionHookResult {
-  config?: unknown;
-  skip?: boolean;
-}
-
-export type ActionHook = (input: {
-  config: unknown;
-  emission: TriggerEmission | undefined;
-  signal: AbortSignal;
-}) => ActionHookResult | unknown | Promise<ActionHookResult | unknown>;
-
-export abstract class Action<P = unknown> {
-  constructor(protected readonly context: ActionContext<P>) {}
-
-  get id(): string {
-    return this.context.id;
-  }
-
-  get config(): P {
-    return this.context.config;
-  }
-
-  set config(value: P) {
-    this.context.config = value;
-  }
-
-  get session(): string | undefined {
-    return this.context.session;
-  }
-
-  get signal(): AbortSignal {
-    return this.context.signal;
-  }
-
-  get sessions(): SessionAccess | undefined {
-    return this.context.sessions;
-  }
-
-  get control(): RuntimeControl | undefined {
-    return this.context.control;
-  }
-
-  get emission(): TriggerEmission | undefined {
-    return this.context.emission;
-  }
-
-  async execute(): Promise<void> {
-    const baseline = cloneValue(this.context.config) as P;
-    try {
-      if (this.context.hook) {
-        const result = await this.context.hook({
-          config: this.context.config,
-          emission: this.context.emission,
-          signal: this.context.signal
-        });
-        const decision = normalizeHookResult(result, this.context.config);
-        this.context.config = decision.config as P;
-        this.context.outcome = { skipped: decision.skip, effectiveConfig: cloneValue(decision.config) };
-        if (decision.skip) return;
-      }
-      await this.run();
-    } finally {
-      this.context.config = baseline;
-    }
-  }
-
-  protected abstract run(): Promise<void>;
-}
-
-export abstract class Trigger<P = unknown> {
-  private runCount = 0;
-
-  constructor(protected readonly context: TriggerContext<P>) {}
-
-  get id(): string {
-    return this.context.id;
-  }
-
-  get config(): P {
-    return this.context.config;
-  }
-
-  get session(): string | undefined {
-    return this.context.session;
-  }
-
-  get signal(): AbortSignal {
-    return this.context.signal;
-  }
-
-  get sessions(): SessionAccess | undefined {
-    return this.context.sessions;
-  }
-
-  get control(): RuntimeControl | undefined {
-    return this.context.control;
-  }
-
-  protected async emit(event: TriggerEvent | Record<string, unknown>): Promise<void> {
-    if (!this.context.emit || !this.canRun()) return;
-    this.recordRun();
-    await this.context.emit(event);
-  }
-
-  protected canRun(): boolean {
-    return this.context.maxRuns === undefined || this.runCount < this.context.maxRuns;
-  }
-
-  protected recordRun(): boolean {
-    this.runCount += 1;
-    return this.context.maxRuns === undefined || this.runCount < this.context.maxRuns;
-  }
-
-  abstract run(): Promise<void>;
 }
 
 export interface TriggerContext<P = unknown> {
@@ -192,38 +62,7 @@ export interface TriggerContext<P = unknown> {
   readonly sessions?: SessionAccess;
   readonly control?: RuntimeControl;
   readonly logger: RuntimeLogger;
-  readonly maxRuns?: number;
   readonly emit?: (event: TriggerEvent | Record<string, unknown>) => Promise<void>;
-}
-
-export abstract class Service<P = unknown> {
-  constructor(protected readonly context: ServiceContext<P>) {}
-
-  get id(): string {
-    return this.context.id;
-  }
-
-  get config(): P {
-    return this.context.config;
-  }
-
-  get session(): string | undefined {
-    return this.context.session;
-  }
-
-  get signal(): AbortSignal {
-    return this.context.signal;
-  }
-
-  get sessions(): SessionAccess | undefined {
-    return this.context.sessions;
-  }
-
-  get control(): RuntimeControl | undefined {
-    return this.context.control;
-  }
-
-  abstract run(): Promise<void>;
 }
 
 export interface ServiceContext<P = unknown> {
@@ -236,6 +75,29 @@ export interface ServiceContext<P = unknown> {
   readonly control?: RuntimeControl;
   readonly logger: RuntimeLogger;
 }
+
+export interface ActionHandler<P = unknown> {
+  run(context: ActionContext<P>): Promise<void>;
+}
+
+export interface TriggerHandler<P = unknown> {
+  run(context: TriggerContext<P>): Promise<void>;
+}
+
+export interface ServiceHandler<P = unknown> {
+  run(context: ServiceContext<P>): Promise<void>;
+}
+
+export interface ActionHookResult {
+  config?: unknown;
+  skip?: boolean;
+}
+
+export type ActionHook = (input: {
+  config: unknown;
+  emission: TriggerEmission | undefined;
+  signal: AbortSignal;
+}) => ActionHookResult | unknown | Promise<ActionHookResult | unknown>;
 
 export type FlowKind = "trigger" | "command" | "schedule" | "service";
 
@@ -518,9 +380,9 @@ export interface CapabilityOptions {
   readonly validateConfig?: ConfigValidator;
 }
 
-export type ActionConstructor = new (context: ActionContext<any>) => Action<any>;
-export type TriggerConstructor = new (context: TriggerContext<any>) => Trigger<any>;
-export type ServiceConstructor = new (context: ServiceContext<any>) => Service<any>;
+export type ActionConstructor = new () => ActionHandler<any>;
+export type TriggerConstructor = new () => TriggerHandler<any>;
+export type ServiceConstructor = new () => ServiceHandler<any>;
 
 export interface PluginCapability {
   readonly kind: CapabilityKind;
@@ -542,31 +404,4 @@ export interface PluginInfo {
 
 export interface PluginModule {
   readonly [handler: string]: unknown;
-}
-
-function normalizeHookResult(result: unknown, current: unknown): { config: unknown; skip: boolean } {
-  if (isHookResult(result)) {
-    return {
-      config: result.config === undefined ? current : mergeConfig(current, result.config),
-      skip: result.skip === true
-    };
-  }
-  return { config: result === undefined ? current : mergeConfig(current, result), skip: false };
-}
-
-function isHookResult(value: unknown): value is ActionHookResult {
-  return typeof value === "object" && value !== null && ("config" in value || "skip" in value);
-}
-
-function mergeConfig(current: unknown, next: unknown): unknown {
-  if (isRecord(current) && isRecord(next)) return { ...current, ...next };
-  return next;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function cloneValue<T>(value: T): T {
-  return structuredClone(value);
 }

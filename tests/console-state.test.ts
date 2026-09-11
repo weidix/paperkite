@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Service, Trigger, type ConfigValidator, type RuntimeEvent } from "@paperkite/sdk";
+import type {
+  ConfigValidator,
+  RuntimeEvent,
+  ServiceHandler,
+  TriggerContext,
+  TriggerHandler
+} from "@paperkite/sdk";
 import { fromMapping, loadCatalog } from "../src/config/loader.js";
 import type { FlowCatalog } from "../src/config/model.js";
 import { CapabilityRegistry } from "../src/extensions/registry.js";
@@ -37,43 +43,43 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 }
 
-class WaitTrigger extends Trigger {
+class WaitTrigger implements TriggerHandler {
   static runs = 0;
 
-  async run(): Promise<void> {
+  async run(ctx: TriggerContext): Promise<void> {
     WaitTrigger.runs += 1;
-    await waitForAbort(this.signal);
+    await waitForAbort(ctx.signal);
   }
 }
 
-class FailingTrigger extends Trigger {
+class FailingTrigger implements TriggerHandler {
   async run(): Promise<void> {
     throw new Error(JOIN_FAILURE);
   }
 }
 
-class FlakyTrigger extends Trigger<{ healthy?: boolean }> {
-  async run(): Promise<void> {
-    if (this.config?.healthy !== true) throw new Error(JOIN_FAILURE);
-    await waitForAbort(this.signal);
+class FlakyTrigger implements TriggerHandler<{ healthy?: boolean }> {
+  async run(ctx: TriggerContext<{ healthy?: boolean }>): Promise<void> {
+    if (ctx.config?.healthy !== true) throw new Error(JOIN_FAILURE);
+    await waitForAbort(ctx.signal);
   }
 }
 
-class AbortRejectingTrigger extends Trigger {
-  async run(): Promise<void> {
-    await waitForAbort(this.signal);
+class AbortRejectingTrigger implements TriggerHandler {
+  async run(ctx: TriggerContext): Promise<void> {
+    await waitForAbort(ctx.signal);
     throw new Error("session closed while stopping");
   }
 }
 
-class OnceTrigger extends Trigger<{ emit?: boolean }> {
-  async run(): Promise<void> {
-    if (this.config?.emit !== false) await this.emit({ text: "once" });
-    await waitForAbort(this.signal);
+class OnceTrigger implements TriggerHandler<{ emit?: boolean }> {
+  async run(ctx: TriggerContext<{ emit?: boolean }>): Promise<void> {
+    if (ctx.config?.emit !== false) await ctx.emit?.({ text: "once" });
+    await waitForAbort(ctx.signal);
   }
 }
 
-class FailingService extends Service {
+class FailingService implements ServiceHandler {
   async run(): Promise<void> {
     throw new Error("console port is taken");
   }

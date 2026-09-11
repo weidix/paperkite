@@ -5,7 +5,6 @@ import {
   PROFILE_WORKSPACE,
   defaultProfileManifest,
   profileDirectory,
-  withSdkDependency,
   type ProfileManifest
 } from "./profile.js";
 
@@ -39,9 +38,7 @@ export function managePlugins(profile: string, args: readonly string[]): number 
 function initProfileSync(directory: string, profile: string): void {
   mkdirSync(directory, { recursive: true });
   const current = readProfileSync(directory);
-  const manifest = Object.keys(current).length ? current : defaultProfileManifest(profile);
-  const next = withSdkDependency(manifest);
-  if (next !== manifest) writeProfileSync(directory, next);
+  if (!Object.keys(current).length) writeProfileSync(directory, defaultProfileManifest(profile));
   const workspacePath = join(directory, "pnpm-workspace.yaml");
   if (!existsSync(workspacePath)) {
     writeFileSync(workspacePath, PROFILE_WORKSPACE, "utf8");

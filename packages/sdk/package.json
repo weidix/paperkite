@@ -4,15 +4,13 @@
   "type": "module",
   "exports": {
     ".": {
-      "development": "./src/index.ts",
-      "default": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
+      "types": "./dist/index.d.ts"
+    }
   },
   "files": ["dist"],
   "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
