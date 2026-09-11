@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/plugin-favorites-cleanup",
   "version": "0.1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/favorites-cleanup"
+  },
   "type": "module",
   "exports": {
     ".": {

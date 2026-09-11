@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/plugin-runtime-console",
   "version": "0.1.2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/runtime-console"
+  },
   "type": "module",
   "exports": {
     ".": {

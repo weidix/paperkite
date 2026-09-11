@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/plugin-messages",
   "version": "0.1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/messages"
+  },
   "type": "module",
   "exports": {
     ".": {

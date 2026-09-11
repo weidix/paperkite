@@ -1,6 +1,11 @@
 {
   "name": "@paperkite/plugin-archive",
   "version": "0.1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/archive"
+  },
   "type": "module",
   "exports": {
     ".": {
