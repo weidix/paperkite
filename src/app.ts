@@ -27,6 +27,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
   const logger = new AppLogger(settings.logging.level, settings.logging.directory);
   configureTelegramClientFactory(settings, logger);
   const extensions = await loadExtensions(catalog.capabilityRefs(), { profile: options.profile });
+  for (const warning of extensions.warnings) logger.warn(warning);
   const sessions = new SessionPool(settings, logger);
   return {
     settings,

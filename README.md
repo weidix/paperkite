@@ -58,6 +58,10 @@ run:
 
 `@paperkite/sdk` 是共享库，不属于插件，没有 `paperkite.plugin` 声明。
 
+### SDK 与 ABI
+
+插件在 `dependencies`、`devDependencies` 或 `peerDependencies` 中声明 `@paperkite/sdk` 版本，即可表达所需的 SDK / ABI 契约，SDK 的 major 号即 ABI 代际。Core 在发现阶段读取这些声明：声明了明确的版本约束且当前 Core 不满足时拒绝加载；插件所需的 ABI 高于 Core 时输出警告并继续加载；未引入 SDK、`*`、`latest` 与无法解析的声明都不构成约束。插件运行期从上下文的 `abi` 字段取得当前 ABI。
+
 ### 插件安装
 
 内置插件（`paperkite.bundles`）随核心安装目录解析，默认可用；`plugin add` 可安装第三方插件，或安装同名包覆盖内置插件。

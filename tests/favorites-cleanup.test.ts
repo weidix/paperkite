@@ -65,6 +65,7 @@ function contextFor(client: FakeClient, config: CleanupConfig = {}, signal?: Abo
   };
   return {
     id: "test-cleanup",
+    abi: 0,
     config,
     session: "primary",
     signal: signal ?? new AbortController().signal,

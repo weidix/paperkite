@@ -43,6 +43,7 @@ export interface SessionAccess {
 
 export interface ActionContext<P = unknown> {
   readonly id: string;
+  readonly abi: number;
   readonly config: P;
   readonly session?: string;
   readonly signal: AbortSignal;
@@ -55,6 +56,7 @@ export interface ActionContext<P = unknown> {
 
 export interface TriggerContext<P = unknown> {
   readonly id: string;
+  readonly abi: number;
   readonly capability: string;
   readonly config: P;
   readonly session?: string;
@@ -67,6 +69,7 @@ export interface TriggerContext<P = unknown> {
 
 export interface ServiceContext<P = unknown> {
   readonly id: string;
+  readonly abi: number;
   readonly capability: string;
   readonly config: P;
   readonly session?: string;

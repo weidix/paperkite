@@ -38,6 +38,7 @@ import { SessionUnavailableError } from "./errors.js";
 import { invalidateAllHooks, invalidateHook, loadHook, normalizeHookResult } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
 import { CapabilityRegistry } from "../extensions/registry.js";
+import { CORE_ABI } from "../extensions/abi.js";
 import type { SessionPool, SessionStateChange } from "../telegram/pool.js";
 
 export interface RuntimeOptions {
@@ -604,6 +605,7 @@ export class Runtime {
     let emitted = 0;
     const context: TriggerContext = {
       id: definition.id,
+      abi: CORE_ABI,
       capability: definition.capability,
       config: definition.config,
       session: definition.session,
@@ -665,6 +667,7 @@ export class Runtime {
     const Constructor = this.options.registry.getService(definition.capability);
     const context: ServiceContext = {
       id: definition.id,
+      abi: CORE_ABI,
       capability: definition.capability,
       config: definition.config,
       session: definition.session,
@@ -713,6 +716,7 @@ export class Runtime {
       : undefined;
     const context: ActionContext = {
       id,
+      abi: CORE_ABI,
       config: decision ? decision.config : specification.config,
       session,
       signal,
