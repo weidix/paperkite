@@ -17,6 +17,9 @@ importers:
       '@paperkite/plugin-favorites-cleanup':
         specifier: workspace:*
         version: link:packages/favorites-cleanup
+      '@paperkite/plugin-favorites-repost':
+        specifier: workspace:*
+        version: link:packages/favorites-repost
       '@paperkite/plugin-messages':
         specifier: workspace:*
         version: link:packages/messages
@@ -141,6 +144,12 @@ importers:
         version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
 
   packages/favorites-cleanup:
+    devDependencies:
+      '@paperkite/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+
+  packages/favorites-repost:
     devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
