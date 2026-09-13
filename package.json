@@ -28,7 +28,8 @@
       "@paperkite/plugin-archive",
       "@paperkite/plugin-process-run",
       "@paperkite/plugin-runtime-console",
-      "@paperkite/plugin-favorites-cleanup"
+      "@paperkite/plugin-favorites-cleanup",
+      "@paperkite/plugin-favorites-repost"
     ]
   },
   "scripts": {
@@ -49,6 +50,7 @@
     "@paperkite/plugin-archive": "workspace:*",
     "@paperkite/plugin-process-run": "workspace:*",
     "@paperkite/plugin-favorites-cleanup": "workspace:*",
+    "@paperkite/plugin-favorites-repost": "workspace:*",
     "@paperkite/plugin-messages": "workspace:*",
     "commander": "^15.0.0",
     "cron-parser": "^5.10.0",
