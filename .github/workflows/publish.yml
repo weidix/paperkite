@@ -1,10 +1,11 @@
 # 发布流程
 #
 # 标签推送触发，标签名决定发布范围：
-#   v0.1.3                      全部包（sdk、插件、主程序）
+#   v0.1.3                      全部包（sdk、插件、清单包、主程序）
 #   core-v0.1.3                 主程序
 #   sdk-v0.2.0                  @paperkite/sdk
 #   plugins-v0.1.2              全部插件
+#   bundles-v0.1.0              @paperkite/bundles
 #   plugin-archive-v0.1.2       单个插件
 #
 # npm 侧走 Trusted publishing，OIDC 直接换取短期令牌，仓库里不存任何 npm 凭据。
@@ -18,11 +19,12 @@ on:
       - "core-v*"
       - "sdk-v*"
       - "plugins-v*"
+      - "bundles-v*"
       - "plugin-*-v*"
   workflow_dispatch:
     inputs:
       target:
-        description: 发布目标：all、core、plugins、sdk 或单个插件名（例如 archive）
+        description: 发布目标：all、core、plugins、sdk、bundles 或单个插件名（例如 archive）
         type: string
         default: all
       dry-run:
@@ -78,31 +80,39 @@ jobs:
               core) ref=core-v ;;
               plugins) ref=plugins-v ;;
               sdk) ref=sdk-v ;;
+              bundles) ref=bundles-v ;;
               *) ref="plugin-$TARGET-v" ;;
             esac
           else
             ref="$GITHUB_REF_NAME"
           fi
           case "$ref" in
-            core-v*) filter=paperkite ;;
-            sdk-v*) filter='@paperkite/sdk' ;;
-            plugins-v*) filter='@paperkite/plugin-*' ;;
+            core-v*) filters=(paperkite) ;;
+            sdk-v*) filters=('@paperkite/sdk') ;;
+            plugins-v*) filters=('@paperkite/plugin-*') ;;
+            bundles-v*) filters=('@paperkite/bundles') ;;
             plugin-*-v*)
               name="${ref#plugin-}"
-              filter="@paperkite/plugin-${name%-v*}"
+              filters=("@paperkite/plugin-${name%-v*}")
               ;;
-            v*) filter='paperkite...' ;;
+            v*) filters=(paperkite... '@paperkite/bundles') ;;
             *)
               echo "无法识别的发布引用：$ref" >&2
               exit 1
               ;;
           esac
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          echo "filter=$filter" >> "$GITHUB_OUTPUT"
-          echo "| 项 | 值 |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 引用 | \`$ref\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 范围 | \`$filter\` |" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "ref=$ref"
+            echo "filters<<PUBLISH_FILTERS"
+            printf '%s\n' "${filters[@]}"
+            echo "PUBLISH_FILTERS"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 引用 | \`$ref\` |"
+            echo "| 范围 | \`${filters[*]}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 核对标签与包版本
         if: github.event_name == 'push'
@@ -114,6 +124,7 @@ jobs:
             v*) dir=.; expected="${REF#v}" ;;
             core-v*) dir=.; expected="${REF##*-v}" ;;
             sdk-v*) dir=packages/sdk; expected="${REF##*-v}" ;;
+            bundles-v*) dir=packages/bundles; expected="${REF##*-v}" ;;
             plugin-*-v*)
               name="${REF#plugin-}"
               dir="packages/${name%-v*}"
@@ -133,15 +144,20 @@ jobs:
 
       - name: 发布
         env:
-          FILTER: ${{ steps.scope.outputs.filter }}
+          FILTERS: ${{ steps.scope.outputs.filters }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          filterArgs=()
+          while IFS= read -r filter; do
+            [ -n "$filter" ] || continue
+            filterArgs+=(--filter "$filter")
+          done <<< "$FILTERS"
           args=(--no-git-checks --access public --report-summary)
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
-          pnpm -r --filter "$FILTER" publish "${args[@]}"
+          pnpm -r "${filterArgs[@]}" publish "${args[@]}"
 
       - name: 汇总
         if: always()
