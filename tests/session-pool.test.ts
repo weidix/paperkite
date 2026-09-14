@@ -94,6 +94,15 @@ function accountFailure(): Error {
   return Object.assign(new Error("500: INTERNAL"), { errorMessage: "INTERNAL", code: 500 });
 }
 
+/** 等状态落定：固定睡眠在负载高的 CI 上会先于退避计时器结束。 */
+async function waitForState(pool: SessionPool, name: string, state: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pool.state(name) === state) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 test("session faults isolate the session and automatic reconnects recover it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "paperkite-guard-"));
   const settings: AppSettings = {
@@ -125,7 +134,7 @@ test("session faults isolate the session and automatic reconnects recover it", a
   });
   assert.ok(states.includes("isolated"), "session must isolate after the fault threshold: " + states.join(","));
 
-  await new Promise((resolve) => setTimeout(resolve, 160));
+  await waitForState(pool, "primary", "connected");
   assert.equal(await pool.run("primary", async () => 42), 42);
   assert.ok(states.includes("connected"), "session must reconnect by itself: " + states.join(","));
   await pool.closeAll();
