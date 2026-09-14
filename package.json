@@ -16,6 +16,7 @@
     "dist",
     "!dist/tests",
     "!dist/packages",
+    "bundles.json",
     "data/settings.example.yml",
     "data/flows.example.yml"
   ],
@@ -43,21 +44,21 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@paperkite/plugin-account-health": "workspace:*",
-    "@paperkite/plugin-notify-bark": "workspace:*",
-    "@paperkite/plugin-runtime-console": "workspace:*",
-    "@paperkite/plugin-messages-watch": "workspace:*",
-    "@paperkite/plugin-archive": "workspace:*",
-    "@paperkite/plugin-process-run": "workspace:*",
-    "@paperkite/plugin-favorites-cleanup": "workspace:*",
-    "@paperkite/plugin-favorites-repost": "workspace:*",
-    "@paperkite/plugin-messages": "workspace:*",
     "commander": "^15.0.0",
     "cron-parser": "^5.10.0",
     "telegram": "^2.26.22",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@paperkite/plugin-account-health": "workspace:*",
+    "@paperkite/plugin-archive": "workspace:*",
+    "@paperkite/plugin-favorites-cleanup": "workspace:*",
+    "@paperkite/plugin-favorites-repost": "workspace:*",
+    "@paperkite/plugin-messages": "workspace:*",
+    "@paperkite/plugin-messages-watch": "workspace:*",
+    "@paperkite/plugin-notify-bark": "workspace:*",
+    "@paperkite/plugin-process-run": "workspace:*",
+    "@paperkite/plugin-runtime-console": "workspace:*",
     "@paperkite/sdk": "workspace:*",
     "@types/luxon": "^3.6.2",
     "@types/node": "^24.3.0",

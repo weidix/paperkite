@@ -1,0 +1,22 @@
+{
+  "name": "@paperkite/bundles",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weidix/paperkite.git",
+    "directory": "packages/bundles"
+  },
+  "files": [],
+  "publishConfig": { "access": "public" },
+  "dependencies": {
+    "@paperkite/plugin-messages": "^0.1.1",
+    "@paperkite/plugin-notify-bark": "^0.1.1",
+    "@paperkite/plugin-messages-watch": "^0.1.2",
+    "@paperkite/plugin-account-health": "^0.1.1",
+    "@paperkite/plugin-archive": "^0.1.1",
+    "@paperkite/plugin-process-run": "^0.1.1",
+    "@paperkite/plugin-runtime-console": "^0.1.2",
+    "@paperkite/plugin-favorites-cleanup": "^0.1.1",
+    "@paperkite/plugin-favorites-repost": "^0.1.1"
+  }
+}

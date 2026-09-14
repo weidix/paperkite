@@ -1,8 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadExtensions, isHandlerConstructor } from "../src/extensions/loader.js";
+import { inspectPlugins, loadExtensions, isHandlerConstructor } from "../src/extensions/loader.js";
 
 const pluginDirectories = [
   "messages",
@@ -92,4 +93,24 @@ test("handler checks accept any class whose prototype exposes run", () => {
   assert.equal(isHandlerConstructor(class {}), false);
   assert.equal(isHandlerConstructor({ run() {} }), false);
   assert.equal(isHandlerConstructor((): void => undefined), false);
+});
+
+test("bundled plugins resolve from the core root while the profile is empty", async () => {
+  const home = await mkdtemp(join(tmpdir(), "paperkite-core-root-"));
+  const previous = process.env.PAPERKITE_HOME;
+  process.env.PAPERKITE_HOME = home;
+  try {
+    const views = await inspectPlugins();
+    assert.equal(views.length, 9);
+    for (const view of views) {
+      assert.equal(view.source, "manifest", view.name);
+      assert.equal(view.root, "core", view.name);
+      assert.equal(view.compatibility?.verdict, "load", view.name);
+      assert.ok(view.version, view.name);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PAPERKITE_HOME;
+    else process.env.PAPERKITE_HOME = previous;
+    await rm(home, { recursive: true, force: true });
+  }
 });

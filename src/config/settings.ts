@@ -11,6 +11,22 @@ export interface SessionGuardSettings {
   readonly backoffMaxMs: number;
 }
 
+export interface PluginSettings {
+  readonly manifest: string;
+  readonly registry: string;
+  readonly autoInstall: boolean;
+  readonly manifestTtlHours: number;
+  readonly scopes: readonly string[];
+}
+
+export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
+  manifest: "@paperkite/bundles",
+  registry: "https://registry.npmjs.org",
+  autoInstall: true,
+  manifestTtlHours: 24,
+  scopes: ["@paperkite/"]
+};
+
 export interface AppSettings {
   readonly telegram: {
     readonly apiId: number;
@@ -22,6 +38,7 @@ export interface AppSettings {
     readonly level: string;
     readonly directory: string;
   };
+  readonly plugins: PluginSettings;
 }
 
 export async function loadSettings(path = defaultSettingsFile()): Promise<AppSettings> {
@@ -37,6 +54,7 @@ export async function loadSettings(path = defaultSettingsFile()): Promise<AppSet
   }
   const sessionsDir = normalizeSession(data.telegram.sessionsDir) ?? "accounts";
   const logging = isRecord(data.logging) ? data.logging : {};
+  const plugins = isRecord(data.plugins) ? data.plugins : {};
   const guard = isRecord(data.telegram.sessionGuard) ? data.telegram.sessionGuard : {};
   return {
     telegram: {
@@ -53,8 +71,31 @@ export async function loadSettings(path = defaultSettingsFile()): Promise<AppSet
     logging: {
       level: String(logging.level ?? "info").toLowerCase(),
       directory: resolve(base, String(logging.directory ?? "logs"))
+    },
+    plugins: {
+      manifest: normalizeSession(plugins.manifest) ?? DEFAULT_PLUGIN_SETTINGS.manifest,
+      registry: normalizeSession(plugins.registry) ?? DEFAULT_PLUGIN_SETTINGS.registry,
+      autoInstall:
+        typeof plugins.autoInstall === "boolean" ? plugins.autoInstall : DEFAULT_PLUGIN_SETTINGS.autoInstall,
+      manifestTtlHours: nonNegativeNumber(
+        plugins.manifestTtlHours ?? DEFAULT_PLUGIN_SETTINGS.manifestTtlHours,
+        "plugins.manifestTtlHours"
+      ),
+      scopes: normalizeScopes(plugins.scopes) ?? DEFAULT_PLUGIN_SETTINGS.scopes
     }
   };
+}
+
+function nonNegativeNumber(value: unknown, field: string): number {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new Error("settings.yml needs a non-negative " + field);
+  return Math.floor(number);
+}
+
+function normalizeScopes(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const scopes = value.map((item) => String(item).trim()).filter(Boolean);
+  return scopes.length ? scopes : undefined;
 }
 
 function positiveNumber(value: unknown, field: string): number {

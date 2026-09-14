@@ -5,9 +5,10 @@ import { access, copyFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { loadCatalog } from "./config/loader.js";
 import { defaultFlowsFile, defaultSettingsFile, paperkiteHome } from "./config/paths.js";
+import { loadSettings, type AppSettings } from "./config/settings.js";
 import { coreRoot } from "./extensions/loader.js";
 import { ensureProfile } from "./extensions/profile.js";
-import { managePlugins } from "./extensions/manager.js";
+import { listPlugins, managePlugins, syncBundles, updatePlugins, type SyncResult } from "./extensions/manager.js";
 import { createApp, defaultLockFile, type PaperkiteApp } from "./app.js";
 import { acquireProcessLock } from "./control/process-lock.js";
 import { requestControl, startControlServer, type ControlServer } from "./control/socket.js";
@@ -22,26 +23,42 @@ const program = new Command()
 
 program
   .command("init")
-  .description("create the local plugin profile directory")
+  .description("create the local plugin profile directory and install bundled plugins")
   .option("--profile <name>", "profile name", "default")
-  .action(async ({ profile }: { profile: string }) => {
+  .option("--offline", "use the cached or built-in bundle manifest")
+  .action(async ({ profile, offline }: { profile: string; offline?: boolean }) => {
     const directory = await ensureProfile(profile);
     const examples = join(coreRoot(), "data");
     const home = paperkiteHome();
     await copyIfMissing(join(examples, "settings.example.yml"), join(home, "settings.yml"));
     await copyIfMissing(join(examples, "flows.example.yml"), join(home, "flows.yml"));
+    const settings = await loadSettings(join(home, "settings.yml")).catch(() => undefined);
+    const result = await syncBundles(profile, { settings: settings?.plugins, offline }).catch((error: unknown) => {
+      process.stderr.write("paperkite: plugin sync failed: " + detailOf(error) + "\n");
+      return undefined;
+    });
+    if (result) reportSync(result);
     process.stdout.write(directory + "\n");
   });
 
 program
   .command("plugin")
-  .description("install, remove, or update plugins in a profile")
-  .argument("[pnpmArgs...]", "arguments passed to pnpm")
+  .description("install, remove, update, or sync plugins in a profile")
+  .argument("[args...]", "operation and its arguments, for example `sync` or `add <package>`")
   .option("--profile <name>", "profile name", "default")
+  .option("--refresh", "ignore the cached bundle manifest")
+  .option("--offline", "use the cached or built-in bundle manifest")
+  .option("--check", "report what sync would change")
+  .option("--settings <file>", "settings file", defaultSettingsFile())
   .allowUnknownOption(true)
-  .action((args: string[], options: { profile: string }) => {
-    process.exitCode = managePlugins(options.profile, args);
-  });
+  .action(
+    async (
+      args: string[],
+      options: { profile: string; settings: string; refresh?: boolean; offline?: boolean; check?: boolean }
+    ) => {
+      process.exitCode = await runPluginCommand(options, args);
+    }
+  );
 
 program
   .command("flows")
@@ -66,7 +83,11 @@ program
   .option("--settings <file>", "settings file", defaultSettingsFile())
   .option("--flows <file>", "flows file", defaultFlowsFile())
   .action(async (flow: string, options: { profile: string; settings: string; flows: string }) => {
-    const app = await createApp({ profile: options.profile, settingsFile: options.settings, flowsFile: options.flows });
+    const app = await createAppWithSync({
+      profile: options.profile,
+      settingsFile: options.settings,
+      flowsFile: options.flows
+    });
     try {
       await app.runtime.runFlow(flow);
     } finally {
@@ -98,7 +119,11 @@ service
     let app: PaperkiteApp | undefined;
     let control: ControlServer | undefined;
     try {
-      const runningApp = await createApp({ profile: options.profile, settingsFile: options.settings, flowsFile: options.flows });
+      const runningApp = await createAppWithSync({
+        profile: options.profile,
+        settingsFile: options.settings,
+        flowsFile: options.flows
+      });
       app = runningApp;
       await runningApp.runtime.startService(id);
       control = await startControlServer(runningApp.runtime);
@@ -211,7 +236,11 @@ program
     let app: PaperkiteApp | undefined;
     let control: ControlServer | undefined;
     try {
-      const runningApp = await createApp({ profile: options.profile, settingsFile: options.settings, flowsFile: options.flows });
+      const runningApp = await createAppWithSync({
+        profile: options.profile,
+        settingsFile: options.settings,
+        flowsFile: options.flows
+      });
       app = runningApp;
       await runningApp.runtime.start();
       control = await startControlServer(runningApp.runtime);
@@ -227,6 +256,78 @@ program
       throw error;
     }
   });
+
+interface AppStartOptions {
+  readonly profile: string;
+  readonly settingsFile: string;
+  readonly flowsFile: string;
+}
+
+/** 启动前做一次幂等 sync；失败只警告，流程引用缺失能力时按 unknown capability 报错。 */
+async function createAppWithSync(options: AppStartOptions): Promise<PaperkiteApp> {
+  const settings = await loadSettings(options.settingsFile);
+  if (settings.plugins.autoInstall) {
+    const result = await syncBundles(options.profile, { settings: settings.plugins }).catch((error: unknown) => {
+      process.stderr.write("paperkite: plugin sync failed: " + detailOf(error) + "\n");
+      return undefined;
+    });
+    if (result) reportSync(result);
+  }
+  return createApp({ profile: options.profile, flowsFile: options.flowsFile, settings });
+}
+
+async function runPluginCommand(
+  options: { profile: string; settings: string; refresh?: boolean; offline?: boolean; check?: boolean },
+  args: readonly string[]
+): Promise<number> {
+  const [operation, ...rest] = args;
+  const settings = (await loadSettings(options.settings).catch(() => undefined))?.plugins;
+  const sync = { settings, refresh: options.refresh, offline: options.offline, check: options.check };
+  if (operation === "sync") {
+    try {
+      const result = await syncBundles(options.profile, sync);
+      reportSync(result, true);
+      return result.problems.length ? 1 : 0;
+    } catch (error) {
+      process.stderr.write("paperkite: " + detailOf(error) + "\n");
+      return 1;
+    }
+  }
+  if (operation === "update") {
+    if (!rest.length) {
+      process.stderr.write("paperkite: plugin update needs at least one package name\n");
+      return 2;
+    }
+    const result = await updatePlugins(options.profile, rest, sync);
+    reportSync(result, true);
+    return result.problems.length ? 1 : 0;
+  }
+  if (operation === undefined || operation === "list") {
+    const entries = await listPlugins(options.profile, sync);
+    process.stdout.write(JSON.stringify(entries, null, 2) + "\n");
+    return 0;
+  }
+  return managePlugins(options.profile, args);
+}
+
+function reportSync(result: SyncResult, verbose = false): void {
+  for (const warning of result.warnings) process.stderr.write("paperkite: " + warning + "\n");
+  for (const problem of result.problems) process.stderr.write("paperkite: " + problem + "\n");
+  if (!verbose) return;
+  const summary = {
+    manifest: result.origin,
+    manifestVersion: result.manifestVersion,
+    installed: result.added,
+    kept: result.kept,
+    removed: result.removed,
+    applied: result.applied
+  };
+  process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
+}
+
+function detailOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 async function waitForSignals(stop: () => Promise<void>): Promise<void> {
   await new Promise<void>((resolve, reject) => {

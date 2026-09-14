@@ -7,14 +7,15 @@ import { SessionUnavailableError } from "../src/engine/errors.js";
 import { SessionPool } from "../src/telegram/pool.js";
 import { createGramLogger, type SessionClient } from "../src/telegram/client.js";
 import { writeSessionFile } from "../src/telegram/session-files.js";
-import type { AppSettings } from "../src/config/settings.js";
+import { DEFAULT_PLUGIN_SETTINGS, type AppSettings } from "../src/config/settings.js";
 import type { RuntimeLogger } from "@paperkite/sdk";
 
 test("session operations are serialized without worker threads", async () => {
   const directory = await mkdtemp(join(tmpdir(), "paperkite-sessions-"));
   const settings: AppSettings = {
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
-    logging: { level: "error", directory }
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
   };
   await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
@@ -102,7 +103,8 @@ test("session faults isolate the session and automatic reconnects recover it", a
       sessionsDir: directory,
       sessionGuard: { windowMs: 200, threshold: 2, backoffMinMs: 30, backoffMaxMs: 200 }
     },
-    logging: { level: "error", directory }
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
   };
   await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
@@ -133,7 +135,8 @@ test("auth-class failures move the session to waiting-auth with a typed error", 
   const directory = await mkdtemp(join(tmpdir(), "paperkite-auth-"));
   const settings: AppSettings = {
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
-    logging: { level: "error", directory }
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
   };
   await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
@@ -167,7 +170,8 @@ test("action-class failures do not count toward session isolation", async () => 
       sessionsDir: directory,
       sessionGuard: { windowMs: 200, threshold: 2, backoffMinMs: 30, backoffMaxMs: 200 }
     },
-    logging: { level: "error", directory }
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
   };
   await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
@@ -189,7 +193,8 @@ test("access hands out an implicit single-session handle only for a declared ses
   const directory = await mkdtemp(join(tmpdir(), "paperkite-access-"));
   const settings: AppSettings = {
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
-    logging: { level: "error", directory }
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
   };
   await writeSessionFile(directory, "primary", "saved");
   const logger = makeLogger();
@@ -206,7 +211,8 @@ test("startup with a missing session isolates it and reports the login command",
   const directory = await mkdtemp(join(tmpdir(), "paperkite-missing-"));
   const settings: AppSettings = {
     telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
-    logging: { level: "error", directory }
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
   };
   const logger = makeLogger();
   const pool = new SessionPool(settings, logger, () => workingClient());
