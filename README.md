@@ -65,17 +65,37 @@ run:
 
 ### 插件安装
 
-内置插件（`paperkite.bundles`）随核心安装目录解析，默认可用；`plugin add` 可安装第三方插件，或安装同名包覆盖内置插件。
+Core 的依赖面只有引擎自身，插件代码全部装在 profile 目录里。内置插件的集合与版本范围由清单包 `@paperkite/bundles` 声明，Core 读它的 packument 得到 name → range，并按 ABI 选出范围内满足条件的最高稳定版，以精确版本写入 profile 的 `package.json`，lockfile 固定。
 
-插件管理用 profile 目录中的 `package.json` 保存依赖和启用清单：
+`paperkite init` 与每次 `run` / `once` / `service run` 启动前都会做一次幂等 sync；`plugins.autoInstall` 关闭后启动不再联网。sync 只安装缺失的插件，已固定的版本不会被静默升级，也不会改动用户安装的插件；清单里下线的插件输出警告并转为用户插件，卸载由用户显式执行。清单读取带 TTL 与 ETag 缓存，命中缓存不联网；网络不可用时回退到随 Core 发布的 `bundles.json` 快照。
+
+```bash
+paperkite plugin list                 # 来源（清单/用户）、安装版本、可用版本与 ABI verdict
+paperkite plugin sync [--refresh]     # 按清单安装缺失插件；--offline 只用缓存与快照
+paperkite plugin sync --check         # 只报告将要发生的变更
+paperkite plugin update <package>     # 重算并前进到最新的兼容版本
+```
+
+`plugin add` / `remove` 的其余参数由 pnpm 处理，写入 profile 的依赖属于用户插件，sync 不会覆盖：
 
 ```bash
 paperkite plugin --profile default add <npm-package>
 paperkite plugin --profile default remove <npm-package>
-paperkite plugin --profile default update <npm-package>
 ```
 
-`add`、`remove`、`update` 后面的参数由 pnpm 处理。只有带 `paperkite.plugin` 声明的依赖才会成为可加载插件。
+只有带 `paperkite.plugin` 声明的依赖才会成为可加载插件。同名插件在 profile 中优先于 Core 安装根，开发工作区里未被 profile 安装的内置插件仍从 Core 根解析。
+
+清单来源、scope 与缓存策略见 `settings.yml` 的 `plugins` 段：
+
+```yaml
+plugins:
+  manifest: "@paperkite/bundles"      # 清单包名，或返回清单 JSON 的 http(s) 地址
+  registry: "https://registry.npmjs.org"
+  autoInstall: true                   # 启动前自动 sync
+  manifestTtlHours: 24
+  scopes:                             # 清单只接受这些 scope 的条目
+    - "@paperkite/"
+```
 
 ## 开发
 

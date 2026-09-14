@@ -11,3 +11,11 @@ telegram:
 logging:
   level: info
   directory: logs
+
+plugins:
+  manifest: "@paperkite/bundles"
+  registry: "https://registry.npmjs.org"
+  autoInstall: true
+  manifestTtlHours: 24
+  scopes:
+    - "@paperkite/"

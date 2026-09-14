@@ -11,6 +11,7 @@ import { SessionPool } from "./telegram/pool.js";
 export interface CreateAppOptions {
   readonly profile?: string;
   readonly settingsFile?: string;
+  readonly settings?: AppSettings;
   readonly flowsFile?: string;
 }
 
@@ -21,7 +22,7 @@ export interface PaperkiteApp {
 }
 
 export async function createApp(options: CreateAppOptions = {}): Promise<PaperkiteApp> {
-  const settings = await loadSettings(options.settingsFile ?? defaultSettingsFile());
+  const settings = options.settings ?? (await loadSettings(options.settingsFile ?? defaultSettingsFile()));
   const flowsFile = options.flowsFile ?? defaultFlowsFile();
   const catalog = await loadCatalog(flowsFile);
   const logger = new AppLogger(settings.logging.level, settings.logging.directory);

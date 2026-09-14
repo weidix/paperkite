@@ -8,6 +8,19 @@ importers:
 
   .:
     dependencies:
+      commander:
+        specifier: ^15.0.0
+        version: 15.0.0
+      cron-parser:
+        specifier: ^5.10.0
+        version: 5.10.0
+      telegram:
+        specifier: ^2.26.22
+        version: 2.26.22
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+    devDependencies:
       '@paperkite/plugin-account-health':
         specifier: workspace:*
         version: link:packages/account-health
@@ -35,19 +48,6 @@ importers:
       '@paperkite/plugin-runtime-console':
         specifier: workspace:*
         version: link:packages/runtime-console
-      commander:
-        specifier: ^15.0.0
-        version: 15.0.0
-      cron-parser:
-        specifier: ^5.10.0
-        version: 5.10.0
-      telegram:
-        specifier: ^2.26.22
-        version: 2.26.22
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
-    devDependencies:
       '@paperkite/sdk':
         specifier: workspace:*
         version: link:packages/sdk
@@ -142,6 +142,36 @@ importers:
       vite:
         specifier: ^7.0.5
         version: 7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.13)(yaml@2.9.0)
+
+  packages/bundles:
+    dependencies:
+      '@paperkite/plugin-account-health':
+        specifier: ^0.1.1
+        version: link:../account-health
+      '@paperkite/plugin-archive':
+        specifier: ^0.1.1
+        version: link:../archive
+      '@paperkite/plugin-favorites-cleanup':
+        specifier: ^0.1.1
+        version: link:../favorites-cleanup
+      '@paperkite/plugin-favorites-repost':
+        specifier: ^0.1.1
+        version: link:../favorites-repost
+      '@paperkite/plugin-messages':
+        specifier: ^0.1.1
+        version: link:../messages
+      '@paperkite/plugin-messages-watch':
+        specifier: ^0.1.2
+        version: link:../messages-watch
+      '@paperkite/plugin-notify-bark':
+        specifier: ^0.1.1
+        version: link:../notify-bark
+      '@paperkite/plugin-process-run':
+        specifier: ^0.1.1
+        version: link:../process-run
+      '@paperkite/plugin-runtime-console':
+        specifier: ^0.1.2
+        version: link:../runtime-console
 
   packages/favorites-cleanup:
     devDependencies:
