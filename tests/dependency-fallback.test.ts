@@ -145,6 +145,21 @@ test("an existing profile without the hoisted settings keeps them and reports th
   });
 });
 
+test("a profile workspace carrying extra pnpm policy is not reported as a migration", async () => {
+  await withHome(async () => {
+    const directory = profileDirectory("default");
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, "pnpm-workspace.yaml"),
+      "packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n\n"
+        + "minimumReleaseAgeExclude:\n  - '@paperkite/plugin-favorites-repost@0.1.1'\n",
+      "utf8"
+    );
+    const result = await ensureProfile("default");
+    assert.equal(result.migration, undefined);
+  });
+});
+
 test("a profile plugin resolves telegram through the core installation", async () => {
   await withHome(async () => {
     const directory = await ensureProfile("default");

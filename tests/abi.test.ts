@@ -45,6 +45,17 @@ test("a satisfied declaration within the core ABI loads silently", () => {
   assert.deepEqual(evaluateCompatibility([">=0.1.0 <0.3.0"]), { verdict: "load", abi: 0 });
 });
 
+/**
+ * 插件把 SDK 声明按发布时的版本固化（pnpm 把 workspace:* 改成具体版本）。
+ * core 抬高 SDK 版本而插件未同批重发时，这些固化声明会被判定为不满足，
+ * 线上插件集体拒绝加载。core 的 SDK 版本必须覆盖已发布插件的声明。
+ */
+test("published plugins pinned to the current SDK version stay loadable", () => {
+  assert.deepEqual(evaluateCompatibility([CORE_SDK_VERSION]), { verdict: "load", abi: 0 });
+  const pinned = CORE_SDK_VERSION.split(".").slice(0, 2).join(".");
+  assert.deepEqual(evaluateCompatibility([pinned]), { verdict: "load", abi: 0 });
+});
+
 test("a satisfied declaration above the core ABI warns and still loads", () => {
   assert.deepEqual(evaluateCompatibility([">=0.1.0 <2"]), {
     verdict: "warn",

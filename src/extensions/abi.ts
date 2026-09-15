@@ -3,7 +3,7 @@ import { parseRange, parseVersion, rangeAbi, satisfies, type Range } from "./sem
 export const SDK_PACKAGE = "@paperkite/sdk";
 
 /** 本 Core 提供的 SDK 版本；ABI 代际取其 major。 */
-export const CORE_SDK_VERSION = "0.2.1";
+export const CORE_SDK_VERSION = "0.2.2";
 
 export const CORE_ABI = Number(CORE_SDK_VERSION.split(".")[0]);
 

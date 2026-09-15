@@ -1,5 +1,6 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { parse } from "yaml";
 import { paperkiteHome } from "../config/paths.js";
 
 export const PROFILE_WORKSPACE = "packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n";
@@ -16,6 +17,26 @@ export async function readProfileWorkspace(directory: string): Promise<string | 
     if (isNodeError(error) && error.code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+/**
+ * 共享闭包所需的 pnpm 设置是否就位：整份文件解析后取字段，文件里另有的 pnpm 策略不影响判定。
+ * 解析失败按就位处理，交给 pnpm 自己报错。
+ */
+export function workspaceSupportsFallback(workspace: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = parse(workspace);
+  } catch {
+    return true;
+  }
+  if (!isRecord(parsed)) return true;
+  return (
+    Array.isArray(parsed.packages) &&
+    parsed.packages.some((entry) => entry === ".") &&
+    parsed.nodeLinker === "hoisted" &&
+    parsed.autoInstallPeers === false
+  );
 }
 
 /** 已存在的 pnpm 设置缺少共享闭包所需的选项时给出的重建路径。 */
@@ -60,7 +81,7 @@ export async function ensureProfile(profile = "default"): Promise<ProfileInit> {
   if (!Object.keys(current).length) await writeProfile(directory, defaultProfileManifest(profile));
   const workspace = await readProfileWorkspace(directory);
   if (workspace === undefined) await writeFile(join(directory, "pnpm-workspace.yaml"), PROFILE_WORKSPACE, "utf8");
-  if (created || workspace === PROFILE_WORKSPACE) return { directory, created };
+  if (created || workspace === undefined || workspaceSupportsFallback(workspace)) return { directory, created };
   return { directory, created, migration: profileWorkspaceMigration(profile) };
 }
 

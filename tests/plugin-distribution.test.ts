@@ -529,7 +529,7 @@ test("profile plugins take precedence over core bundles with the same name", asy
     const core = views.find((entry) => entry.name === NOTIFY);
     assert.equal(core?.root, "core");
     assert.equal(core?.source, "manifest");
-    assert.equal(core?.version, "0.1.1");
+    assert.equal(core?.version, (await readSnapshot()).dependencies[NOTIFY]?.replace(/^\D+/, ""));
   });
 });
 
