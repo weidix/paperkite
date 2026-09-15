@@ -5,6 +5,7 @@ import { defaultFlowsFile, defaultSettingsFile, paperkiteHome } from "./config/p
 import { AppLogger } from "./engine/logger.js";
 import { Runtime } from "./engine/runtime.js";
 import { loadExtensions, createUsageMarker } from "./extensions/loader.js";
+import { healDependencyFallback } from "./extensions/dependency-fallback.js";
 import { configureTelegramClientFactory } from "./telegram/client.js";
 import { SessionPool } from "./telegram/pool.js";
 
@@ -27,7 +28,11 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
   const catalog = await loadCatalog(flowsFile);
   const logger = new AppLogger(settings.logging.level, settings.logging.directory);
   configureTelegramClientFactory(settings, logger);
-  const extensions = await loadExtensions(catalog.capabilityRefs(), { profile: options.profile });
+  for (const warning of await healDependencyFallback()) logger.warn(warning);
+  const extensions = await loadExtensions(catalog.capabilityRefs(), {
+    profile: options.profile,
+    strict: settings.plugins.strict
+  });
   for (const warning of extensions.warnings) logger.warn(warning);
   const sessions = new SessionPool(settings, logger);
   return {

@@ -30,7 +30,7 @@ export class ArchiveSyncAction implements ActionHandler<ArchiveConfig> {
       downloadMedia: coerceBool(config.downloadMedia, true),
       batchSize,
       shouldStop: () => ctx.signal.aborted,
-      submit: (operation) => sessions.run((client: unknown) => operation(client as ArchiveClient)),
+      submit: (operation) => sessions.run((client) => operation(client as ArchiveClient)),
       chatIdOf: (entity) => String(utils.getPeerId(entity as PeerLike)),
       logger: ctx.logger
     });

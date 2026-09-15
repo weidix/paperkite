@@ -17,6 +17,8 @@ export interface PluginSettings {
   readonly autoInstall: boolean;
   readonly manifestTtlHours: number;
   readonly scopes: readonly string[];
+  /** 诊断命中 host-owned 约定时拒绝加载该插件。 */
+  readonly strict: boolean;
 }
 
 export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
@@ -24,7 +26,8 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
   registry: "https://registry.npmjs.org",
   autoInstall: true,
   manifestTtlHours: 24,
-  scopes: ["@paperkite/"]
+  scopes: ["@paperkite/"],
+  strict: false
 };
 
 export interface AppSettings {
@@ -81,7 +84,8 @@ export async function loadSettings(path = defaultSettingsFile()): Promise<AppSet
         plugins.manifestTtlHours ?? DEFAULT_PLUGIN_SETTINGS.manifestTtlHours,
         "plugins.manifestTtlHours"
       ),
-      scopes: normalizeScopes(plugins.scopes) ?? DEFAULT_PLUGIN_SETTINGS.scopes
+      scopes: normalizeScopes(plugins.scopes) ?? DEFAULT_PLUGIN_SETTINGS.scopes,
+      strict: typeof plugins.strict === "boolean" ? plugins.strict : DEFAULT_PLUGIN_SETTINGS.strict
     }
   };
 }

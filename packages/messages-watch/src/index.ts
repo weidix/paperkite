@@ -1,5 +1,5 @@
 import { NewMessage } from "telegram/events/index.js";
-import type { SessionAccess, TriggerContext, TriggerEvent, TriggerHandler } from "@paperkite/sdk";
+import type { SessionAccess, SessionClient, TriggerContext, TriggerEvent, TriggerHandler } from "@paperkite/sdk";
 import { resolveChat, type ResolveClient } from "./resolve.js";
 
 export { resolveChat, type ResolveClient } from "./resolve.js";
@@ -17,12 +17,6 @@ interface WatchConfig {
   readonly intervalSeconds?: number;
   readonly maxMessages?: number;
   readonly afterMessageId?: number;
-}
-
-interface EventClient extends ResolveClient {
-  addEventHandler(handler: (event: unknown) => void, builder: NewMessage): void;
-  removeEventHandler(handler: (event: unknown) => void, builder: NewMessage): void;
-  getMessages(chat: string | number, options: Record<string, unknown>): Promise<readonly unknown[]>;
 }
 
 const CHAT_REFERENCE =
@@ -46,10 +40,9 @@ export class LiveConversationTrigger implements TriggerHandler<WatchConfig> {
     const sessions = ctx.sessions;
     if (!sessions || !ctx.session) throw new Error("live conversation watcher needs a session");
     const matcher = makePattern(config);
-    const registrations: Array<{ client: EventClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
+    const registrations: Array<{ client: SessionClient; handler: (event: unknown) => void; builder: NewMessage }> = [];
     try {
-      await sessions.run(async (rawClient) => {
-        const client = rawClient as EventClient;
+      await sessions.run(async (client) => {
         const resolved = await Promise.all(chats.map((chat) => resolveChat(client, chat)));
         const builder = new NewMessage({
           chats: resolved as never[],
@@ -101,8 +94,7 @@ export class PollConversationTrigger implements TriggerHandler<WatchConfig> {
         if (ctx.signal.aborted) break;
         try {
           await runUntilAborted(
-            sessions.run(async (rawClient) => {
-              const client = rawClient as EventClient;
+            sessions.run(async (client) => {
               const messages = await client.getMessages(chat, {
                 limit,
                 minId: cursors.get(cursorKey(chat)) ?? 0,
@@ -137,8 +129,7 @@ function listChats(config: WatchConfig): Array<string | number> {
 }
 
 async function resolveChats(sessions: SessionAccess, chats: readonly (string | number)[]): Promise<Array<string | number>> {
-  return sessions.run(async (rawClient) => {
-    const client = rawClient as EventClient;
+  return sessions.run(async (client) => {
     return Promise.all(chats.map((chat) => resolveChat(client, chat)));
   });
 }

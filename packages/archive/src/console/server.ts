@@ -556,6 +556,7 @@ async function fetchLiveCaptionText(
   try {
     const chatUsername = await store.getChatUsername(record.chatId);
     return await sessions.run(async (client) => {
+      // ArchiveClient 的 getMessages 按 ids 取值，与 gramjs 的同名方法参数不同，边界处按归档抽象收窄
       const host = client as unknown as import("../archiver.js").ArchiveClient;
       const entity = await resolveChatEntity(host, record.chatId, chatUsername);
       if (entity === undefined) return undefined;

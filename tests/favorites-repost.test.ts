@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FavoritesRepostAction } from "@paperkite/plugin-favorites-repost";
-import type { ActionContext, RuntimeLogger } from "@paperkite/sdk";
+import type { ActionContext, RuntimeLogger, SessionClient } from "@paperkite/sdk";
 
 interface FakeMessage {
   readonly id: number;
@@ -77,7 +77,7 @@ function contextFor(
     config,
     session: "primary",
     signal: signal ?? new AbortController().signal,
-    sessions: { run: async (operation) => operation(client) },
+    sessions: { run: async (operation) => operation(client as unknown as SessionClient) },
     logger,
     emission: undefined,
     spawn(): void {}

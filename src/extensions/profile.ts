@@ -2,7 +2,32 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { paperkiteHome } from "../config/paths.js";
 
-export const PROFILE_WORKSPACE = "packages:\n  - .\n";
+export const PROFILE_WORKSPACE = "packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n";
+
+/** profile 目录与共享目录之间的中间层；插件向上查找命中 core 的依赖闭包。 */
+export function profilesDirectory(): string {
+  return resolve(paperkiteHome(), "profiles");
+}
+
+export async function readProfileWorkspace(directory: string): Promise<string | undefined> {
+  try {
+    return await readFile(join(directory, "pnpm-workspace.yaml"), "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+/** 已存在的 pnpm 设置缺少共享闭包所需的选项时给出的重建路径。 */
+export function profileWorkspaceMigration(profile: string): string {
+  const directory = profileDirectory(profile);
+  return (
+    "paperkite: " + profile + " keeps its existing pnpm-workspace.yaml; plugins resolve host-owned " +
+    "packages from " + directory + "/node_modules unless that file sets nodeLinker: hoisted and " +
+    "autoInstallPeers: false. Rebuild the profile (remove " + directory + " and run paperkite init) " +
+    "or add both options to that file\n"
+  );
+}
 
 export function defaultProfileManifest(profile: string): ProfileManifest {
   return {
@@ -19,18 +44,24 @@ export function profileDirectory(profile = "default"): string {
   return resolve(paperkiteHome(), "profiles", profile);
 }
 
-export async function ensureProfile(profile = "default"): Promise<string> {
+export interface ProfileInit {
+  readonly directory: string;
+  /** 本次调用新建了 profile 目录，pnpm 设置由此处写入。 */
+  readonly created: boolean;
+  /** 已有 pnpm 设置与当前布局不符时给出重建或迁移路径。 */
+  readonly migration?: string;
+}
+
+export async function ensureProfile(profile = "default"): Promise<ProfileInit> {
   const directory = profileDirectory(profile);
+  const created = !(await exists(directory));
   await mkdir(directory, { recursive: true });
   const current = await readProfile(directory);
   if (!Object.keys(current).length) await writeProfile(directory, defaultProfileManifest(profile));
-  const workspacePath = join(directory, "pnpm-workspace.yaml");
-  try {
-    await access(workspacePath);
-  } catch {
-    await writeFile(workspacePath, PROFILE_WORKSPACE, "utf8");
-  }
-  return directory;
+  const workspace = await readProfileWorkspace(directory);
+  if (workspace === undefined) await writeFile(join(directory, "pnpm-workspace.yaml"), PROFILE_WORKSPACE, "utf8");
+  if (created || workspace === PROFILE_WORKSPACE) return { directory, created };
+  return { directory, created, migration: profileWorkspaceMigration(profile) };
 }
 
 export interface ProfileManifest {
@@ -85,6 +116,15 @@ async function writeJson(file: string, value: unknown): Promise<void> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

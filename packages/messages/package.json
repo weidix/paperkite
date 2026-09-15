@@ -1,6 +1,6 @@
 {
   "name": "@paperkite/plugin-messages",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/weidix/paperkite.git",
@@ -14,8 +14,12 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
-  "publishConfig": { "access": "public" },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -30,7 +34,11 @@
     "plugin": {
       "entry": "./dist/index.js",
       "capabilities": [
-        { "kind": "action", "name": "messages.send", "handler": "SendMessageAction" }
+        {
+          "kind": "action",
+          "name": "messages.send",
+          "handler": "SendMessageAction"
+        }
       ]
     }
   }

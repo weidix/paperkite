@@ -1,20 +1,15 @@
-import type { ActionContext, ActionHandler, RuntimeLogger } from "@paperkite/sdk";
+import { Api } from "telegram/tl/api.js";
+import type { ActionContext, ActionHandler, RuntimeLogger, SessionClient } from "@paperkite/sdk";
 
 interface CleanupConfig {
   readonly maxMessages?: number;
   readonly dryRun?: boolean;
 }
 
-interface FavoritesClient {
-  iterMessages(entity: unknown, options: Record<string, unknown>): AsyncIterable<unknown>;
-  downloadMedia(message: unknown, options: { outputFile?: unknown; thumb?: unknown }): Promise<unknown>;
-  deleteMessages(entity: unknown, ids: readonly number[], options: { revoke: boolean }): Promise<unknown>;
-}
-
 interface Candidate {
   readonly id: number;
   readonly groupedId?: string;
-  readonly raw: Record<string, unknown>;
+  readonly raw: Api.Message;
 }
 
 type ProbeResult = "valid" | "expired" | "failed";
@@ -38,23 +33,22 @@ export class FavoritesCleanupAction implements ActionHandler<CleanupConfig> {
   async run(ctx: ActionContext<CleanupConfig>): Promise<void> {
     const sessions = ctx.sessions;
     if (!sessions || !ctx.session) throw new Error("favorites cleanup needs a session");
-    await sessions.run((client) => cleanup(ctx, client as FavoritesClient));
+    await sessions.run((client) => cleanup(ctx, client));
   }
 }
 
-async function cleanup(ctx: ActionContext<CleanupConfig>, client: FavoritesClient): Promise<void> {
+async function cleanup(ctx: ActionContext<CleanupConfig>, client: SessionClient): Promise<void> {
   const config = ctx.config;
   const dryRun = config.dryRun === true;
   const candidates: Candidate[] = [];
   const groups = new Map<string, number[]>();
   let scanned = 0;
 
-  for await (const raw of client.iterMessages("me", { limit: scanLimit(config.maxMessages) })) {
+  for await (const message of client.iterMessages("me", { limit: scanLimit(config.maxMessages) })) {
     if (ctx.signal.aborted) return;
     scanned += 1;
-    const message = recordOf(raw);
-    const id = positiveId(message?.id);
-    if (!message || id === undefined) continue;
+    const id = positiveId(message.id);
+    if (id === undefined) continue;
     if (!forwardOf(message)) continue;
     const groupedId = groupedIdOf(message);
     candidates.push({ id, raw: message, ...(groupedId !== undefined ? { groupedId } : {}) });
@@ -92,8 +86,8 @@ async function cleanup(ctx: ActionContext<CleanupConfig>, client: FavoritesClien
 }
 
 async function probeFile(
-  client: FavoritesClient,
-  message: Record<string, unknown>,
+  client: SessionClient,
+  message: Api.Message,
   logger: RuntimeLogger
 ): Promise<ProbeResult> {
   if (!fileMediaOf(message.media)) return "failed";
@@ -129,26 +123,27 @@ function scanLimit(value: number | undefined): number | undefined {
   return number === 0 ? undefined : number;
 }
 
-function forwardOf(message: Record<string, unknown>): boolean {
-  return message.fwdFrom !== undefined && message.fwdFrom !== null;
+function forwardOf(message: unknown): boolean {
+  const forward = recordOf(message)?.fwdFrom;
+  return forward !== undefined && forward !== null;
 }
 
 const UNAVAILABLE_FORWARD_PATTERN = /^This (channel|message) can['\u2019]t be displayed/i;
 
-function unavailableOf(message: Record<string, unknown>): boolean {
-  const text = typeof message.message === "string" ? message.message : "";
+function unavailableOf(message: unknown): boolean {
+  const text = typeof recordOf(message)?.message === "string" ? String(recordOf(message)?.message) : "";
   return UNAVAILABLE_FORWARD_PATTERN.test(text);
 }
 
-function fileMediaOf(media: unknown): boolean {
+function fileMediaOf(media: Api.TypeMessageMedia | undefined): boolean {
   const name = className(media);
   return name === "MessageMediaPhoto" || name === "MessageMediaDocument";
 }
 
-function probeThumb(media: unknown): unknown | undefined {
+function probeThumb(media: Api.TypeMessageMedia | undefined): Api.TypePhotoSize | undefined {
   if (className(media) !== "MessageMediaDocument") return undefined;
   const thumbs = recordArray(recordOf(recordOf(media)?.document), "thumbs");
-  let best: unknown;
+  let best: Api.TypePhotoSize | undefined;
   let bestSize = -1;
   for (const thumb of thumbs) {
     const name = className(thumb);
@@ -156,7 +151,7 @@ function probeThumb(media: unknown): unknown | undefined {
     const size = Number(recordOf(thumb)?.size ?? 0);
     if (size > bestSize) {
       bestSize = size;
-      best = thumb;
+      best = thumb as Api.TypePhotoSize;
     }
   }
   return best;
@@ -171,8 +166,8 @@ function isExpiredError(error: unknown): boolean {
   return EXPIRED_ERRORS.has(message) || /^FILE_REFERENCE/i.test(message);
 }
 
-function groupedIdOf(message: Record<string, unknown>): string | undefined {
-  const value = message.groupedId;
+function groupedIdOf(message: unknown): string | undefined {
+  const value = recordOf(message)?.groupedId;
   if (value === undefined || value === null) return undefined;
   return String(value);
 }

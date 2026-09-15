@@ -13,6 +13,7 @@ data/archive.sqlite*
 data/media/
 data/logs/
 data/state/
+data/cache/
 data/profiles/
 data/.paperkite/
 data/hooks/

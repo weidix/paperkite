@@ -25,6 +25,13 @@ const SETTINGS: PluginSettings = {
 
 const MESSAGES = "@paperkite/plugin-messages";
 const NOTIFY = "@paperkite/plugin-notify-bark";
+const BROKEN = "@acme/plugin-broken";
+const UNIT = "@acme/plugin-unit";
+
+const DIST_SETTINGS: PluginSettings = {
+  ...SETTINGS,
+  scopes: ["@paperkite/", "@acme/"]
+};
 
 interface VersionSpec {
   readonly dependencies?: Record<string, string>;
@@ -561,12 +568,59 @@ test("plugin list reports source, installed version, available version, and ABI 
       range: "^0.1.1",
       available: "0.1.2",
       compatibility: { verdict: "load" },
+      shared: [],
       capabilities: ["messages.send"],
+      deviations: undefined,
       note: undefined
     });
     const notify = entries.find((entry) => entry.name === NOTIFY);
     assert.equal(notify?.root, "core");
     assert.equal(notify?.source, "manifest");
+  });
+});
+
+test("plugin list surfaces host-owned conflicts with the plugin and package", async () => {
+  await withHome(async (home) => {
+    const profileDir = join(home, "profiles", "default");
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(
+      join(profileDir, "package.json"),
+      JSON.stringify({
+        name: "paperkite-profile-default",
+        version: "0.0.0",
+        dependencies: { [BROKEN]: "1.0.0" },
+        paperkite: { profile: { plugins: [BROKEN] } }
+      }),
+      "utf8"
+    );
+    await writePlugin(home, "default", BROKEN, "1.0.0", [
+      { kind: "action", name: "broken.run", handler: "BrokenAction" }
+    ]);
+    const manifestPath = join(profileDir, "node_modules", BROKEN, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.dependencies = { telegram: "^2.26.0" };
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    await mkdir(join(profileDir, "node_modules", BROKEN, "node_modules", "telegram"), { recursive: true });
+
+    const { fetch } = fakeFetch({
+      [registryUrl("@paperkite/bundles")]: registryDocument(
+        "@paperkite/bundles",
+        { "0.1.0": { dependencies: { [MESSAGES]: "^0.1.1" } } },
+        "0.1.0"
+      )
+    });
+    const entries = await listPlugins("default", { settings: DIST_SETTINGS, fetch });
+    const broken = entries.find((entry) => entry.name === BROKEN);
+    assert.deepEqual(broken?.deviations, [
+      {
+        code: "dependency",
+        package: "telegram",
+        field: "dependencies",
+        declared: "^2.26.0",
+        detail: "host-owned package declared as a runtime dependency; the profile installs a second copy"
+      }
+    ]);
+    assert.match(broken?.note ?? "", /host-owned telegram \(dependencies\)/);
   });
 });
 
@@ -615,7 +669,8 @@ test("plugin settings default and override through settings.yml", async () => {
       registry: "https://mirror.test",
       autoInstall: false,
       manifestTtlHours: 0,
-      scopes: ["@acme/"]
+      scopes: ["@acme/"],
+      strict: false
     });
   } finally {
     await rm(directory, { recursive: true, force: true });

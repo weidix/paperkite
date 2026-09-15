@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { DateTime } from "luxon";
-import type { ActionContext, ActionHandler, TriggerEmission } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler, SessionClient, TriggerEmission } from "@paperkite/sdk";
 
 interface SendConfig {
   readonly mode?: "user" | "bot" | "personal";
@@ -19,11 +19,6 @@ interface SendConfig {
   readonly delaySeconds?: number;
 }
 
-interface TelegramClientLike {
-  sendMessage(peer: string | number, options: Record<string, unknown>): Promise<unknown>;
-  sendFile(peer: string | number, options: Record<string, unknown>): Promise<unknown>;
-}
-
 export class SendMessageAction implements ActionHandler<SendConfig> {
   async run(ctx: ActionContext<SendConfig>): Promise<void> {
     const config = ctx.config;
@@ -38,10 +33,9 @@ export class SendMessageAction implements ActionHandler<SendConfig> {
     const sessions = ctx.sessions;
     if (peer === undefined || peer === "") throw new Error("send needs peer");
     if (!sessions || !ctx.session) throw new Error("send needs a session");
-    await sessions.run(async (client) => {
-      const telegram = client as TelegramClientLike;
+    await sessions.run(async (client: SessionClient) => {
       if (config.file) {
-        await telegram.sendFile(peer, {
+        await client.sendFile(peer, {
           file: config.file,
           caption: render(config.caption ?? message, ctx.emission),
           replyTo: config.replyTo ?? (config.replyToEvent ? replyId(ctx.emission) : undefined),
@@ -52,7 +46,7 @@ export class SendMessageAction implements ActionHandler<SendConfig> {
         return;
       }
       if (!message) throw new Error("send needs text or file");
-      await telegram.sendMessage(peer, {
+      await client.sendMessage(peer, {
         message,
         replyTo: config.replyTo ?? (config.replyToEvent ? replyId(ctx.emission) : undefined),
         silent: config.silent,

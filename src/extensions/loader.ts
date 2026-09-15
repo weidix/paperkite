@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,7 +14,9 @@ import type {
 } from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
 import { bundleRanges, profileDirectory, readProfile, userPlugins } from "./profile.js";
+import { hostOwnedPackages } from "./dependency-fallback.js";
 import { evaluateCompatibility, sdkDeclarations, type CompatibilityVerdict } from "./abi.js";
+import { satisfiesRange } from "./semver.js";
 
 interface PackagePluginMeta {
   readonly plugin?: boolean | { readonly capabilities?: readonly PluginCapability[] };
@@ -31,6 +33,31 @@ interface PackageManifest {
   readonly paperkite?: PackagePluginMeta;
 }
 
+/** 诊断命中的字段层级：清单声明、解析真值、安装树。 */
+export type DeviationCode = "dependency" | "shadow" | "hoisted" | "peer-range";
+
+export interface PluginDeviation {
+  readonly code: DeviationCode;
+  readonly package: string;
+  readonly field?: string;
+  readonly declared?: string;
+  readonly expected?: string;
+  readonly detail: string;
+}
+
+export interface PluginReport {
+  readonly verdict: "ok" | "warn" | "reject";
+  readonly deviations: readonly PluginDeviation[];
+}
+
+/** 三层共用的 host-owned 枚举与清单同源，来自 core 的依赖闭包。 */
+export function hostOwnedNames(root?: string): readonly string[] {
+  return hostOwnedPackages(root);
+}
+
+/** core 安装自身的插件不产生 profile 侧诊断。 */
+const CLEAN_REPORT: PluginReport = { verdict: "ok", deviations: [] };
+
 export type PluginSource = "manifest" | "user";
 
 export interface InstalledPluginView {
@@ -41,6 +68,9 @@ export interface InstalledPluginView {
   readonly range?: string;
   readonly capabilities: readonly PluginCapability[];
   readonly compatibility?: CompatibilityVerdict;
+  /** 该插件以 peer 声明并由共享目录满足的 host-owned 包。 */
+  readonly shared: readonly string[];
+  readonly report?: PluginReport;
   readonly warning?: string;
 }
 
@@ -81,10 +111,10 @@ function shortPluginName(name: string): string {
 
 export async function loadExtensions(
   references: Iterable<string>,
-  options: { profile?: string } = {}
+  options: { profile?: string; strict?: boolean } = {}
 ): Promise<LoadedExtensions> {
   const profile = profileDirectory(options.profile ?? "default");
-  const inspections = await inspectProfile(profile);
+  const inspections = await inspectProfile(profile, options.strict ?? false);
   const candidates = inspections.flatMap((inspection) => {
     if (inspection.error) throw new Error(inspection.error);
     return inspection.candidate ? [inspection.candidate] : [];
@@ -135,9 +165,9 @@ export async function loadExtensions(
 }
 
 /** profile 优先、core 根兜底的插件发现结果，供 `plugin list` 与加载共用。 */
-export async function inspectPlugins(profile = "default"): Promise<readonly InstalledPluginView[]> {
+export async function inspectPlugins(profile = "default", strict = false): Promise<readonly InstalledPluginView[]> {
   const directory = profileDirectory(profile);
-  const inspections = await inspectProfile(directory);
+  const inspections = await inspectProfile(directory, strict);
   return inspections.map((inspection) => ({
     name: inspection.name,
     source: inspection.source,
@@ -146,8 +176,154 @@ export async function inspectPlugins(profile = "default"): Promise<readonly Inst
     range: inspection.range,
     capabilities: inspection.capabilities ?? [],
     compatibility: inspection.compatibility,
+    shared: inspection.shared ?? [],
+    report: inspection.report,
     warning: inspection.warning ?? inspection.error
   }));
+}
+
+/** 三层诊断共用同一份 host-owned 枚举，逐层给出插件、包名与命中字段。 */
+export function diagnosePlugin(
+  directory: string,
+  manifest: PackageManifest,
+  names: readonly string[],
+  core: string,
+  profile: string
+): PluginReport {
+  const deviations: PluginDeviation[] = [];
+  const dependencies = manifest.dependencies ?? {};
+  const peers = manifest.peerDependencies ?? {};
+  for (const name of names) {
+    const declared = dependencies[name];
+    if (declared === undefined) continue;
+    deviations.push({
+      code: "dependency",
+      package: name,
+      field: "dependencies",
+      declared: String(declared),
+      detail: "host-owned package declared as a runtime dependency; the profile installs a second copy"
+    });
+  }
+  for (const name of names) {
+    const peer = peers[name];
+    if (typeof peer !== "string" || !peer.trim()) continue;
+    const version = resolvePackageVersion(core, name);
+    if (!version || satisfiesRange(version, peer.trim())) continue;
+    deviations.push({
+      code: "peer-range",
+      package: name,
+      field: "peerDependencies",
+      declared: peer.trim(),
+      expected: version,
+      detail: "peer range " + peer.trim() + " does not cover core " + name + " " + version
+    });
+  }
+  for (const name of names) {
+    if (peers[name] !== undefined) continue;
+    const resolved = resolveFrom(directory, name);
+    const expected = resolveFrom(core, name);
+    if (!resolved || !expected || canonicalPath(resolved) === canonicalPath(expected)) continue;
+    deviations.push({
+      code: "shadow",
+      package: name,
+      field: "realpath",
+      expected: canonicalPath(expected),
+      detail: "resolves to " + canonicalPath(resolved) + ", outside the core installation"
+    });
+  }
+  const known = new Set(deviations.map((item) => item.package));
+  for (const name of installedHostOwned(directory, new Set(names), core)) {
+    if (known.has(name)) continue;
+    deviations.push({
+      code: "hoisted",
+      package: name,
+      field: "node_modules",
+      detail: "present below the plugin directory; a transitive dependency pulled it into the profile"
+    });
+  }
+  const reject = deviations.some((item) => item.code === "dependency" || item.code === "peer-range");
+  return { verdict: reject ? "reject" : deviations.length ? "warn" : "ok", deviations };
+}
+
+/** 插件目录之下命中的 host-owned 包，含嵌套 node_modules 层级。 */
+function installedHostOwned(
+  directory: string,
+  hostOwned: ReadonlySet<string>,
+  core: string
+): readonly string[] {
+  const found = new Set<string>();
+  const visited = new Set<string>();
+  const walk = (current: string): void => {
+    if (found.size >= hostOwned.size || resolvesTo(current, core)) return;
+    const modules = join(current, "node_modules");
+    for (const name of readPackages(modules)) {
+      if (!hostOwned.has(name) || found.has(name)) continue;
+      found.add(name);
+      const target = canonicalPath(join(modules, name));
+      if (visited.has(target)) continue;
+      visited.add(target);
+      walk(join(modules, name));
+    }
+  };
+  walk(directory);
+  return [...found].sort();
+}
+
+function resolvesTo(target: string, root: string): boolean {
+  return canonicalPath(target).startsWith(canonicalPath(root) + sep);
+}
+
+/** `node_modules` 下的包名；scope 目录先合并条目名再下钻。 */
+function readPackages(modules: string): readonly string[] {
+  let entries;
+  try {
+    entries = readdirSync(modules, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === ".bin") continue;
+    if (entry.name.startsWith("@") && entry.isDirectory()) {
+      for (const child of readPackages(join(modules, entry.name))) names.push(child);
+      continue;
+    }
+    names.push(entry.name);
+  }
+  return names;
+}
+
+function resolveFrom(directory: string, name: string): string | undefined {
+  try {
+    return dirname(createRequire(join(directory, "package.json")).resolve(name + "/package.json"));
+  } catch {
+    return undefined;
+  }
+}
+
+function resolvePackageVersion(root: string, name: string): string | undefined {
+  try {
+    const manifest = JSON.parse(readFileSync(join(root, "node_modules", name, "package.json"), "utf8")) as {
+      version?: unknown;
+    };
+    return typeof manifest.version === "string" ? manifest.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/** 加载期诊断文本：列出插件、包名与命中字段。 */
+export function deviationWarning(plugin: string, deviation: PluginDeviation): string {
+  const field = deviation.field ? " (" + deviation.field + ")" : "";
+  return "plugin " + plugin + " host-owned " + deviation.package + field + ": " + deviation.detail;
 }
 
 function bindCapability(
@@ -225,6 +401,8 @@ interface PluginInspection {
   readonly version?: string;
   readonly capabilities?: readonly PluginCapability[];
   readonly compatibility?: CompatibilityVerdict;
+  readonly shared?: readonly string[];
+  readonly report?: PluginReport;
   readonly warning?: string;
   readonly error?: string;
   readonly candidate?: PluginCandidate;
@@ -237,7 +415,7 @@ interface PluginRequest {
 }
 
 /** 候选集：profile 声明的用户插件、清单接管的插件与 core 快照里的内置插件。 */
-async function inspectProfile(profile: string): Promise<readonly PluginInspection[]> {
+async function inspectProfile(profile: string, strict: boolean): Promise<readonly PluginInspection[]> {
   const profileManifest = await readProfile(profile);
   const managed = bundleRanges(profileManifest);
   const requests = new Map<string, PluginRequest>();
@@ -249,12 +427,16 @@ async function inspectProfile(profile: string): Promise<readonly PluginInspectio
   }
   const inspections: PluginInspection[] = [];
   for (const request of [...requests.values()].sort((left, right) => left.name.localeCompare(right.name))) {
-    inspections.push(await inspectPlugin(request, profile));
+    inspections.push(await inspectPlugin(request, profile, strict));
   }
   return inspections;
 }
 
-async function inspectPlugin(request: PluginRequest, profile: string): Promise<PluginInspection> {
+async function inspectPlugin(
+  request: PluginRequest,
+  profile: string,
+  strict: boolean
+): Promise<PluginInspection> {
   const packageFile = resolvePackageJson(request.name, profile);
   if (!packageFile) {
     return {
@@ -285,24 +467,46 @@ async function inspectPlugin(request: PluginRequest, profile: string): Promise<P
     if (!Array.isArray(capabilities)) throw new Error("invalid capability metadata in " + request.name);
     const compatibility = evaluateCompatibility(sdkDeclarations(manifest));
     const version = typeof manifest.version === "string" ? manifest.version : undefined;
+    const owned = hostOwnedNames();
+    const report = base.root === "profile"
+      ? diagnosePlugin(dirname(packageFile), manifest, owned, coreRoot(), profile)
+      : CLEAN_REPORT;
+    const shared = Object.keys(manifest.peerDependencies ?? {}).filter((name) => owned.includes(name)).sort();
+    const diagnoses = report.deviations.map((deviation) => deviationWarning(request.name, deviation));
+    if (strict && report.verdict === "reject") {
+      return {
+        ...base,
+        version,
+        capabilities,
+        compatibility,
+        shared,
+        report,
+        error: "plugin " + request.name + " declares host-owned packages as runtime dependencies: " +
+          report.deviations.map((item) => item.package + " (" + item.field + ")").join(", ")
+      };
+    }
     if (compatibility.verdict === "reject") {
       return {
         ...base,
         version,
         capabilities,
         compatibility,
+        shared,
+        report,
         error: "plugin " + request.name + " is incompatible: " + compatibility.detail
       };
     }
+    const warning = compatibility.verdict === "warn"
+      ? "plugin " + request.name + " compatibility warning: " + compatibility.detail
+      : undefined;
     return {
       ...base,
       version,
       capabilities,
       compatibility,
-      warning:
-        compatibility.verdict === "warn"
-          ? "plugin " + request.name + " compatibility warning: " + compatibility.detail
-          : undefined,
+      shared,
+      report,
+      warning: [warning, ...diagnoses].filter(Boolean).join("\n") || undefined,
       candidate: {
         name: request.name,
         version,

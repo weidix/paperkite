@@ -1,3 +1,5 @@
+import type { TelegramClient } from "telegram";
+
 export type CapabilityKind = "action" | "trigger" | "service";
 
 export interface RuntimeLogger {
@@ -37,8 +39,29 @@ export interface SessionUnavailable {
   readonly state: SessionState;
 }
 
+type OmittedSessionMethods =
+  | "connect"
+  | "disconnect"
+  | "destroy"
+  | "start"
+  | "signIn"
+  | "signInUser"
+  | "signInBot"
+  | "sendCode"
+  | "checkAuthorization"
+  | "isUserAuthorized"
+  | "updateTwoFaSettings"
+  | "setLogLevel"
+  | "parseMode";
+
+/**
+ * core 交出的客户端：gramjs 客户端的类型面，去掉生命周期与鉴权方法。
+ * `Omit` 只做减面，插件按自有局部接口访问时会话句柄仍可一次断言落地。
+ */
+export type SessionClient = Omit<TelegramClient, OmittedSessionMethods>;
+
 export interface SessionAccess {
-  run<T>(operation: (client: unknown) => T | Promise<T>): Promise<T>;
+  run<T>(operation: (client: SessionClient) => T | Promise<T>): Promise<T>;
 }
 
 export interface ActionContext<P = unknown> {

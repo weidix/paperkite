@@ -1,5 +1,11 @@
 import { Api } from "telegram/tl/api.js";
-import type { RuntimeLogger, SessionAccess, SessionState, Unsubscribe } from "@paperkite/sdk";
+import type {
+  RuntimeLogger,
+  SessionAccess,
+  SessionClient as SessionRunClient,
+  SessionState,
+  Unsubscribe
+} from "@paperkite/sdk";
 import { SessionUnavailableError } from "../engine/errors.js";
 import type { AppSettings } from "../config/settings.js";
 import { createGramClient, type SessionClient } from "./client.js";
@@ -95,7 +101,7 @@ export class SessionPool {
 
   access(name?: string): SessionAccess | undefined {
     if (name === undefined) return undefined;
-    return { run: (operation) => this.run(name, operation) };
+    return { run: (operation) => this.run(name, (client) => operation(client as unknown as SessionRunClient)) };
   }
 
   state(name: string): SessionState | undefined {

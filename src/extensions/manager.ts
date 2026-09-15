@@ -13,7 +13,8 @@ import {
   type ProfileManifest
 } from "./profile.js";
 import { acquireProcessLock } from "../control/process-lock.js";
-import { inspectPlugins, type InstalledPluginView, type PluginSource } from "./loader.js";
+import { healDependencyFallback } from "./dependency-fallback.js";
+import { inspectPlugins, type InstalledPluginView, type PluginDeviation, type PluginSource } from "./loader.js";
 import {
   filterScopes,
   readBundleManifest,
@@ -58,7 +59,7 @@ export interface SyncResult {
   readonly applied: boolean;
 }
 
-export function managePlugins(profile: string, args: readonly string[]): number {
+export async function managePlugins(profile: string, args: readonly string[]): Promise<number> {
   const directory = profileDirectory(profile);
   initProfileSync(directory, profile);
   const before = readProfileSync(directory);
@@ -78,13 +79,17 @@ export function managePlugins(profile: string, args: readonly string[]): number 
     return exitCode;
   }
   reconcileProfileSync(directory, before);
+  for (const warning of await healDependencyFallback()) process.stderr.write("paperkite: " + warning + "\n");
+  for (const view of await inspectPlugins(profile)) {
+    if (view.warning) process.stderr.write("paperkite: " + view.warning + "\n");
+  }
   return 0;
 }
 
 /** 按清单安装缺失的内置插件；已固定的版本与用户插件都不改动。 */
 export async function syncBundles(profile = "default", options: SyncOptions = {}): Promise<SyncResult> {
   const settings = options.settings ?? DEFAULT_PLUGIN_SETTINGS;
-  const directory = await ensureProfile(profile);
+  const { directory, migration } = await ensureProfile(profile);
   const release = await readReleasePolicy(directory);
   const lock = await acquireProcessLock(join(directory, ".paperkite-bundles.lock"));
   try {
@@ -104,7 +109,7 @@ export async function syncBundles(profile = "default", options: SyncOptions = {}
       fetch: options.fetch,
       now: options.now ?? Date.now,
       cacheDir: options.cacheDir,
-      warnings: [...manifest.warnings],
+      warnings: [...(migration ? [migration] : []), ...manifest.warnings],
       problems: []
     };
     const { accepted, skipped } = filterScopes(manifest.dependencies, settings.scopes);
@@ -167,6 +172,7 @@ export async function syncBundles(profile = "default", options: SyncOptions = {}
     if (additions.length) {
       const code = await (options.runner ?? runPnpm)(["install", "--ignore-scripts"], directory);
       if (code !== 0) context.problems.push("pnpm install failed in " + directory + " (exit " + code + ")");
+      context.warnings.push(...(await healDependencyFallback()));
     }
     const applied = changed || additions.length > 0;
     return {
@@ -191,7 +197,7 @@ export async function updatePlugins(
   options: SyncOptions = {}
 ): Promise<SyncResult> {
   const settings = options.settings ?? DEFAULT_PLUGIN_SETTINGS;
-  const directory = await ensureProfile(profile);
+  const { directory, migration } = await ensureProfile(profile);
   const release = await readReleasePolicy(directory);
   const lock = await acquireProcessLock(join(directory, ".paperkite-bundles.lock"));
   try {
@@ -211,7 +217,7 @@ export async function updatePlugins(
       fetch: options.fetch,
       now: options.now ?? Date.now,
       cacheDir: options.cacheDir,
-      warnings: [...manifest.warnings],
+      warnings: [...(migration ? [migration] : []), ...manifest.warnings],
       problems: []
     };
     const accepted = filterScopes(manifest.dependencies, settings.scopes).accepted;
@@ -254,6 +260,7 @@ export async function updatePlugins(
       if (installs) {
         const code = await (options.runner ?? runPnpm)(["install", "--ignore-scripts"], directory);
         if (code !== 0) context.problems.push("pnpm install failed in " + directory + " (exit " + code + ")");
+        context.warnings.push(...(await healDependencyFallback()));
       }
     }
     return {
@@ -271,6 +278,7 @@ export async function updatePlugins(
   }
 }
 
+/** 每个插件一行：安装来源、可用版本、共享来源与三层诊断。 */
 export interface PluginListEntry {
   readonly name: string;
   readonly source: PluginSource;
@@ -279,7 +287,10 @@ export interface PluginListEntry {
   readonly range?: string;
   readonly available?: string;
   readonly compatibility?: CompatibilityVerdict;
+  /** 该插件在 core 依赖闭包容忍下解析到的 host-owned 包。 */
+  readonly shared: readonly string[];
   readonly capabilities: readonly string[];
+  readonly deviations?: readonly PluginDeviation[];
   readonly note?: string;
 }
 
@@ -287,7 +298,7 @@ export interface PluginListEntry {
 export async function listPlugins(profile = "default", options: SyncOptions = {}): Promise<readonly PluginListEntry[]> {
   const settings = options.settings ?? DEFAULT_PLUGIN_SETTINGS;
   const directory = profileDirectory(profile);
-  const views = await inspectPlugins(profile);
+  const views = await inspectPlugins(profile, settings.strict);
   const current = await readProfile(directory);
   const dependencies = current.dependencies ?? {};
   const manifest = await readBundleManifest({
@@ -315,6 +326,7 @@ export async function listPlugins(profile = "default", options: SyncOptions = {}
   for (const view of views) {
     const range = view.range ?? accepted[view.name] ?? specRange(dependencies[view.name]);
     const available = range ? await resolveVersion(context, view.name, range) : undefined;
+    const deviations = view.report?.deviations ?? [];
     entries.push({
       name: view.name,
       source: view.source,
@@ -323,7 +335,9 @@ export async function listPlugins(profile = "default", options: SyncOptions = {}
       range,
       available,
       compatibility: view.compatibility,
+      shared: view.shared,
       capabilities: view.capabilities.map((capability) => capability.name),
+      deviations: deviations.length ? deviations : undefined,
       note: view.warning
     });
   }

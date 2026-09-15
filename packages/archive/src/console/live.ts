@@ -83,7 +83,7 @@ export class LiveMediaStreamer {
 
   private async fetchPart(media: unknown, offset: number, length: number): Promise<Buffer | undefined> {
     return this.deps.sessions.run(async (client) => {
-      const host = client as unknown as ArchiveClient;
+      const host = client as ArchiveClient;
       const parts: Buffer[] = [];
       let received = 0;
       for await (const chunk of liveChunksOf(host, media, offset, Math.ceil(length / CHUNK_BYTES))) {
@@ -103,7 +103,7 @@ export class LiveMediaStreamer {
   }> {
     try {
       const result = await this.deps.sessions.run(async (client) => {
-        const host = client as unknown as ArchiveClient;
+        const host = client as ArchiveClient;
         const message = await fetchMessage(host, file, chatUsername);
         if (message === undefined) return "missing" as const;
         if (message.media === undefined || message.media === null) return "unavailable" as const;

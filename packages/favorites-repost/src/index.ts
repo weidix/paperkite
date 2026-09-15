@@ -1,4 +1,4 @@
-import type { ActionContext, ActionHandler, RuntimeLogger } from "@paperkite/sdk";
+import type { ActionContext, ActionHandler, RuntimeLogger, SessionClient } from "@paperkite/sdk";
 
 type RepostScope = "forwards" | "tail";
 
@@ -10,12 +10,6 @@ interface RepostConfig {
   readonly deleteOriginal?: boolean;
   readonly dryRun?: boolean;
   readonly adoptCopies?: boolean;
-}
-
-interface RepostClient {
-  iterMessages(entity: unknown, options: Record<string, unknown>): AsyncIterable<unknown>;
-  forwardMessages(entity: unknown, options: Record<string, unknown>): Promise<readonly unknown[]>;
-  deleteMessages(entity: unknown, ids: readonly number[], options: { revoke: boolean }): Promise<unknown>;
 }
 
 interface Entry {
@@ -47,13 +41,13 @@ export class FavoritesRepostAction implements ActionHandler<RepostConfig> {
     const sessions = ctx.sessions;
     if (!sessions || !ctx.session) throw new Error("favorites repost needs a session");
     const config = normalizeConfig(ctx.config);
-    await sessions.run((client) => repost(ctx, client as RepostClient, config));
+    await sessions.run((client) => repost(ctx, client, config));
   }
 }
 
 async function repost(
   ctx: ActionContext<RepostConfig>,
-  client: RepostClient,
+  client: SessionClient,
   config: NormalizedConfig
 ): Promise<void> {
   if (config.adoptCopies) {
@@ -108,7 +102,7 @@ async function repost(
 }
 
 async function collect(
-  client: RepostClient,
+  client: SessionClient,
   limit: number | undefined,
   signal: AbortSignal
 ): Promise<Entry[]> {
@@ -130,7 +124,7 @@ async function collect(
 }
 
 async function convertBatch(
-  client: RepostClient,
+  client: SessionClient,
   ids: readonly number[],
   logger: RuntimeLogger
 ): Promise<BatchOutcome> {
@@ -162,7 +156,7 @@ async function convertBatch(
 /** 一次性清理：收藏里已有本插件追加的隐藏副本时，核对最新一批消息与转发原消息逐条对应，通过后只删除原消息。 */
 async function adoptCopies(
   ctx: ActionContext<RepostConfig>,
-  client: RepostClient,
+  client: SessionClient,
   config: NormalizedConfig
 ): Promise<void> {
   const entries = await collect(client, undefined, ctx.signal);

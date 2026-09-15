@@ -27,7 +27,8 @@ program
   .option("--profile <name>", "profile name", "default")
   .option("--offline", "use the cached or built-in bundle manifest")
   .action(async ({ profile, offline }: { profile: string; offline?: boolean }) => {
-    const directory = await ensureProfile(profile);
+    const { directory, migration } = await ensureProfile(profile);
+    if (migration) process.stderr.write(migration);
     const examples = join(coreRoot(), "data");
     const home = paperkiteHome();
     await copyIfMissing(join(examples, "settings.example.yml"), join(home, "settings.yml"));
@@ -307,7 +308,7 @@ async function runPluginCommand(
     process.stdout.write(JSON.stringify(entries, null, 2) + "\n");
     return 0;
   }
-  return managePlugins(options.profile, args);
+  return await managePlugins(options.profile, args);
 }
 
 function reportSync(result: SyncResult, verbose = false): void {

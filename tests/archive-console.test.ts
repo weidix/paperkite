@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Api } from "telegram";
-import type { RuntimeLogger, ServiceContext, SessionAccess } from "@paperkite/sdk";
+import type { RuntimeLogger, ServiceContext, SessionAccess, SessionClient } from "@paperkite/sdk";
 import type { DialogEntry, TelegramMessage } from "../packages/archive/src/archiver.js";
 import { createArchiveConsoleServer } from "../packages/archive/src/console/server.js";
 import { ArchiveConsoleWebService } from "../packages/archive/src/console/service.js";
@@ -95,8 +95,9 @@ function chunkIterable(chunks: readonly Buffer[]): AsyncIterable<Buffer> {
 }
 
 function fakeSessions(client: FakeLiveClient): SessionAccess {
+  const handle = client as unknown as SessionClient;
   return {
-    run: async <T>(operation: (client: unknown) => T | Promise<T>) => operation(client)
+    run: async <T>(operation: (client: SessionClient) => T | Promise<T>) => operation(handle)
   };
 }
 

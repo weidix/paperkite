@@ -17,15 +17,29 @@ const pluginDirectories = [
   "favorites-repost"
 ];
 
-test("each actual plugin owns one manifest and shared packages stay ordinary", async () => {
+const HOST_OWNED = ["telegram"];
+
+test("each actual plugin owns one manifest and keeps host-owned packages on peers", async () => {
   for (const directory of pluginDirectories) {
     const manifest = JSON.parse(await readFile(join(process.cwd(), "packages", directory, "package.json"), "utf8")) as {
       name: string;
+      dependencies?: Record<string, string>;
       peerDependencies?: Record<string, string>;
       paperkite?: { plugin?: unknown };
     };
     assert.ok(manifest.paperkite?.plugin, directory);
-    assert.equal(manifest.peerDependencies, undefined, directory);
+    const dependencies = manifest.dependencies ?? {};
+    const peers = manifest.peerDependencies ?? {};
+    for (const name of Object.keys(dependencies)) {
+      assert.equal(
+        HOST_OWNED.includes(name),
+        false,
+        directory + " declares host-owned " + name + " on dependencies"
+      );
+    }
+    for (const name of Object.keys(peers)) {
+      assert.equal(HOST_OWNED.includes(name), true, directory + " declares a non host-owned peer: " + name);
+    }
   }
   for (const directory of ["sdk"]) {
     const manifest = JSON.parse(await readFile(join(process.cwd(), "packages", directory, "package.json"), "utf8")) as {
