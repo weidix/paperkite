@@ -126,6 +126,8 @@ export async function syncBundles(profile = "default", options: SyncOptions = {}
       const installed = installedVersion(directory, name);
       if (spec && installed && specSatisfied(spec, installed)) {
         kept.push(name);
+        // 已固定的版本照样刷一次单包 packument：refresh 之后紧跟的 update 要看到新版本
+        if (context.refresh) await resolveVersion(context, name, range);
         continue;
       }
       const pinned = spec && parseVersion(spec) ? spec : undefined;
