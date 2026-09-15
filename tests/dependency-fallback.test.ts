@@ -318,10 +318,27 @@ test("a transitive telegram copy below the plugin directory is diagnosed", async
     });
     await writePackages(plugin, [{ name: TELEGRAM, version: "2.26.22" }]);
 
-    const report = diagnosePlugin(plugin, { peerDependencies: { [TELEGRAM]: "^2.26.0" } }, hostOwnedNames(), coreRoot(), directory.directory);
+    const manifest = { peerDependencies: { [TELEGRAM]: "^2.26.0" } };
+    const report = diagnosePlugin(plugin, manifest, hostOwnedNames(), coreRoot(), directory.directory);
+    // peer 声明过也要报：profile 里的第二份把共享目录遮住，插件拿到的与 core 那份不是同一实例
     assert.deepEqual(
       report.deviations.map((item) => [item.code, item.package, item.field]),
-      [["hoisted", TELEGRAM, "node_modules"]]
+      [["shadow", TELEGRAM, "realpath"]]
+    );
+
+    const withDependency = diagnosePlugin(
+      plugin,
+      { ...manifest, dependencies: { [TELEGRAM]: "^2.26.0" } },
+      hostOwnedNames(),
+      coreRoot(),
+      directory.directory
+    );
+    assert.deepEqual(
+      withDependency.deviations.map((item) => [item.code, item.package, item.field]),
+      [
+        ["dependency", TELEGRAM, "dependencies"],
+        ["shadow", TELEGRAM, "realpath"]
+      ]
     );
   });
 });

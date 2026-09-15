@@ -218,8 +218,9 @@ export function diagnosePlugin(
       detail: "peer range " + peer.trim() + " does not cover core " + name + " " + version
     });
   }
+  // 真值层看插件点名过的 host-owned 包解析到哪：profile 里长出第二份就报，与声明方式无关
   for (const name of names) {
-    if (peers[name] !== undefined) continue;
+    if (dependencies[name] === undefined && peers[name] === undefined) continue;
     const resolved = resolveFrom(directory, name);
     const expected = resolveFrom(core, name);
     if (!resolved || !expected || canonicalPath(resolved) === canonicalPath(expected)) continue;
@@ -231,9 +232,10 @@ export function diagnosePlugin(
       detail: "resolves to " + canonicalPath(resolved) + ", outside the core installation"
     });
   }
+  // 安装树只看插件没点名的包：点名过的已由上面两层覆盖
   const known = new Set(deviations.map((item) => item.package));
   for (const name of installedHostOwned(directory, new Set(names), core)) {
-    if (known.has(name)) continue;
+    if (known.has(name) || dependencies[name] !== undefined || peers[name] !== undefined) continue;
     deviations.push({
       code: "hoisted",
       package: name,
