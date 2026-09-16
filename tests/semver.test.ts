@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { activeConditions } from "../src/extensions/loader.js";
 import { maxSatisfying, satisfiesRange } from "../src/extensions/semver.js";
 import { HOST_OWNED_PACKAGES } from "../src/extensions/host-owned.js";
 import { diagnosePlugin } from "../src/extensions/loader.js";
@@ -46,4 +47,11 @@ test("a yaml dependency outside the host-owned list is clean", () => {
     "/tmp/profile"
   );
   assert.deepEqual(report, { verdict: "ok", deviations: [] });
+});
+
+test("development conditions are read from every flag position", () => {
+  assert.ok(activeConditions(["--conditions=development"]).has("development"));
+  assert.ok(activeConditions(["--conditions", "development"]).has("development"));
+  assert.ok(activeConditions(["--conditions=development,node"]).has("development"));
+  assert.ok(!activeConditions(["--conditions=node"]).has("development"));
 });

@@ -581,18 +581,31 @@ function resolveEntry(manifest: PackageManifest): string | undefined {
 
 const EXACT_CONDITIONS = ["development", "node", "import", "default"] as const;
 
-function runConditions(): readonly string[] {
-  return developmentRequested() ? EXACT_CONDITIONS : EXACT_CONDITIONS.filter((condition) => condition !== "development");
+export function activeConditions(tokens: readonly string[] = [
+  ...process.execArgv,
+  ...process.argv,
+  ...(process.env.NODE_OPTIONS ?? "").split(/\s+/)
+]): ReadonlySet<string> {
+  const found = new Set<string>();
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token.startsWith("--conditions=")) {
+      for (const value of token.slice("--conditions=".length).split(",")) {
+        if (value.trim()) found.add(value.trim());
+      }
+    } else if (token === "--conditions" && tokens[index + 1]) {
+      for (const value of (tokens[index + 1] as string).split(",")) {
+        if (value.trim()) found.add(value.trim());
+      }
+    }
+  }
+  return found;
 }
 
-function developmentRequested(): boolean {
-  const tokens = [...process.argv, ...(process.env.NODE_OPTIONS ?? "").split(/\s+/)];
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token === "--conditions=development") return true;
-    if (token === "--conditions" && tokens[index + 1] === "development") return true;
-  }
-  return false;
+function runConditions(): readonly string[] {
+  return activeConditions().has("development") || process.env.PAPERKITE_DEV === "1"
+    ? EXACT_CONDITIONS
+    : EXACT_CONDITIONS.filter((condition) => condition !== "development");
 }
 
 function resolveConditionalEntry(value: unknown, conditions: readonly string[]): string | undefined {
