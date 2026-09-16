@@ -146,31 +146,31 @@ importers:
   packages/bundles:
     dependencies:
       '@paperkite/plugin-account-health':
-        specifier: ^0.1.2
+        specifier: ^0.1.3
         version: link:../account-health
       '@paperkite/plugin-archive':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../archive
       '@paperkite/plugin-favorites-cleanup':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../favorites-cleanup
       '@paperkite/plugin-favorites-repost':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../favorites-repost
       '@paperkite/plugin-messages':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../messages
       '@paperkite/plugin-messages-watch':
-        specifier: ^0.1.4
+        specifier: ^0.1.5
         version: link:../messages-watch
       '@paperkite/plugin-notify-bark':
-        specifier: ^0.1.2
+        specifier: ^0.1.3
         version: link:../notify-bark
       '@paperkite/plugin-process-run':
-        specifier: ^0.1.2
+        specifier: ^0.1.3
         version: link:../process-run
       '@paperkite/plugin-runtime-console':
-        specifier: ^0.1.3
+        specifier: ^0.1.4
         version: link:../runtime-console
 
   packages/favorites-cleanup:
