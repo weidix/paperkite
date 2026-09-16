@@ -33,6 +33,7 @@ const fakeSessions = {
   ensure: async () => undefined,
   access: () => ({ run: async (operation: (client: unknown) => unknown) => operation(undefined) }),
   closeAll: async () => undefined,
+  reset: async () => undefined,
   subscribe: () => () => undefined,
   state: () => undefined,
   states: () => []
@@ -42,6 +43,7 @@ async function makeRuntime(
   settings: {
     catalog?: FlowCatalog;
     reloadCatalog?: () => Promise<FlowCatalog>;
+    reloadExtensions?: (references: ReadonlySet<string>) => Promise<{ registry: CapabilityRegistry; installed: [] }>;
     stopGraceMs?: number;
     register?: (registry: CapabilityRegistry) => void;
     sessions?: SessionPool;
@@ -60,6 +62,7 @@ async function makeRuntime(
     logger,
     installed: [],
     reloadCatalog: settings.reloadCatalog,
+    reloadExtensions: settings.reloadExtensions,
     stopGraceMs: settings.stopGraceMs
   });
   const events: RuntimeEvent[] = [];
@@ -273,13 +276,20 @@ test("reloadFlow stops a disabled schedule", async () => {
 class FakeSessionPool {
   private readonly statesMap = new Map<string, string>();
   private readonly listeners = new Set<(change: { name: string; previous: string; state: string; reason?: string }) => void>();
+  ensured: string[][] = [];
 
   constructor(initial: Record<string, string>) {
     for (const [name, state] of Object.entries(initial)) this.statesMap.set(name, state);
   }
 
-  async ensure(): Promise<void> {}
+  async ensure(names?: Iterable<string>): Promise<void> {
+    if (names) this.ensured.push([...names]);
+    for (const name of names ?? []) {
+      if (!this.statesMap.has(name)) this.statesMap.set(name, "connected");
+    }
+  }
   async closeAll(): Promise<void> {}
+  async reset(): Promise<void> {}
 
   state(name: string): string | undefined {
     return this.statesMap.get(name);
@@ -343,5 +353,62 @@ test("flows bound to a session suspend on isolation and resume on recovery", asy
   assert.ok(events.some((event) => event.type === "session.state"));
   assert.ok(events.some((event) => event.type === "flow.suspended"));
   assert.ok(events.some((event) => event.type === "flow.resumed"));
+  await runtime.stop();
+});
+
+test("reload swaps the capability registry so new actions run", async () => {
+  const first = fromMapping({
+    schedules: [{ id: "daily", cron: "0 4 * * *", run: { capability: "demo.action", config: {} } }]
+  });
+  const second = fromMapping({
+    schedules: [{ id: "daily", cron: "0 4 * * *", run: { capability: "demo.next", config: {} } }]
+  });
+  const next = new CapabilityRegistry();
+  next.register("action", "demo.next", EchoAction, "plugin-demo");
+  const { runtime, events } = await makeRuntime({
+    catalog: first,
+    reloadCatalog: async () => second,
+    reloadExtensions: async () => ({ registry: next, installed: [] })
+  });
+  await runtime.reload();
+  await runtime.runFlow("daily");
+  assert.deepEqual(EchoAction.runs, [{ id: "schedule:daily", config: {} }]);
+  assert.ok(events.some((event) => event.type === "flows.reloaded" && event.ok));
+  await runtime.stop();
+});
+
+test("a failed extension reload keeps the old registry", async () => {
+  const catalog = fromMapping({
+    schedules: [{ id: "daily", cron: "0 4 * * *", run: { capability: "demo.action", config: {} } }]
+  });
+  const { runtime, events } = await makeRuntime({
+    catalog,
+    reloadCatalog: async () => catalog,
+    reloadExtensions: async () => {
+      throw new Error("broken profile");
+    }
+  });
+  await assert.rejects(runtime.reload(), /broken profile/);
+  await runtime.runFlow("daily");
+  assert.equal(EchoAction.runs.length, 1);
+  assert.ok(events.some((event) => event.type === "flows.reloaded" && !event.ok));
+  await runtime.stop();
+});
+
+test("reloadFlow ensures a newly bound session before starting", async () => {
+  WaitTrigger.runs = 0;
+  const sessions = new FakeSessionPool({ "acct-1": "connected" });
+  const catalog = fromMapping({
+    triggers: [{ id: "watch", capability: "demo.wait", session: "acct-2" }]
+  });
+  const { runtime } = await makeRuntime({
+    catalog,
+    sessions: sessions as unknown as SessionPool,
+    register: (registry) => registry.register("trigger", "demo.wait", WaitTrigger, "plugin-demo")
+  });
+  await runtime.start();
+  await runtime.reloadFlow("watch");
+  assert.ok(sessions.ensured.some((names) => names.includes("acct-2")));
+  assert.ok(sessions.states().some((info) => info.name === "acct-2"));
   await runtime.stop();
 });

@@ -38,6 +38,7 @@ import { SessionUnavailableError } from "./errors.js";
 import { invalidateAllHooks, invalidateHook, loadHook, normalizeHookResult } from "./hooks.js";
 import { RuntimeScheduler } from "./scheduler.js";
 import { CapabilityRegistry } from "../extensions/registry.js";
+import { createUsageMarker } from "../extensions/loader.js";
 import { CORE_ABI } from "../extensions/abi.js";
 import type { SessionPool, SessionStateChange } from "../telegram/pool.js";
 
@@ -49,7 +50,13 @@ export interface RuntimeOptions {
   readonly installed: readonly PluginInfo[];
   readonly markUsed?: (references: ReadonlySet<string>) => readonly PluginInfo[];
   readonly reloadCatalog?: () => Promise<FlowCatalog>;
+  readonly reloadExtensions?: (references: ReadonlySet<string>) => Promise<ReloadedExtensions>;
   readonly stopGraceMs?: number;
+}
+
+export interface ReloadedExtensions {
+  readonly registry: CapabilityRegistry;
+  readonly installed: readonly PluginInfo[];
 }
 
 export class Runtime {
@@ -65,6 +72,9 @@ export class Runtime {
   private readonly lastStops = new Map<string, FlowLastStop>();
   private readonly pendingReload = new Set<string>();
   private catalog: FlowCatalog;
+  private registry: CapabilityRegistry;
+  private installed: readonly PluginInfo[];
+  private markUsed: ((references: ReadonlySet<string>) => readonly PluginInfo[]) | undefined;
   private configBaseline: ConfigBaseline | undefined;
   private lifecycle = new AbortController();
   private started = false;
@@ -74,11 +84,12 @@ export class Runtime {
 
   constructor(private readonly options: RuntimeOptions) {
     this.catalog = options.catalog;
+    this.registry = options.registry;
+    this.installed = options.installed;
+    this.markUsed = options.markUsed;
     this.configBaseline = readBaseline(options.catalog.path);
-    this.sessionUnsub = options.sessions.subscribe((change) => this.handleSessionChange(change));
+    options.sessions.subscribe((change) => this.handleSessionChange(change));
   }
-
-  private sessionUnsub: Unsubscribe | undefined;
 
   get snapshot(): RuntimeSnapshot {
     return {
@@ -107,8 +118,7 @@ export class Runtime {
   }
 
   listPlugins(): readonly PluginInfo[] {
-    const markUsed = this.options.markUsed;
-    return markUsed ? markUsed(this.catalog.capabilityRefs()) : this.options.installed;
+    return this.markUsed ? this.markUsed(this.catalog.capabilityRefs()) : this.installed;
   }
 
   subscribe(listener: RuntimeEventListener): Unsubscribe {
@@ -137,7 +147,9 @@ export class Runtime {
       this.started = false;
       this.lifecycle.abort();
       await this.stopFlows();
-      await this.options.sessions.closeAll();
+      const sessions = this.options.sessions as Partial<SessionPool> & { closeAll(): Promise<void> };
+      if (typeof sessions.reset === "function") await sessions.reset();
+      else await sessions.closeAll();
       throw error;
     }
   }
@@ -167,6 +179,17 @@ export class Runtime {
     const wasStarted = this.started;
     await this.stopFlows();
     this.catalog = next;
+    if (this.options.reloadExtensions) {
+      try {
+        const extensions = await this.options.reloadExtensions(next.capabilityRefs());
+        this.registry = extensions.registry;
+        this.installed = extensions.installed;
+        this.markUsed = createUsageMarker(extensions.installed);
+      } catch (error) {
+        this.emit({ type: "flows.reloaded", ok: false, error: messageOf(error) });
+        throw error;
+      }
+    }
     this.configBaseline = readBaseline(next.path);
     this.pendingReload.clear();
     this.clearStops();
@@ -282,13 +305,27 @@ export class Runtime {
       if (this.started && item.enabled) this.startSchedule(item);
     } else if (item.kind === "trigger") {
       await this.stopFlow(`trigger:${item.id}`);
-      if (this.started && item.enabled) this.startTrigger(item);
+      if (this.started && item.enabled) {
+        await this.ensureFlowSessions(item);
+        this.startTrigger(item);
+      }
     } else if (item.kind === "service") {
       await this.stopFlow(`service:${item.id}`);
-      if (this.started && item.enabled && item.autoStart) this.launchService(item);
+      if (this.started && item.enabled && item.autoStart) {
+        await this.ensureFlowSessions(item);
+        this.launchService(item);
+      }
     }
     this.emit({ type: "flow.reloaded", id: item.id, kind: item.kind });
     return true;
+  }
+
+  private async ensureFlowSessions(definition: FlowDefinition): Promise<void> {
+    const names = new Set<string>();
+    if ("session" in definition && definition.session) names.add(definition.session);
+    if (definition.kind === "trigger") for (const action of definition.actions) collectActionSessions(action, names);
+    else if ("action" in definition) collectActionSessions(definition.action, names);
+    if (names.size) await this.options.sessions.ensure(names);
   }
 
   private invalidateFlowHooks(item: FlowDefinition): void {
@@ -307,7 +344,9 @@ export class Runtime {
       this.started = false;
       this.lifecycle.abort();
       await this.stopFlows();
-      await this.options.sessions.closeAll();
+      const sessions = this.options.sessions as Partial<SessionPool> & { closeAll(): Promise<void> };
+      if (typeof sessions.reset === "function") await sessions.reset();
+      else await sessions.closeAll();
     })();
     this.stopping = stopping;
     await stopping;
@@ -601,7 +640,7 @@ export class Runtime {
     controller: AbortController,
     onDepleted: () => void
   ): Promise<void> {
-    const Constructor = this.options.registry.getTrigger(definition.capability);
+    const Constructor = this.registry.getTrigger(definition.capability);
     let emitted = 0;
     const context: TriggerContext = {
       id: definition.id,
@@ -611,7 +650,7 @@ export class Runtime {
       session: definition.session,
       signal: controller.signal,
       sessions: this.options.sessions.access(definition.session),
-      control: this.options.registry.grantsControl("trigger", definition.capability) ? this : undefined,
+      control: this.registry.grantsControl("trigger", definition.capability) ? this : undefined,
       logger: this.capabilityLogger("trigger", definition.capability),
       emit: async (event) => {
         if (controller.signal.aborted) return;
@@ -664,7 +703,7 @@ export class Runtime {
   }
 
   private async runService(definition: ServiceDefinition, controller: AbortController): Promise<void> {
-    const Constructor = this.options.registry.getService(definition.capability);
+    const Constructor = this.registry.getService(definition.capability);
     const context: ServiceContext = {
       id: definition.id,
       abi: CORE_ABI,
@@ -673,7 +712,7 @@ export class Runtime {
       session: definition.session,
       signal: controller.signal,
       sessions: this.options.sessions.access(definition.session),
-      control: this.options.registry.grantsControl("service", definition.capability) ? this : undefined,
+      control: this.registry.grantsControl("service", definition.capability) ? this : undefined,
       logger: this.capabilityLogger("service", definition.capability)
     };
     await new Constructor().run(context);
@@ -709,7 +748,7 @@ export class Runtime {
       }
       throw error;
     }
-    const Constructor = this.options.registry.getAction(capability);
+    const Constructor = this.registry.getAction(capability);
     const hook = await loadHook(specification.hook, this.catalog.path);
     const decision = hook
       ? normalizeHookResult(await hook({ config: specification.config, emission, signal }), specification.config)
@@ -721,7 +760,7 @@ export class Runtime {
       session,
       signal,
       sessions: this.options.sessions.access(session),
-      control: this.options.registry.grantsControl("action", capability) ? this : undefined,
+      control: this.registry.grantsControl("action", capability) ? this : undefined,
       logger: this.capabilityLogger("action", capability),
       emission,
       spawn: (task) => this.track(task.then(() => undefined))
@@ -762,7 +801,7 @@ export class Runtime {
   }
 
   private capabilityLogger(kind: "action" | "trigger" | "service", capability: string): RuntimeLogger {
-    const scope = this.options.registry.scopeOf(kind, capability) ?? capability;
+    const scope = this.registry.scopeOf(kind, capability) ?? capability;
     return this.options.logger.child(scope);
   }
 
@@ -832,7 +871,7 @@ export class Runtime {
   }
 
   private validator(kind: "action" | "trigger" | "service", name: string): ConfigValidator | undefined {
-    return this.options.registry.validatorOf(kind, name);
+    return this.registry.validatorOf(kind, name);
   }
 
   private configDirty(): boolean {

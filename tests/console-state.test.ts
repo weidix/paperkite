@@ -21,6 +21,7 @@ const fakeSessions = {
   ensure: async () => undefined,
   access: () => ({ run: async (operation: (client: unknown) => unknown) => operation(undefined) }),
   closeAll: async () => undefined,
+  reset: async () => undefined,
   subscribe: () => () => undefined,
   state: () => undefined,
   states: () => []

@@ -29,6 +29,7 @@ class FakeSessionPool {
 
   async ensure(): Promise<void> {}
   async closeAll(): Promise<void> {}
+  async reset(): Promise<void> {}
 
   state(name: string): string | undefined {
     return this.statesMap.get(name);
