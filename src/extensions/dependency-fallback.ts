@@ -37,9 +37,14 @@ export function moduleFallbackDirectory(): string {
   return join(profilesDirectory(), "node_modules");
 }
 
+/** core 安装的依赖闭包；只服务于镜像与 pruneFallback。 */
+export function coreClosurePackages(root = coreRoot()): readonly string[] {
+  return [...coreDependencyClosure(join(root, "package.json")).links.keys()].sort();
+}
+
 /** core 持有的运行期包名集合；新增共享包时先把包加进 core 的 dependencies。 */
 export function hostOwnedPackages(root = coreRoot()): readonly string[] {
-  return [...coreDependencyClosure(join(root, "package.json")).links.keys()].sort();
+  return coreClosurePackages(root);
 }
 
 /** 从 core 的安装清单出发，逐层读取各包声明的 dependencies。 */

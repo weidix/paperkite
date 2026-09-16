@@ -14,7 +14,7 @@ import type {
 } from "@paperkite/sdk";
 import { CapabilityRegistry } from "./registry.js";
 import { bundleRanges, profileDirectory, readProfile, userPlugins } from "./profile.js";
-import { hostOwnedPackages } from "./dependency-fallback.js";
+import { HOST_OWNED_PACKAGES } from "./host-owned.js";
 import { evaluateCompatibility, sdkDeclarations, type CompatibilityVerdict } from "./abi.js";
 import { satisfiesRange } from "./semver.js";
 
@@ -50,9 +50,9 @@ export interface PluginReport {
   readonly deviations: readonly PluginDeviation[];
 }
 
-/** 三层共用的 host-owned 枚举与清单同源，来自 core 的依赖闭包。 */
-export function hostOwnedNames(root?: string): readonly string[] {
-  return hostOwnedPackages(root);
+/** 必须与 core 共用同一份模块实例的包：对象身份判定依赖共用实例。 */
+export function hostOwnedNames(): readonly string[] {
+  return HOST_OWNED_PACKAGES;
 }
 
 /** core 安装自身的插件不产生 profile 侧诊断。 */
@@ -322,6 +322,23 @@ function canonicalPath(path: string): string {
   }
 }
 
+/** peer 点名的 host-owned 包解析到 profile 副本时拒绝加载：该包按实例身份共享。 */
+function shadowedHostOwned(
+  directory: string,
+  manifest: PackageManifest,
+  names: readonly string[],
+  core: string
+): readonly string[] {
+  const peers = manifest.peerDependencies ?? {};
+  return names.filter((name) => {
+    if (typeof peers[name] !== "string") return false;
+    const resolved = resolveFrom(directory, name);
+    const expected = resolveFrom(core, name);
+    if (!resolved || !expected) return false;
+    return canonicalPath(resolved) !== canonicalPath(expected);
+  });
+}
+
 /** 加载期诊断文本：列出插件、包名与命中字段。 */
 export function deviationWarning(plugin: string, deviation: PluginDeviation): string {
   const field = deviation.field ? " (" + deviation.field + ")" : "";
@@ -474,7 +491,20 @@ async function inspectPlugin(
       ? diagnosePlugin(dirname(packageFile), manifest, owned, coreRoot(), profile)
       : CLEAN_REPORT;
     const shared = Object.keys(manifest.peerDependencies ?? {}).filter((name) => owned.includes(name)).sort();
+    const shadowed = shadowedHostOwned(dirname(packageFile), manifest, owned, coreRoot());
     const diagnoses = report.deviations.map((deviation) => deviationWarning(request.name, deviation));
+    if (shadowed.length) {
+      return {
+        ...base,
+        version,
+        capabilities,
+        compatibility,
+        shared,
+        report,
+        error: "plugin " + request.name + " resolves host-owned packages outside the core installation: " +
+          shadowed.join(", ")
+      };
+    }
     if (strict && report.verdict === "reject") {
       return {
         ...base,
