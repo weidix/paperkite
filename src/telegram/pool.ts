@@ -10,7 +10,7 @@ import { SessionUnavailableError } from "../engine/errors.js";
 import type { AppSettings } from "../config/settings.js";
 import { createGramClient, type SessionClient } from "./client.js";
 import { classifySessionFailure } from "./failure.js";
-import { normalizeSessionName, readSessionFile, writeSessionFile } from "./session-files.js";
+import { normalizeSessionName, readSessionFile, tightenSessionFiles, writeSessionFile } from "./session-files.js";
 
 export interface SessionStateInfo {
   readonly name: string;
@@ -62,6 +62,7 @@ export class SessionPool {
   private readonly listeners = new Set<SessionStateListener>();
   private readonly guard: GuardSettings;
   private closed = false;
+  private tightened = false;
 
   constructor(
     private readonly settings: AppSettings,
@@ -85,6 +86,10 @@ export class SessionPool {
   }
 
   async ensure(names: Iterable<string>): Promise<void> {
+    if (!this.tightened) {
+      this.tightened = true;
+      await tightenSessionFiles(this.settings.telegram.sessionsDir);
+    }
     const pending: Entry[] = [];
     for (const name of new Set([...names].map((value) => normalizeSessionName(value)))) {
       const existing = this.entries.get(name);
@@ -155,6 +160,11 @@ export class SessionPool {
   async closeAll(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    await this.reset();
+    this.listeners.clear();
+  }
+
+  async reset(): Promise<void> {
     const entries = [...this.entries.values()];
     this.entries.clear();
     for (const entry of entries) {
@@ -163,7 +173,6 @@ export class SessionPool {
       await entry.tail;
       await this.disposeClient(entry);
     }
-    this.listeners.clear();
   }
 
   private createEntry(name: string): Entry {

@@ -1,3 +1,4 @@
+import { chmod, stat } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import assert from "node:assert/strict";
 import { SessionUnavailableError } from "../src/engine/errors.js";
 import { SessionPool } from "../src/telegram/pool.js";
 import { createGramLogger, type SessionClient } from "../src/telegram/client.js";
-import { writeSessionFile } from "../src/telegram/session-files.js";
+import { tightenSessionFiles, writeSessionFile } from "../src/telegram/session-files.js";
 import { DEFAULT_PLUGIN_SETTINGS, type AppSettings } from "../src/config/settings.js";
 import type { RuntimeLogger } from "@paperkite/sdk";
 
@@ -236,4 +237,36 @@ test("startup with a missing session isolates it and reports the login command",
     return true;
   });
   await pool.closeAll();
+});
+
+test("reset reconnects sessions and keeps state listeners", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-reset-"));
+  const settings: AppSettings = {
+    telegram: { apiId: 1, apiHash: "hash", sessionsDir: directory },
+    logging: { level: "error", directory },
+    plugins: DEFAULT_PLUGIN_SETTINGS
+  };
+  await writeSessionFile(directory, "primary", "saved");
+  const pool = new SessionPool(settings, makeLogger(), () => workingClient());
+  const seen: string[] = [];
+  pool.subscribe((change) => seen.push(change.state));
+  await pool.ensure(["primary"]);
+  assert.equal(pool.state("primary"), "connected");
+  await pool.reset();
+  await pool.ensure(["primary"]);
+  assert.equal(pool.state("primary"), "connected");
+  assert.ok(seen.filter((state) => state === "connected").length >= 2);
+  await pool.closeAll();
+});
+
+test("session files land with owner-only permissions", async () => {
+  if (process.platform === "win32") return;
+  const directory = await mkdtemp(join(tmpdir(), "paperkite-perms-"));
+  await writeSessionFile(directory, "primary", "saved");
+  const mode = (await stat(join(directory, "primary.session"))).mode & 0o777;
+  assert.equal(mode, 0o600);
+  await chmod(join(directory, "primary.session"), 0o644);
+  await tightenSessionFiles(directory);
+  const tightened = (await stat(join(directory, "primary.session"))).mode & 0o777;
+  assert.equal(tightened, 0o600);
 });

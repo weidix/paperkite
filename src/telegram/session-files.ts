@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 export function normalizeSessionName(value: string): string {
@@ -25,8 +25,23 @@ export async function readSessionFile(directory: string, name: string): Promise<
 }
 
 export async function writeSessionFile(directory: string, name: string, value: string): Promise<void> {
-  await mkdir(directory, { recursive: true });
-  await writeFile(sessionFilePath(directory, name), value, "utf8");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const path = sessionFilePath(directory, name);
+  await writeFile(path, value, { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600).catch(() => undefined);
+}
+
+export async function tightenSessionFiles(directory: string): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(directory);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith(".session")) continue;
+    await chmod(join(directory, entry), 0o600).catch(() => undefined);
+  }
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
