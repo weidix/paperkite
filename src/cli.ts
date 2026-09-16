@@ -228,6 +228,31 @@ program
   });
 
 program
+  .command("version")
+  .description("show the running build identity")
+  .action(async () => {
+    const { execFileSync } = await import("node:child_process");
+    let git = "";
+    try {
+      git = execFileSync("git", ["describe", "--tags", "--always", "--dirty"], {
+        cwd: coreRoot(),
+        encoding: "utf8"
+      }).trim();
+    } catch {
+      git = "";
+    }
+    try {
+      const snapshot = await requestControl<{ build?: Record<string, unknown>; pid?: number }>({ action: "snapshot" });
+      process.stdout.write(JSON.stringify({ ...(snapshot.build ?? {}), git, pid: snapshot.pid }, null, 2) + "\n");
+    } catch {
+      const source = process.argv[1]?.endsWith(".ts") ? "src" : "dist";
+      process.stdout.write(
+        JSON.stringify({ version: manifest.version, root: coreRoot(), source, git, running: false }, null, 2) + "\n"
+      );
+    }
+  });
+
+program
   .command("run")
   .description("start configured triggers, schedules, and services")
   .option("--profile <name>", "profile name", "default")

@@ -2,6 +2,7 @@ import type {
   ActionContext,
   ActionSpecInput,
   ActionSpecView,
+  BuildInfo,
   ConfigValidator,
   FlowKind,
   FlowLastStop,
@@ -48,6 +49,7 @@ export interface RuntimeOptions {
   readonly sessions: SessionPool;
   readonly logger: AppLogger;
   readonly installed: readonly PluginInfo[];
+  readonly build?: BuildInfo;
   readonly markUsed?: (references: ReadonlySet<string>) => readonly PluginInfo[];
   readonly reloadCatalog?: () => Promise<FlowCatalog>;
   readonly reloadExtensions?: (references: ReadonlySet<string>) => Promise<ReloadedExtensions>;
@@ -74,6 +76,7 @@ export class Runtime {
   private catalog: FlowCatalog;
   private registry: CapabilityRegistry;
   private installed: readonly PluginInfo[];
+  private build: BuildInfo;
   private markUsed: ((references: ReadonlySet<string>) => readonly PluginInfo[]) | undefined;
   private configBaseline: ConfigBaseline | undefined;
   private lifecycle = new AbortController();
@@ -86,6 +89,7 @@ export class Runtime {
     this.catalog = options.catalog;
     this.registry = options.registry;
     this.installed = options.installed;
+    this.build = options.build ?? { version: "0.0.0", root: process.cwd(), source: "dist" };
     this.markUsed = options.markUsed;
     this.configBaseline = readBaseline(options.catalog.path);
     options.sessions.subscribe((change) => this.handleSessionChange(change));
@@ -98,6 +102,7 @@ export class Runtime {
       uptimeSeconds: this.started ? (Date.now() - this.startedAt) / 1000 : 0,
       configDirty: this.configDirty(),
       flowsFile: this.catalog.path,
+      build: this.build,
       triggers: this.catalog.enabled("trigger").map((item) => item.id),
       services: this.catalog.enabled("service").map((item) => item.id),
       schedules: this.catalog.enabled("schedule").map((item) => item.id),

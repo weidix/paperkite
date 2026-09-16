@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { loadCatalog } from "./config/loader.js";
 import { loadSettings, type AppSettings } from "./config/settings.js";
 import { defaultFlowsFile, defaultSettingsFile, paperkiteHome } from "./config/paths.js";
@@ -28,6 +30,10 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
   const catalog = await loadCatalog(flowsFile);
   const logger = new AppLogger(settings.logging.level, settings.logging.directory);
   configureTelegramClientFactory(settings, logger);
+  const root = coreRoot();
+  if (root !== process.cwd()) {
+    logger.warn(`running from ${root} while cwd is ${process.cwd()}; plugin paths resolve from the install root`);
+  }
   const heal = await healModuleFallback();
   for (const change of heal.changes) logger.debug(`shared fallback ${change.kind} ${change.name} -> ${change.target ?? "-"}`);
   for (const warning of heal.warnings) logger.warn(warning);
@@ -37,6 +43,11 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
   });
   for (const warning of extensions.warnings) logger.warn(warning);
   const sessions = new SessionPool(settings, logger);
+  const build = {
+    version: readCoreVersion(root),
+    root,
+    source: fileURLToPath(import.meta.url).endsWith(".ts") ? "src" as const : "dist" as const
+  };
   return {
     settings,
     logger,
@@ -46,11 +57,21 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Paperki
       sessions,
       logger,
       installed: extensions.installed,
+      build,
       markUsed: createUsageMarker(extensions.installed),
       reloadCatalog: () => loadCatalog(flowsFile),
       reloadExtensions: (references) => loadExtensions(references, { profile: options.profile, strict: settings.plugins.strict })
     })
   };
+}
+
+function readCoreVersion(root: string): string {
+  try {
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version?: unknown };
+    return typeof manifest.version === "string" ? manifest.version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
 }
 
 export function defaultLockFile(): string {

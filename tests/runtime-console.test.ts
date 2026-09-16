@@ -47,6 +47,7 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       schedules: [],
       activeServices: ["console"],
       activeActions: [],
+      build: { version: "0.0.0", root: "/tmp", source: "src" as const },
       sessions: [],
       flows: [
         {

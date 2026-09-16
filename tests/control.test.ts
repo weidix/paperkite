@@ -15,6 +15,7 @@ const EMPTY_SNAPSHOT = {
   schedules: [],
   activeServices: [],
   activeActions: [],
+  build: { version: "0.0.0", root: "/tmp", source: "src" as const },
   sessions: [],
   flows: [],
   logs: []

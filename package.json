@@ -41,7 +41,8 @@
     "start": "node dist/src/cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r typecheck",
     "test": "tsx --test tests/*.test.ts",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "deploy": "pnpm build && launchctl kickstart -k gui/$(id -u)/com.wei.paperkite"
   },
   "dependencies": {
     "commander": "^15.0.0",

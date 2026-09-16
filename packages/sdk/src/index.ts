@@ -202,6 +202,12 @@ export interface ActiveActionView {
   readonly startedAt: string;
 }
 
+export interface BuildInfo {
+  readonly version: string;
+  readonly root: string;
+  readonly source: "dist" | "src";
+}
+
 export interface RuntimeSnapshot {
   readonly running: boolean;
   readonly pid: number;
@@ -216,6 +222,7 @@ export interface RuntimeSnapshot {
   readonly sessions: readonly SessionSnapshot[];
   readonly flows: readonly FlowSnapshot[];
   readonly logs: readonly LogScopeInfo[];
+  readonly build: BuildInfo;
 }
 
 export interface ActionSpecInput {
