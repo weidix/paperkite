@@ -347,6 +347,7 @@ export class Runtime {
       const sessions = this.options.sessions as Partial<SessionPool> & { closeAll(): Promise<void> };
       if (typeof sessions.reset === "function") await sessions.reset();
       else await sessions.closeAll();
+      await this.options.logger.flush?.();
     })();
     this.stopping = stopping;
     await stopping;

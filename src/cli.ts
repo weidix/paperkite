@@ -130,6 +130,7 @@ service
       control = await startControlServer(runningApp.runtime);
       await waitForSignals(async () => {
         await runningApp.runtime.stop();
+        await runningApp.logger.flush();
         await control?.close();
         await lock.release();
       });
@@ -247,6 +248,7 @@ program
       control = await startControlServer(runningApp.runtime);
       await waitForSignals(async () => {
         await runningApp.runtime.stop();
+        await runningApp.logger.flush();
         await control?.close();
         await lock.release();
       });
