@@ -13,7 +13,7 @@ export function createArchiveStore(options: ArchiveStoreOptions = {}): ArchiveSt
     const file = url.slice("sqlite:".length) || "data/archive.db";
     return new SqliteArchiveStore(resolve(file));
   }
-  return new PostgresArchiveStore(url, options.schema ?? "public");
+  return new PostgresArchiveStore(url, options.schema ?? "public", options);
 }
 
 export function resolveBackend(url: string | undefined): "sqlite" | "postgres" {

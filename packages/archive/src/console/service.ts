@@ -10,6 +10,9 @@ import { createArchiveStore, resolveBackend } from "../storage/index.js";
 export interface ArchiveConsoleWebConfig {
   readonly url?: string;
   readonly schema?: string;
+  readonly poolSize?: number;
+  readonly connectTimeoutMs?: number;
+  readonly statementTimeoutMs?: number;
   /** 落盘媒体的解析根目录；相对路径的 file_path 以此为基准。 */
   readonly mediaDir?: string;
   readonly host?: string;
@@ -22,7 +25,10 @@ export class ArchiveConsoleWebService implements ServiceHandler<ArchiveConsoleWe
     const config = ctx.config ?? {};
     const store = createArchiveStore({
       url: config.url,
-      schema: config.schema
+      schema: config.schema,
+      poolSize: config.poolSize,
+      connectTimeoutMs: config.connectTimeoutMs,
+      statementTimeoutMs: config.statementTimeoutMs
     });
     const server = createArchiveConsoleServer({
       store,

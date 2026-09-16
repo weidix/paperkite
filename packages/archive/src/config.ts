@@ -9,6 +9,9 @@ export interface ArchiveTarget {
 export interface ArchiveConfig {
   readonly url?: string;
   readonly schema?: string;
+  readonly poolSize?: number;
+  readonly connectTimeoutMs?: number;
+  readonly statementTimeoutMs?: number;
   readonly chats?: unknown;
   readonly chat?: string | number;
   readonly daysBack?: number;
