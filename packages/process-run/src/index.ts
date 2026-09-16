@@ -25,12 +25,14 @@ export class ProcessRunAction implements ActionHandler<CommandConfig> {
           cwd: config.cwd ? resolve(config.cwd) : process.cwd(),
           env: { ...process.env, ...config.env },
           shell: true,
+          detached: true,
           stdio: ["ignore", "pipe", "pipe"]
         })
       : spawn(program, args, {
           cwd: config.cwd ? resolve(config.cwd) : process.cwd(),
           env: { ...process.env, ...config.env },
           shell,
+          detached: true,
           stdio: ["ignore", "pipe", "pipe"]
         });
     let stdout = "";
@@ -46,7 +48,7 @@ export class ProcessRunAction implements ActionHandler<CommandConfig> {
 
     const result = await waitForProcess(child, timeoutMs, ctx.signal);
     if (result.error) throw result.error;
-    if (result.timedOut) throw new Error(`command timed out after ${timeoutMs}ms: ${program}`);
+    if (result.timedOut) throw new Error(`command timed out after ${timeoutMs}ms and was SIGKILLed: ${program}`);
     if (result.aborted) return;
     if (result.code !== 0) {
       throw new Error(`command exited with ${String(result.code)}: ${stderr.trim() || stdout.trim()}`);
@@ -133,18 +135,27 @@ async function waitForProcess(
     let settled = false;
     let timedOut = false;
     let aborted = false;
+    let escalation: NodeJS.Timeout | undefined;
+
+    const terminate = (): void => {
+      if (escalation) return;
+      killTree(child, "SIGTERM");
+      escalation = setTimeout(() => killTree(child, "SIGKILL"), TERMINATE_GRACE_MS);
+      escalation.unref();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      terminate();
     }, timeoutMs);
     const onAbort = (): void => {
       aborted = true;
-      child.kill("SIGTERM");
+      terminate();
     };
     const finish = (result: ProcessResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (escalation) clearTimeout(escalation);
       signal.removeEventListener("abort", onAbort);
       resolve(result);
     };
@@ -153,4 +164,20 @@ async function waitForProcess(
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+const TERMINATE_GRACE_MS = 5_000;
+
+function killTree(child: ReturnType<typeof spawn>, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // 进程已经退出
+    }
+  }
 }
