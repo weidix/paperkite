@@ -8,6 +8,7 @@ export interface RuntimeLogger {
   warn(message: string, ...values: unknown[]): void;
   error(message: string, ...values: unknown[]): void;
   child(scope: string): RuntimeLogger;
+  flush?(): Promise<void>;
 }
 
 export interface TriggerEvent {
