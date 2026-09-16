@@ -21,7 +21,10 @@ export class ArchiveSyncAction implements ActionHandler<ArchiveConfig> {
 
     const store = createArchiveStore({
       url: config.url,
-      schema: config.schema
+      schema: config.schema,
+      poolSize: config.poolSize,
+      connectTimeoutMs: config.connectTimeoutMs,
+      statementTimeoutMs: config.statementTimeoutMs
     });
     const batchSize = Math.max(1, coerceInt(config.batchSize, 50));
     const archiver = new MessageArchiver({
@@ -41,6 +44,7 @@ export class ArchiveSyncAction implements ActionHandler<ArchiveConfig> {
       let totalMessages = 0;
       let totalMedia = 0;
       let totalSkipped = 0;
+      const failed: string[] = [];
       for (const target of targets) {
         ctx.logger.info(
           `archive chat=${target.chat} daysBack=${target.daysBack} maxMessages=${target.maxMessages} ` +
@@ -56,10 +60,13 @@ export class ArchiveSyncAction implements ActionHandler<ArchiveConfig> {
         totalMessages += result.messages;
         totalMedia += result.media;
         totalSkipped += result.skipped;
+        if (!result.ok) failed.push(String(target.chat) + ": " + (result.error ?? "unknown"));
       }
       ctx.logger.info(
-        `archive summary chats=${targets.length} messages=${totalMessages} media=${totalMedia} skipped=${totalSkipped}`
+        `archive summary chats=${targets.length} messages=${totalMessages} media=${totalMedia} ` +
+          `skipped=${totalSkipped} failed=${failed.length}`
       );
+      if (failed.length) throw new Error(`archive sync failed for ${failed.length} chat(s): ${failed.join("; ")}`);
     } finally {
       await store.close();
     }

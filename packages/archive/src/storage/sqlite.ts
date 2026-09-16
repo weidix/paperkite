@@ -180,7 +180,7 @@ export class SqliteArchiveStore implements ArchiveStore {
       .map(toBlockedUserInfo);
   }
 
-  /** 老库迁移：messages 补 blocked 标志列与 entities 实体列。 */
+  /** 老库迁移：messages 补 blocked 标志列与 entities 实体列，历史表补 error 列。 */
   private ensureLegacyColumns(): void {
     const columns = this.database.prepare("PRAGMA table_info(messages)").all() as readonly Record<string, unknown>[];
     const names = new Set(columns.map((column) => String(column.name)));
@@ -189,6 +189,11 @@ export class SqliteArchiveStore implements ArchiveStore {
     }
     if (!names.has("entities")) {
       this.database.exec("ALTER TABLE messages ADD COLUMN entities TEXT");
+    }
+    const history = this.database.prepare("PRAGMA table_info(sync_history)").all() as readonly Record<string, unknown>[];
+    const historyNames = new Set(history.map((column) => String(column.name)));
+    if (!historyNames.has("error")) {
+      this.database.exec("ALTER TABLE sync_history ADD COLUMN error TEXT");
     }
   }
 
@@ -251,6 +256,20 @@ export class SqliteArchiveStore implements ArchiveStore {
     `).run(new Date().toISOString(), messagesCount, mediaCount, sessionId);
   }
 
+  async failSyncSession(
+    sessionId: number,
+    messagesCount: number,
+    mediaCount: number,
+    error: string
+  ): Promise<void> {
+    if (sessionId < 0) return;
+    this.database.prepare(`
+      UPDATE sync_history
+         SET sync_completed_at = ?, messages_count = ?, media_count = ?, status = 'failed', error = ?
+       WHERE id = ?
+    `).run(new Date().toISOString(), messagesCount, mediaCount, error, sessionId);
+  }
+
   async getLastMessageInfo(chatId: string): Promise<LastMessageInfo | undefined> {
     const row = this.database.prepare(`
       SELECT message_id, date FROM messages
@@ -296,34 +315,44 @@ export class SqliteArchiveStore implements ArchiveStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const now = new Date().toISOString();
+    let inserted = 0;
+    for (const chunk of chunkOf(messages, SAVE_BATCH_CHUNK)) {
+      this.database.exec("BEGIN");
+      try {
+        for (const row of chunk) {
+          const result = messageStatement.run(
+            row.messageId,
+            row.chatId,
+            row.groupedId ?? null,
+            row.chatTitle ?? null,
+            row.senderId ?? null,
+            row.senderUsername ?? null,
+            row.senderFirstName ?? null,
+            row.senderLastName ?? null,
+            toIsoDate(row.date),
+            row.text,
+            entitiesJson(row.entities),
+            row.messageType ?? "text",
+            row.replyToMessageId ?? null,
+            row.forwardFromId ?? null,
+            row.forwardFromName ?? null,
+            row.hasMedia ? 1 : 0,
+            row.mediaType ?? null,
+            row.mediaFilePath ?? null,
+            now,
+            blockedOf(row, this.blockwords, this.blockedUsers) ? 1 : 0
+          );
+          inserted += Number(result.changes);
+        }
+        this.database.exec("COMMIT");
+      } catch (error) {
+        this.database.exec("ROLLBACK");
+        throw error;
+      }
+      await yieldToLoop();
+    }
     this.database.exec("BEGIN");
     try {
-      let inserted = 0;
-      for (const row of messages) {
-        const result = messageStatement.run(
-          row.messageId,
-          row.chatId,
-          row.groupedId ?? null,
-          row.chatTitle ?? null,
-          row.senderId ?? null,
-          row.senderUsername ?? null,
-          row.senderFirstName ?? null,
-          row.senderLastName ?? null,
-          toIsoDate(row.date),
-          row.text,
-          entitiesJson(row.entities),
-          row.messageType ?? "text",
-          row.replyToMessageId ?? null,
-          row.forwardFromId ?? null,
-          row.forwardFromName ?? null,
-          row.hasMedia ? 1 : 0,
-          row.mediaType ?? null,
-          row.mediaFilePath ?? null,
-          now,
-          blockedOf(row, this.blockwords, this.blockedUsers) ? 1 : 0
-        );
-        inserted += Number(result.changes);
-      }
       for (const row of media) {
         mediaStatement.run(
           row.messageId,
@@ -337,11 +366,12 @@ export class SqliteArchiveStore implements ArchiveStore {
         );
       }
       this.database.exec("COMMIT");
-      return { messages: inserted, media: media.length };
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
     }
+    await yieldToLoop();
+    return { messages: inserted, media: media.length };
   }
 
   async listBlockwords(): Promise<BlockwordState> {
@@ -486,6 +516,7 @@ export class SqliteArchiveStore implements ArchiveStore {
   }
 
   async searchStructured(query: ArchiveQuery): Promise<ArchiveSearchResult> {
+    await yieldToLoop();
     const { where: rowWhere, values: rowValues } = buildWhere(query);
     const { where: memberWhere, values: memberValues } = buildWhere(query, "g");
     const entry = buildSearchWhere(rowWhere, rowValues, memberWhere, memberValues);
@@ -915,6 +946,20 @@ function pairClause(column: string, pairs: readonly (readonly [string, string | 
 
 function pairValues(pairs: readonly (readonly [string, string | number])[]): (string | number)[] {
   return pairs.flatMap(([chatId, second]) => [chatId, second]);
+}
+
+const SAVE_BATCH_CHUNK = 200;
+
+async function yieldToLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function chunkOf<T>(rows: readonly T[], size: number): readonly (readonly T[])[] {
+  const chunks: (readonly T[])[] = [];
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function pushGrouped<T>(map: Map<string, T[]>, key: string, item: T): void {

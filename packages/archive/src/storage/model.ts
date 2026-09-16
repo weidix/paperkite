@@ -268,6 +268,9 @@ export interface ChatLedgerRow {
 export interface ArchiveStoreOptions {
   readonly url?: string;
   readonly schema?: string;
+  readonly poolSize?: number;
+  readonly connectTimeoutMs?: number;
+  readonly statementTimeoutMs?: number;
 }
 
 /** 屏蔽词快照：词表（已归一化小写）与内存缓存版本号。 */
@@ -305,6 +308,7 @@ export interface ArchiveStore {
   saveChat(chat: ChatRecord): Promise<boolean>;
   startSyncSession(chatId: string, startDate: string, endDate: string): Promise<number>;
   completeSyncSession(sessionId: number, messagesCount: number, mediaCount: number): Promise<void>;
+  failSyncSession(sessionId: number, messagesCount: number, mediaCount: number, error: string): Promise<void>;
   getLastMessageInfo(chatId: string): Promise<LastMessageInfo | undefined>;
   getChatUsername(chatId: string): Promise<string | undefined>;
   messageIdsExist(chatId: string, messageIds: readonly number[]): Promise<ReadonlySet<number>>;

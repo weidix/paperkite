@@ -58,6 +58,8 @@ export interface ArchiveResult {
   readonly messages: number;
   readonly media: number;
   readonly skipped: number;
+  readonly ok: boolean;
+  readonly error?: string;
 }
 
 export interface ArchiverDependencies {
@@ -116,7 +118,7 @@ export class MessageArchiver {
 
   async saveChatMessages(chatIdentifier: string | number, options: ArchiveRunOptions = {}): Promise<ArchiveResult> {
     const chatInfo = await this.findChat(chatIdentifier);
-    if (!chatInfo) return { messages: 0, media: 0, skipped: 0 };
+    if (!chatInfo) return { messages: 0, media: 0, skipped: 0, ok: false, error: "chat unresolved: " + chatIdentifier };
 
     await this.deps.store.saveChat(withHandleFallback(chatInfo, chatIdentifier));
 
@@ -147,9 +149,10 @@ export class MessageArchiver {
       );
       return asResult(counts);
     } catch (error) {
-      await this.deps.store.completeSyncSession(sessionId, counts.messages, counts.media);
-      this.deps.logger.warn("sync failed for " + chatIdentifier, error);
-      return asResult(counts);
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.deps.store.failSyncSession(sessionId, counts.messages, counts.media, detail);
+      this.deps.logger.error("sync failed for " + chatIdentifier, error);
+      return { ...asResult(counts), ok: false, error: detail };
     }
   }
 
@@ -515,7 +518,7 @@ interface MutableCounts {
 }
 
 function asResult(counts: MutableCounts): ArchiveResult {
-  return { messages: counts.messages, media: counts.media, skipped: counts.skipped };
+  return { messages: counts.messages, media: counts.media, skipped: counts.skipped, ok: true };
 }
 
 function budgetExhausted(budget: { remaining?: number }): boolean {

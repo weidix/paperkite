@@ -87,6 +87,9 @@ class CountingStore implements ArchiveStore {
   completeSyncSession(sessionId: number, messagesCount: number, mediaCount: number): Promise<void> {
     return this.inner.completeSyncSession(sessionId, messagesCount, mediaCount);
   }
+  failSyncSession(sessionId: number, messagesCount: number, mediaCount: number, error: string): Promise<void> {
+    return this.inner.failSyncSession(sessionId, messagesCount, mediaCount, error);
+  }
   getLastMessageInfo(chatId: string) { return this.inner.getLastMessageInfo(chatId); }
   getChatUsername(chatId: string) { return this.inner.getChatUsername(chatId); }
   messageIdsExist(chatId: string, messageIds: readonly number[]) { return this.inner.messageIdsExist(chatId, messageIds); }
@@ -165,7 +168,7 @@ test("archive batches stay bounded and pages descend by exclusive max id", async
   });
   try {
     const result = await h.archiver.saveChatMessages("@test_chat");
-    assert.deepEqual(result, { messages: 120, media: 0, skipped: 0 });
+    assert.deepEqual(result, { messages: 120, media: 0, skipped: 0, ok: true });
     // findChat 一次 + 每批一次取页（50/50/20）
     assert.equal(h.submissions, 4);
     assert.deepEqual(h.client.iterRequests.map((request) => request.maxId), [0, 71, 21]);
@@ -201,14 +204,14 @@ test("interrupted archive resumes incrementally without rescanning below the anc
     // 无新增消息时，增量只触及锚点行本身（跳过），更老的区域不再重扫
     h.stopAfterBatch = false;
     const second = await h.archiver.saveChatMessages("@test_chat");
-    assert.deepEqual(second, { messages: 0, media: 0, skipped: 1 });
+    assert.deepEqual(second, { messages: 0, media: 0, skipped: 1, ok: true });
 
     // 新增消息 121..130 从最新尾部补齐
     for (const id of [121, 122, 123, 124, 125, 126, 127, 128, 129, 130]) {
       h.client.messages.set(id, new FakeMessage(id));
     }
     const third = await h.archiver.saveChatMessages("@test_chat");
-    assert.deepEqual(third, { messages: 10, media: 0, skipped: 1 });
+    assert.deepEqual(third, { messages: 10, media: 0, skipped: 1, ok: true });
     const total = await h.store.searchStructured({});
     assert.equal(total.total, 60);
   } finally {
@@ -223,7 +226,7 @@ test("archive downloads media only for newly saved messages", async () => {
   });
   try {
     const first = await h.archiver.saveChatMessages("@test_chat");
-    assert.deepEqual(first, { messages: 80, media: 80, skipped: 0 });
+    assert.deepEqual(first, { messages: 80, media: 80, skipped: 0, ok: true });
     assert.equal(sumDownloads(h.client), 80);
 
     for (let id = 81; id <= 90; id++) {
@@ -263,14 +266,45 @@ test("archive grouped id is preserved on stored rows", async () => {
   }
 });
 
-test("archive returns zeros for a missing chat without touching the store", async () => {
+test("archive reports a missing chat as a failed result without touching the store", async () => {
   const h = await harness();
   try {
     const result = await h.archiver.saveChatMessages("missing");
-    assert.deepEqual(result, { messages: 0, media: 0, skipped: 0 });
+    assert.deepEqual(result, { messages: 0, media: 0, skipped: 0, ok: false, error: "chat unresolved: missing" });
     assert.equal(h.submissions, 1);
     const total = await h.store.searchStructured({});
     assert.equal(total.total, 0);
+  } finally {
+    await h.store.close();
+  }
+});
+
+test("archive marks the sync session failed and keeps the partial counts", async () => {
+  const h = await harness({ messages: [new FakeMessage(1)] });
+  try {
+    const failing = new MessageArchiver({
+      store: {
+        saveChat: (chat: never) => h.store.saveChat(chat),
+        getLastMessageInfo: (chatId: string) => h.store.getLastMessageInfo(chatId),
+        messageIdsExist: (chatId: string, ids: readonly number[]) => h.store.messageIdsExist(chatId, ids),
+        startSyncSession: (chatId: string, start: string, end: string) => h.store.startSyncSession(chatId, start, end),
+        completeSyncSession: (a: number, b: number, c: number) => h.store.completeSyncSession(a, b, c),
+        failSyncSession: (a: number, b: number, c: number, e: string) => h.store.failSyncSession(a, b, c, e),
+        saveBatch: async () => {
+          throw new Error("boom");
+        }
+      } as unknown as ArchiveStore,
+      mediaDir: h.tmp,
+      downloadMedia: false,
+      batchSize: 50,
+      shouldStop: () => false,
+      submit: (operation) => Promise.resolve(operation(h.client)),
+      chatIdOf: (entity) => String((entity as { id: number }).id),
+      logger
+    });
+    const result = await failing.saveChatMessages("@test_chat");
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /boom/);
   } finally {
     await h.store.close();
   }
