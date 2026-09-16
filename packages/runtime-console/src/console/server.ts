@@ -1,11 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fastify from "fastify";
+import { once } from "node:events";
 import type { Socket } from "node:net";
 import type { ActionSpecInput, FlowPatch, RuntimeControl, RuntimeEvent, RuntimeLogger } from "@paperkite/sdk";
 import { HttpError, isHttpError } from "./errors.js";
 import { tailFile } from "./logs.js";
 
 const MAX_BUFFERED_EVENTS = 2000;
+const MAX_PENDING_EVENTS = 1_000;
+const MAX_LIVE_CLIENTS = 32;
 
 export interface RuntimeConsoleServerOptions {
   readonly logger: RuntimeLogger;
@@ -178,19 +181,59 @@ async function streamEvents(
   reply.hijack();
   const raw = reply.raw;
   const socket = raw.socket;
+  if (liveSockets.size >= MAX_LIVE_CLIENTS) {
+    raw.writeHead(503, { "content-type": "text/plain" });
+    raw.end("too many live clients\n");
+    return;
+  }
   if (socket) liveSockets.add(socket);
-  raw.writeHead(200, EVENT_HEADERS);
-  raw.write("retry: 3000\n\n");
-  for (const event of bufferedEvents) raw.write(`data: ${JSON.stringify(event)}\n\n`);
-  const unsubscribe = control.subscribe((event) => {
-    raw.write(`data: ${JSON.stringify(event)}\n\n`);
-  });
-  const heartbeat = setInterval(() => raw.write(": keep-alive\n\n"), 15_000);
-  request.raw.once("close", () => {
-    clearInterval(heartbeat);
+
+  const pending: string[] = [];
+  let writing = false;
+  let closed = false;
+  let unsubscribe: () => void = () => undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
+
+  const drop = (): void => {
+    if (closed) return;
+    closed = true;
+    if (heartbeat) clearInterval(heartbeat);
     unsubscribe();
     if (socket) liveSockets.delete(socket);
-  });
+    raw.destroy();
+  };
+  const flush = async (): Promise<void> => {
+    if (writing || closed) return;
+    writing = true;
+    try {
+      while (pending.length && !closed) {
+        const chunk = pending.shift() as string;
+        if (!raw.write(chunk)) await once(raw, "drain");
+      }
+    } catch {
+      drop();
+    } finally {
+      writing = false;
+    }
+  };
+  const push = (chunk: string): void => {
+    if (closed) return;
+    if (pending.length >= MAX_PENDING_EVENTS) {
+      drop();
+      return;
+    }
+    pending.push(chunk);
+    void flush();
+  };
+
+  unsubscribe = control.subscribe((event) => push(`data: ${JSON.stringify(event)}\n\n`));
+  heartbeat = setInterval(() => push(": keep-alive\n\n"), 15_000);
+  raw.on("error", drop);
+  request.raw.once("close", drop);
+
+  raw.writeHead(200, EVENT_HEADERS);
+  raw.write("retry: 3000\n\n");
+  for (const event of bufferedEvents) push(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 function releaseIdleConnections(server: FastifyInstance): void {

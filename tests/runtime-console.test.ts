@@ -47,6 +47,7 @@ function stubRuntime(logs: RuntimeControl["snapshot"]["logs"] = []): {
       schedules: [],
       activeServices: ["console"],
       activeActions: [],
+      build: { version: "0.0.0", root: "/tmp", source: "src" as const },
       sessions: [],
       flows: [
         {
@@ -370,6 +371,28 @@ test("runtime console serves the SPA shell for direct deep links", async () => {
   } finally {
     controller.abort();
     await running;
+  }
+});
+
+test("a saturated live client is dropped instead of buffering forever", async () => {
+  const { runtime, emit } = stubRuntime();
+  const server = createRuntimeConsoleServer(runtime, { logger });
+  await server.listen({ host: "127.0.0.1", port: 0 });
+  const address = server.server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}`;
+  const controller = new AbortController();
+  try {
+    const response = await fetch(`${base}/api/events`, { signal: controller.signal });
+    assert.equal(response.status, 200);
+    await response.body?.cancel();
+    for (let index = 0; index < 1_200; index += 1) {
+      emit({ type: "schedule.fired", id: `s${index}`, at: "2026-09-02T08:00:00.000Z" });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    controller.abort();
+    await server.close();
   }
 });
 
