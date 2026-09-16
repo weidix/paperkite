@@ -21,6 +21,7 @@ interface PartialVersion {
   readonly minor?: number;
   readonly patch?: number;
   readonly prerelease: readonly (number | string)[];
+  readonly wildcard?: boolean;
 }
 
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -57,9 +58,10 @@ function parsePartial(text: string): PartialVersion | undefined {
   const match = PARTIAL_PATTERN.exec(text);
   if (!match) return undefined;
   const major = component(match[1]);
+  if (major === "*") return { major: 0, prerelease: [], wildcard: true };
+  if (typeof major !== "number") return undefined;
   const minor = component(match[2]);
   const patch = component(match[3]);
-  if (typeof major !== "number") return undefined;
   if (minor === undefined && match[2] !== undefined) return undefined;
   if (patch === undefined && match[3] !== undefined) return undefined;
   if (minor === "*" && typeof patch === "number") return undefined;
@@ -74,6 +76,10 @@ function parsePartial(text: string): PartialVersion | undefined {
 }
 
 function expand(op: string | undefined, partial: PartialVersion): ComparatorSet | undefined {
+  if (partial.wildcard) {
+    if (op === ">" || op === "<") return [{ op: "<", version: version(0, 0, 0, [0]) }];
+    return [{ op: ">=", version: version(0, 0, 0) }];
+  }
   const { major, minor, patch, prerelease } = partial;
   const atLeast = (): Comparator => ({
     op: ">=",
@@ -134,9 +140,12 @@ export function parseRange(text: string): Range | undefined {
       const from = parsePartial(hyphen[1]);
       const to = parsePartial(hyphen[2]);
       if (!from || !to) return undefined;
-      const lower = expand(">=", from);
-      const upper = expand("<=", to);
-      if (!lower || !upper) return undefined;
+      const lower: ComparatorSet = from.wildcard ? [] : (expand(">=", from) ?? []);
+      const upper: ComparatorSet = to.wildcard ? [] : (expand("<=", to) ?? []);
+      if (!lower.length && !upper.length) {
+        sets.push([{ op: ">=", version: version(0, 0, 0) }]);
+        continue;
+      }
       sets.push([...lower, ...upper]);
       continue;
     }
@@ -148,18 +157,32 @@ export function parseRange(text: string): Range | undefined {
       if (!match?.[2]) return undefined;
       const partial = parsePartial(match[2]);
       if (!partial) return undefined;
+      if (partial.wildcard && !match[1]) continue;
       const expanded = expand(match[1], partial);
       if (!expanded) return undefined;
       comparators.push(...expanded);
     }
-    if (!comparators.length) return undefined;
+    if (!comparators.length) {
+      comparators.push({ op: ">=", version: version(0, 0, 0) });
+    }
     sets.push(comparators);
   }
   return sets.length ? sets : undefined;
 }
 
 export function satisfies(range: Range, current: Version): boolean {
-  return range.some((set) => set.every((comparator) => holds(comparator, current)));
+  return range.some((set) => admits(set, current) && set.every((comparator) => holds(comparator, current)));
+}
+
+function admits(set: ComparatorSet, current: Version): boolean {
+  if (!current.prerelease.length) return true;
+  return set.some(
+    (comparator) =>
+      comparator.version.prerelease.length > 0 &&
+      comparator.version.major === current.major &&
+      comparator.version.minor === current.minor &&
+      comparator.version.patch === current.patch
+  );
 }
 
 function holds(comparator: Comparator, current: Version): boolean {

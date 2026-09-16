@@ -29,6 +29,18 @@ export interface DependencyManifest {
 
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies"] as const;
 
+/** 宽松声明不构成版本约束：通配符、latest/next、workspace/file 协议与无法解析的文本。 */
+function isLenientDeclaration(text: string): boolean {
+  const value = text.trim();
+  if (!value || ["*", "x", "X", "latest", "next"].includes(value)) return true;
+  if (/^(workspace|file|link|portal|npm|jsr|http|https|git|github|gitlab):/.test(value)) return true;
+  const range = parseRange(value);
+  return range !== undefined && range.some((set) =>
+    set.length === 1 && set[0]?.op === ">=" && set[0].version.major === 0 &&
+    set[0].version.minor === 0 && set[0].version.patch === 0 && set[0].version.prerelease.length === 0
+  );
+}
+
 export function sdkDeclarations(manifest: DependencyManifest): readonly string[] {
   const declarations: string[] = [];
   for (const field of DEPENDENCY_FIELDS) {
@@ -49,6 +61,7 @@ export function evaluateCompatibility(
   policy: CoreAbiPolicy = CORE_POLICY
 ): CompatibilityVerdict {
   const declared = declarations
+    .filter((text) => !isLenientDeclaration(text))
     .map((text) => ({ text, range: parseRange(text) }))
     .filter((entry): entry is { text: string; range: Range } => entry.range !== undefined);
   if (!declared.length) return { verdict: "load" };
