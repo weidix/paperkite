@@ -24,17 +24,30 @@ export function controlPath(): string {
   return join(paperkiteHome(), "control.sock");
 }
 
+const CONTROL_TIMEOUTS: Readonly<Record<string, number>> = {
+  "runtime.reload": 120_000,
+  "flow.reload": 60_000,
+  "flow.run": 0,
+  "service.start": 60_000,
+  "service.stop": 60_000,
+  "session.reconnect": 60_000
+};
+const DEFAULT_CONTROL_TIMEOUT_MS = 10_000;
+
 export async function startControlServer(runtime: RuntimeControl, path = controlPath()): Promise<ControlServer> {
   if (process.platform !== "win32") {
     await mkdir(dirname(path), { recursive: true });
     await unlink(path).catch(() => undefined);
   }
-  const server = createServer((socket) => handleConnection(socket, runtime));
+  const server = createServer((socket) => {
+    socket.on("error", () => undefined);
+    void handleConnection(socket, runtime);
+  });
   await listen(server, path);
   if (process.platform !== "win32") await chmod(path, 0o600).catch(() => undefined);
   return {
     close: async () => {
-      server.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       await unlink(path).catch(() => undefined);
     }
   };
@@ -43,19 +56,17 @@ export async function startControlServer(runtime: RuntimeControl, path = control
 export async function requestControl<T = unknown>(
   request: ControlRequest,
   path = controlPath(),
-  timeoutMs = 3_000
+  timeoutMs = CONTROL_TIMEOUTS[request.action ?? ""] ?? DEFAULT_CONTROL_TIMEOUT_MS
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const socket = createConnection(path);
     const input = createInterface({ input: socket, crlfDelay: Infinity });
-    const timer = setTimeout(() => {
-      socket.destroy(new Error("control request timed out"));
-    }, timeoutMs);
+    const timer = timeoutMs > 0 ? setTimeout(() => socket.destroy(new Error("control request timed out; the server may still be running it, check with service status")), timeoutMs) : undefined;
     let settled = false;
     const finish = (error: Error | undefined, value?: T): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       input.close();
       socket.destroy();
       if (error) reject(error);
@@ -76,6 +87,7 @@ export async function requestControl<T = unknown>(
 }
 
 async function handleConnection(socket: Socket, runtime: RuntimeControl): Promise<void> {
+  socket.on("error", () => undefined);
   const input = createInterface({ input: socket, crlfDelay: Infinity });
   for await (const line of input) {
     let response: { ok: boolean; result?: unknown; error?: string };
@@ -84,7 +96,12 @@ async function handleConnection(socket: Socket, runtime: RuntimeControl): Promis
     } catch (error) {
       response = { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-    socket.write(JSON.stringify(response) + "\n");
+    if (socket.destroyed) break;
+    try {
+      socket.write(JSON.stringify(response) + "\n");
+    } catch {
+      break;
+    }
   }
   socket.end();
 }

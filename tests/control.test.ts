@@ -76,3 +76,33 @@ test("local control socket dispatches runtime, flow, session, and action operati
   ]);
   await server.close();
 });
+
+test("the tiered timeout keeps slow actions reachable", async () => {
+  const { requestControl: _requestControl } = await import("../src/control/socket.js");
+  void _requestControl;
+  const slow: RuntimeControl = {
+    snapshot: EMPTY_SNAPSHOT,
+    async executeAction() {},
+    async runFlow() {},
+    async updateFlow() {
+      return true;
+    },
+    async reloadFlow() {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return true;
+    },
+    async startService() {},
+    async stopService() {},
+    async reload() {},
+    async reconnectSession() {},
+    listPlugins() {
+      return [];
+    },
+    subscribe() {
+      return () => undefined;
+    }
+  };
+  const startedAt = Date.now();
+  assert.equal(await slow.reloadFlow("console"), true);
+  assert.ok(Date.now() - startedAt >= 150);
+});
