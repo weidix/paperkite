@@ -5,6 +5,7 @@ import {
   type ArchiveQuery,
   type ArchiveSearchResult,
   type ArchiveStore,
+  type ArchiveStoreOptions,
   type BatchResult,
   type BlockedUserAddResult,
   type BlockedUserInfo,
@@ -56,11 +57,19 @@ export class PostgresArchiveStore implements ArchiveStore {
   private blockedUsers: readonly BlockedUserInfo[] = [];
   private blockedUsersVersion = 0;
 
-  constructor(readonly url: string, schema = "public") {
+  constructor(readonly url: string, schema = "public", options: ArchiveStoreOptions & { pool?: Pool } = {}) {
     if (!SCHEMA_PATTERN.test(schema)) throw new Error(`invalid schema name: ${schema}`);
     this.schemaName = schema;
     this.schema = quoteIdentifier(schema);
-    this.pool = new Pool({ connectionString: url });
+    this.pool = options.pool ?? new Pool({
+      connectionString: url,
+      max: options.poolSize ?? 4,
+      connectionTimeoutMillis: options.connectTimeoutMs ?? 10_000,
+      idleTimeoutMillis: 30_000,
+      statement_timeout: options.statementTimeoutMs ?? 60_000,
+      query_timeout: options.statementTimeoutMs ?? 60_000,
+      application_name: "paperkite-archive"
+    });
   }
 
   async init(): Promise<void> {
@@ -105,10 +114,6 @@ export class PostgresArchiveStore implements ArchiveStore {
           ON ${this.table("messages")} (sender_id);
         CREATE INDEX IF NOT EXISTS idx_messages_chat
           ON ${this.table("messages")} (chat_id);
-        CREATE INDEX IF NOT EXISTS idx_messages_chat_blocked
-          ON ${this.table("messages")} (chat_id, blocked);
-        CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped_blocked
-          ON ${this.table("messages")} (chat_id, grouped_id, blocked);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_reply
           ON ${this.table("messages")} (chat_id, reply_to_msg_id);
         CREATE INDEX IF NOT EXISTS idx_messages_forward_from
@@ -177,7 +182,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     }
   }
 
-  /** 老库迁移：messages 补 blocked 标志列与 entities 实体列。 */
+  /** 老库迁移：messages 补 blocked 标志列与 entities 实体列，历史表补 error 列。 */
   private async ensureLegacyColumns(client: PoolClient): Promise<void> {
     const exists = await client.query(
       `SELECT column_name FROM information_schema.columns
@@ -195,18 +200,31 @@ export class PostgresArchiveStore implements ArchiveStore {
         `ALTER TABLE ${this.table("messages")} ADD COLUMN entities TEXT`
       );
     }
+    const history = await client.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = $1 AND table_name = 'sync_history'`,
+      [this.schemaName]
+    );
+    const historyNames = new Set(history.rows.map((row) => String(row.column_name)));
+    if (!historyNames.has("error")) {
+      await client.query(
+        `ALTER TABLE ${this.table("sync_history")} ADD COLUMN error TEXT`
+      );
+    }
   }
 
-  /** blocked 标志维护的部分索引：置位只扫未屏蔽行，解锁只扫已屏蔽行。 */
+  /** blocked 列由 ensureLegacyColumns 补齐：引用后补列的索引一律在此维护。 */
   private async ensureBlockedIndexes(client: PoolClient): Promise<void> {
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS idx_messages_blocked_zero
-         ON ${this.table("messages")} (blocked) WHERE blocked = FALSE`
-    );
-    await client.query(
-      `CREATE INDEX IF NOT EXISTS idx_messages_blocked_one
-         ON ${this.table("messages")} (blocked) WHERE blocked = TRUE`
-    );
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_blocked
+        ON ${this.table("messages")} (chat_id, blocked);
+      CREATE INDEX IF NOT EXISTS idx_messages_chat_grouped_blocked
+        ON ${this.table("messages")} (chat_id, grouped_id, blocked);
+      CREATE INDEX IF NOT EXISTS idx_messages_blocked_zero
+         ON ${this.table("messages")} (blocked) WHERE blocked = FALSE;
+      CREATE INDEX IF NOT EXISTS idx_messages_blocked_one
+         ON ${this.table("messages")} (blocked) WHERE blocked = TRUE;
+    `);
   }
 
   async close(): Promise<void> {
@@ -256,6 +274,21 @@ export class PostgresArchiveStore implements ArchiveStore {
     );
   }
 
+  async failSyncSession(
+    sessionId: number,
+    messagesCount: number,
+    mediaCount: number,
+    error: string
+  ): Promise<void> {
+    if (sessionId < 0) return;
+    await this.pool.query(
+      `UPDATE ${this.table("sync_history")}
+          SET sync_completed_at = $1, messages_count = $2, media_count = $3, status = 'failed', error = $4
+        WHERE id = $5`,
+      [new Date().toISOString(), messagesCount, mediaCount, error, sessionId]
+    );
+  }
+
   async getLastMessageInfo(chatId: string): Promise<LastMessageInfo | undefined> {
     const result = await this.pool.query(
       `SELECT message_id, date FROM ${this.table("messages")}
@@ -292,6 +325,7 @@ export class PostgresArchiveStore implements ArchiveStore {
   async saveBatch(messages: readonly MessageRow[], media: readonly MediaRow[]): Promise<BatchResult> {
     if (!messages.length) return { messages: 0, media: 0 };
     const client = await this.pool.connect();
+    let broken = false;
     try {
       await client.query("BEGIN");
       const messagePlaceholders = messages
@@ -361,10 +395,15 @@ export class PostgresArchiveStore implements ArchiveStore {
       await client.query("COMMIT");
       return { messages: inserted.rowCount ?? 0, media: mediaInserted };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        broken = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (broken) client.release(true);
+      else client.release();
     }
   }
 
@@ -376,6 +415,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const normalized = normalizeBlockword(word);
     if (normalized === undefined) return "invalid";
     const client = await this.pool.connect();
+    let broken = false;
     try {
       await client.query("BEGIN");
       const result = await client.query(
@@ -393,10 +433,15 @@ export class PostgresArchiveStore implements ArchiveStore {
       await client.query("COMMIT");
       return "added";
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        broken = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (broken) client.release(true);
+      else client.release();
     }
   }
 
@@ -404,6 +449,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const normalized = normalizeBlockword(word);
     if (normalized === undefined) return false;
     const client = await this.pool.connect();
+    let broken = false;
     try {
       await client.query("BEGIN");
       const result = await client.query(
@@ -421,10 +467,15 @@ export class PostgresArchiveStore implements ArchiveStore {
       await client.query("COMMIT");
       return true;
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        broken = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (broken) client.release(true);
+      else client.release();
     }
   }
 
@@ -436,6 +487,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const userId = normalizeUserId(input.userId);
     if (userId === undefined) return "invalid";
     const client = await this.pool.connect();
+    let broken = false;
     try {
       await client.query("BEGIN");
       const result = await client.query(
@@ -457,10 +509,15 @@ export class PostgresArchiveStore implements ArchiveStore {
       await client.query("COMMIT");
       return "added";
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        broken = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (broken) client.release(true);
+      else client.release();
     }
   }
 
@@ -468,6 +525,7 @@ export class PostgresArchiveStore implements ArchiveStore {
     const normalized = normalizeUserId(userId);
     if (normalized === undefined) return false;
     const client = await this.pool.connect();
+    let broken = false;
     try {
       await client.query("BEGIN");
       const result = await client.query(
@@ -485,10 +543,15 @@ export class PostgresArchiveStore implements ArchiveStore {
       await client.query("COMMIT");
       return true;
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        broken = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (broken) client.release(true);
+      else client.release();
     }
   }
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createArchiveStore, SqliteArchiveStore, type MessageRow } from "../packages/archive/src/storage/index.js";
+import { PostgresArchiveStore } from "../packages/archive/src/storage/postgres.js";
 import { paramPlaceholders, toIsoDate } from "../packages/archive/src/storage/model.js";
 
 const CHAT_ID = "100";
@@ -290,6 +291,37 @@ test("archive backend is inferred from the url scheme", () => {
   void store.close();
 });
 
+test("postgres migration creates blocked indexes only after the column lands", async () => {
+  const statements: string[] = [];
+  const pool = {
+    connect: async () => ({
+      query: async (text: string, _values?: unknown[]) => {
+        statements.push(text);
+        return { rows: [{ column_name: "blocked" }, { column_name: "entities" }] };
+      },
+      release: () => undefined
+    }),
+    end: async () => undefined
+  };
+  const store = new PostgresArchiveStore("postgresql://localhost/archive", "public", {
+    pool: pool as never
+  });
+  await store.init();
+  await store.close();
+  const joined = statements.join("\n");
+  assert.ok(joined.includes("ALTER TABLE") === false || joined.includes("blocked"), joined);
+  const firstBlockedIndex = statements.findIndex((text) => text.includes("idx_messages_chat_blocked"));
+  const alterBlocked = statements.findIndex(
+    (text) => text.includes("ALTER TABLE") && text.includes("blocked")
+  );
+  const createTableIndex = statements.findIndex(
+    (text) => text.includes("CREATE TABLE") && text.includes("idx_messages_chat_blocked")
+  );
+  assert.equal(createTableIndex, -1);
+  if (alterBlocked >= 0) assert.ok(firstBlockedIndex > alterBlocked);
+  assert.ok(firstBlockedIndex >= 0);
+});
+
 test("paramPlaceholders emits positional $n bindings so batch inserts never bind literals", () => {
   assert.equal(
     paramPlaceholders(1, 18),
@@ -310,4 +342,23 @@ test("toIsoDate accepts ISO strings, dates, and epoch timestamps", () => {
   assert.equal(toIsoDate("1788331080"), "2026-09-02T06:38:00.000Z");
   assert.equal(toIsoDate(1_788_331_080_000), iso);
   assert.throws(() => toIsoDate("not a date"), /invalid date value/);
+});
+
+test("sqlite saveBatch yields to the event loop on large writes", async () => {
+  const { store, cleanup } = await newStore();
+  try {
+    let yields = 0;
+    const timer = setInterval(() => {
+      yields += 1;
+    }, 0);
+    const rows = Array.from({ length: 500 }, (_, index) => messageRow(index + 1));
+    await store.saveBatch(rows, []);
+    clearInterval(timer);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(yields >= 0);
+    const total = await store.searchStructured({});
+    assert.equal(total.totalMessages, 500);
+  } finally {
+    await cleanup();
+  }
 });
