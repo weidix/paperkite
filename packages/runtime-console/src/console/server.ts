@@ -6,9 +6,10 @@ import type { ActionSpecInput, FlowPatch, RuntimeControl, RuntimeEvent, RuntimeL
 import { HttpError, isHttpError } from "./errors.js";
 import { tailFile } from "./logs.js";
 
-const MAX_BUFFERED_EVENTS = 2000;
+const MAX_BUFFERED_EVENTS = 200;
 const MAX_PENDING_EVENTS = 1_000;
 const MAX_LIVE_CLIENTS = 32;
+const REPLAY_CHUNK_BYTES = 64 * 1024;
 
 export interface RuntimeConsoleServerOptions {
   readonly logger: RuntimeLogger;
@@ -19,6 +20,8 @@ export function createRuntimeConsoleServer(
   options: RuntimeConsoleServerOptions
 ): FastifyInstance {
   const server = fastify({ logger: false });
+  server.server.requestTimeout = 0;
+  server.server.headersTimeout = 0;
   const liveSockets = new Set<Socket>();
   const bufferedEvents: RuntimeEvent[] = [];
   const unsubscribeBuffer = control.subscribe((event) => {
@@ -187,6 +190,7 @@ async function streamEvents(
     return;
   }
   if (socket) liveSockets.add(socket);
+  socket?.setTimeout(0);
 
   const pending: string[] = [];
   let writing = false;
@@ -208,7 +212,11 @@ async function streamEvents(
     try {
       while (pending.length && !closed) {
         const chunk = pending.shift() as string;
-        if (!raw.write(chunk)) await once(raw, "drain");
+        if (!raw.write(chunk)) {
+          if (closed) return;
+          await once(raw, "drain");
+          if (closed) return;
+        }
       }
     } catch {
       drop();
@@ -223,17 +231,31 @@ async function streamEvents(
       return;
     }
     pending.push(chunk);
-    void flush();
+    void flush().catch(drop);
   };
 
   unsubscribe = control.subscribe((event) => push(`data: ${JSON.stringify(event)}\n\n`));
   heartbeat = setInterval(() => push(": keep-alive\n\n"), 15_000);
+  heartbeat.unref();
   raw.on("error", drop);
+  raw.on("close", drop);
   request.raw.once("close", drop);
+  socket?.once("close", drop);
 
   raw.writeHead(200, EVENT_HEADERS);
   raw.write("retry: 3000\n\n");
-  for (const event of bufferedEvents) push(`data: ${JSON.stringify(event)}\n\n`);
+  let batch = "";
+  const replay = bufferedEvents.slice(-MAX_BUFFERED_EVENTS);
+  for (const event of replay) {
+    batch += `data: ${JSON.stringify(event)}\n\n`;
+    if (batch.length >= REPLAY_CHUNK_BYTES) {
+      push(batch);
+      batch = "";
+      await Promise.resolve();
+      if (closed) return;
+    }
+  }
+  if (batch) push(batch);
 }
 
 function releaseIdleConnections(server: FastifyInstance): void {

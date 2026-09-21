@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -392,6 +393,89 @@ test("a saturated live client is dropped instead of buffering forever", async ()
     await new Promise((resolve) => setTimeout(resolve, 100));
   } finally {
     controller.abort();
+    await server.close();
+  }
+});
+
+test("a fresh SSE connection stays usable after the buffer fills with fat events", async () => {
+  const { runtime, emit } = stubRuntime();
+  const server = createRuntimeConsoleServer(runtime, { logger });
+  await server.listen({ host: "127.0.0.1", port: 0 });
+  const address = server.server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}`;
+  const fatConfig = { url: "postgresql://archive", chats: ["@aaa", "@bbb"], note: "x".repeat(1500) };
+  for (let index = 0; index < 500; index += 1) {
+    emit({
+      type: "action.started",
+      id: `schedule:archive-daily:${index}`,
+      capability: "archive.sync",
+      config: fatConfig,
+      at: "2026-09-02T08:00:00.000Z"
+    });
+  }
+  const controller = new AbortController();
+  try {
+    const response = await fetch(`${base}/api/events`, { signal: controller.signal });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/event-stream");
+    const reader = response.body?.getReader();
+    assert.ok(reader);
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes("schedule:archive-daily:499")) break;
+    }
+    assert.ok(buffer.includes("schedule:archive-daily:499"), buffer.slice(-200));
+    reader.releaseLock();
+  } finally {
+    controller.abort();
+    await server.close();
+  }
+});
+
+test("the 33rd concurrent SSE connection is rejected without touching the event stream", async () => {
+  const { runtime, listeners } = stubRuntime();
+  const server = createRuntimeConsoleServer(runtime, { logger });
+  await server.listen({ host: "127.0.0.1", port: 0 });
+  const address = server.server.address();
+  assert.ok(address && typeof address === "object");
+  const port = address.port;
+  const held: Array<() => void> = [];
+  const openStream = (): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const request = httpRequest({ host: "127.0.0.1", port, path: "/api/events" }, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error("expected 200, got " + response.statusCode));
+          return;
+        }
+        response.resume();
+        held.push(() => request.destroy());
+        resolve();
+      });
+      request.once("error", reject);
+      request.end();
+    });
+  const probeStatus = (): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const request = httpRequest({ host: "127.0.0.1", port, path: "/api/events" }, (response) => {
+        response.resume();
+        response.once("end", () => resolve(response.statusCode ?? 0));
+      });
+      request.once("error", reject);
+      request.end();
+    });
+  try {
+    for (let index = 0; index < 32; index += 1) {
+      await openStream();
+    }
+    assert.equal(await probeStatus(), 503);
+    assert.equal(listeners.length, 33);
+  } finally {
+    for (const destroy of held) destroy();
     await server.close();
   }
 });
