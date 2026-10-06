@@ -34,6 +34,7 @@
   const MenuItem = DropdownMenu.Item;
 
   type FlowTab = "all" | "missing" | FlowKind;
+  type FlowConfigSummary = { filled: number; total: number; missing: number };
 
   const TABS = [
     { value: "all" as FlowTab, label: "全部", icon: CirclePlay },
@@ -50,6 +51,9 @@
     schedule: "定时任务",
     service: "服务"
   };
+
+  const MENU_ITEM_CLASS =
+    "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent";
 
   let tab = $state<FlowTab>("all");
   let selected: FlowSnapshot | null = $state(null);
@@ -88,7 +92,7 @@
     return `${actionCount} 个动作${flow.maxRuns ? ` · 最多 ${flow.maxRuns} 次` : ""}`;
   }
 
-  function configSummary(flow: FlowSnapshot): { filled: number; total: number; missing: number } {
+  function configSummary(flow: FlowSnapshot): FlowConfigSummary {
     const slots: { label: string; config: unknown }[] =
       flow.kind === "trigger"
         ? [
@@ -209,7 +213,118 @@
     selected = flow;
     dialogOpen = true;
   }
+
+  function onRowKeydown(event: KeyboardEvent, flow: FlowSnapshot): void {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openDialog(flow);
+  }
 </script>
+
+{#snippet noticeMark(notice: { tone: "error" | "warn"; title: string } | undefined)}
+  {#if notice}
+    <span
+      class={cn(
+        "inline-flex shrink-0 cursor-help items-center",
+        notice.tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400"
+      )}
+      role="img"
+      aria-label={notice.title}
+      title={notice.title}
+    >
+      {#if notice.tone === "error"}
+        <CircleAlert class="size-3.5" aria-hidden="true" />
+      {:else}
+        <TriangleAlert class="size-3.5" aria-hidden="true" />
+      {/if}
+    </span>
+  {/if}
+{/snippet}
+
+{#snippet reloadButton(flow: FlowSnapshot, busy: boolean)}
+  {#if flow.pendingReload}
+    <button
+      type="button"
+      class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:pointer-events-none disabled:opacity-50 dark:text-amber-400"
+      disabled={busy}
+      title="按最新定义重载此条"
+      aria-label={`重载 ${flow.id}`}
+      onclick={(event) => {
+        event.stopPropagation();
+        void reload(flow);
+      }}
+    >
+      <RefreshCw class={cn("size-3.5", busy && "animate-spin")} aria-hidden="true" />
+      待重载
+    </button>
+  {/if}
+{/snippet}
+
+{#snippet configBadge(flow: FlowSnapshot, summary: FlowConfigSummary)}
+  {#if summary.missing > 0}
+    <Badge variant="destructive" title={`${summary.filled}/${summary.total} 个配置已填写`}>
+      缺 {summary.missing} 项
+    </Badge>
+  {:else}
+    <Badge variant="outline" title={`${summary.filled}/${summary.total} 个配置已填写`}>
+      已配置
+    </Badge>
+  {/if}
+{/snippet}
+
+{#snippet flowSwitch(flow: FlowSnapshot, busy: boolean)}
+  {#if flow.kind !== "command"}
+    <Switch
+      checked={flow.enabled}
+      controlled
+      onCheckedChange={(value) => (toggleTarget = { flow, enabled: value })}
+      disabled={busy}
+      onclick={(event) => event.stopPropagation()}
+      aria-label={`切换 ${flow.id} 启用状态`}
+    />
+  {/if}
+{/snippet}
+
+{#snippet flowMenu(flow: FlowSnapshot)}
+  <MenuRoot>
+    <MenuTrigger
+      class="inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={`${flow.id} 操作`}
+      onclick={(event) => event.stopPropagation()}
+    >
+      <MoreHorizontal class="size-4" aria-hidden="true" />
+    </MenuTrigger>
+    <MenuPortal>
+      <MenuContent
+        class="z-50 min-w-[9rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+        sideOffset={4}
+        align="end"
+      >
+        <MenuItem onSelect={() => openDialog(flow)} class={MENU_ITEM_CLASS}>
+          <SquarePen class="size-4" aria-hidden="true" />
+          修改此条
+        </MenuItem>
+        {#if flow.kind === "command" || flow.kind === "schedule"}
+          <MenuItem onSelect={() => void run(flow)} class={MENU_ITEM_CLASS}>
+            <CirclePlay class="size-4" aria-hidden="true" />
+            运行一次
+          </MenuItem>
+        {/if}
+        {#if flow.kind === "service"}
+          <MenuItem onSelect={() => void toggleService(flow)} class={MENU_ITEM_CLASS}>
+            {flow.active ? "停止服务" : "启动服务"}
+          </MenuItem>
+        {/if}
+        {#if flow.kind !== "command"}
+          <MenuItem onSelect={() => void reload(flow)} class={MENU_ITEM_CLASS}>
+            <RefreshCw class="size-4" aria-hidden="true" />
+            重载此条
+          </MenuItem>
+        {/if}
+      </MenuContent>
+    </MenuPortal>
+  </MenuRoot>
+{/snippet}
 
 {#if !snapshot}
   <div class="flex flex-col gap-4">
@@ -217,11 +332,11 @@
     <div class="animate-pulse rounded-md bg-muted h-72 rounded-xl"></div>
   </div>
 {:else}
-  <div class="flex flex-col gap-4">
+  <div class="flex flex-col gap-3 sm:gap-4">
     <Tabs bind:value={tab} items={tabItems} />
 
     {#if visible.length === 0}
-      <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+      <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
           <span class="flex size-10 items-center justify-center rounded-full bg-muted">
             <CircleAlert class="size-5 text-muted-foreground" aria-hidden="true" />
           </span>
@@ -234,7 +349,8 @@
           {/if}
         </div>
     {:else}
-      <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
+      <!-- 宽屏：完整表格 -->
+      <div class="hidden rounded-lg border bg-card text-card-foreground shadow-sm md:block">
         <div class="p-0">
           <div class="relative w-full overflow-auto"><table class="w-full caption-bottom text-sm">
             <thead class="[&_tr]:border-b">
@@ -272,39 +388,8 @@
                         {flow.id}
                       </button>
                       <span class="text-xs text-muted-foreground">{KIND_LABEL[flow.kind]}</span>
-                      {#if notice}
-                        <span
-                          class={cn(
-                            "inline-flex shrink-0 cursor-help items-center",
-                            notice.tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400"
-                          )}
-                          role="img"
-                          aria-label={notice.title}
-                          title={notice.title}
-                        >
-                          {#if notice.tone === "error"}
-                            <CircleAlert class="size-3.5" aria-hidden="true" />
-                          {:else}
-                            <TriangleAlert class="size-3.5" aria-hidden="true" />
-                          {/if}
-                        </span>
-                      {/if}
-                      {#if flow.pendingReload}
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 rounded-md border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:pointer-events-none disabled:opacity-50 dark:text-amber-400"
-                          disabled={busy}
-                          title="按最新定义重载此条"
-                          aria-label={`重载 ${flow.id}`}
-                          onclick={(event) => {
-                            event.stopPropagation();
-                            void reload(flow);
-                          }}
-                        >
-                          <RefreshCw class={cn("size-3.5", busy && "animate-spin")} aria-hidden="true" />
-                          待重载
-                        </button>
-                      {/if}
+                      {@render noticeMark(notice)}
+                      {@render reloadButton(flow, busy)}
                     </div>
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
@@ -324,85 +409,66 @@
                     <span class="text-xs text-muted-foreground">{flowSummary(flow)}</span>
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 hidden lg:table-cell">
-                    {#if summary.missing > 0}
-                      <Badge variant="destructive" title={`${summary.filled}/${summary.total} 个配置已填写`}>
-                        缺 {summary.missing} 项
-                      </Badge>
-                    {:else}
-                      <Badge variant="outline" title={`${summary.filled}/${summary.total} 个配置已填写`}>
-                        已配置
-                      </Badge>
-                    {/if}
+                    {@render configBadge(flow, summary)}
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-center">
-                    {#if flow.kind !== "command"}
-                      <Switch
-                        checked={flow.enabled}
-                        controlled
-                        onCheckedChange={(value) => (toggleTarget = { flow, enabled: value })}
-                        disabled={busy}
-                        onclick={(event) => event.stopPropagation()}
-                        aria-label={`切换 ${flow.id} 启用状态`}
-                      />
-                    {/if}
+                    {@render flowSwitch(flow, busy)}
                   </td>
                   <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0" onclick={(event) => event.stopPropagation()}>
-                    <MenuRoot>
-                      <MenuTrigger
-                        class="inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label={`${flow.id} 操作`}
-                        onclick={(event) => event.stopPropagation()}
-                      >
-                        <MoreHorizontal class="size-4" aria-hidden="true" />
-                      </MenuTrigger>
-                      <MenuPortal>
-                        <MenuContent
-                          class="z-50 min-w-[9rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
-                          sideOffset={4}
-                          align="end"
-                        >
-                          <MenuItem
-                            onSelect={() => openDialog(flow)}
-                            class="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent"
-                          >
-                            <SquarePen class="size-4" aria-hidden="true" />
-                            修改此条
-                          </MenuItem>
-                          {#if flow.kind === "command" || flow.kind === "schedule"}
-                            <MenuItem
-                              onSelect={() => void run(flow)}
-                              class="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent"
-                            >
-                              <CirclePlay class="size-4" aria-hidden="true" />
-                              运行一次
-                            </MenuItem>
-                          {/if}
-                          {#if flow.kind === "service"}
-                            <MenuItem
-                              onSelect={() => void toggleService(flow)}
-                              class="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent"
-                            >
-                              {flow.active ? "停止服务" : "启动服务"}
-                            </MenuItem>
-                          {/if}
-                          {#if flow.kind !== "command"}
-                            <MenuItem
-                              onSelect={() => void reload(flow)}
-                              class="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-accent"
-                            >
-                              <RefreshCw class="size-4" aria-hidden="true" />
-                              重载此条
-                            </MenuItem>
-                          {/if}
-                        </MenuContent>
-                      </MenuPortal>
-                    </MenuRoot>
+                    {@render flowMenu(flow)}
                   </td>
                 </tr>
               {/each}
             </tbody>
           </table></div>
         </div>
+      </div>
+
+      <!-- 窄屏：逐条卡片，标识与状态同行，其余信息压到副行 -->
+      <div class="flex flex-col gap-2 md:hidden">
+        {#each visible as flow (`${flow.kind}:${flow.id}`)}
+          {@const busy = pending === flow.id}
+          {@const summary = configSummary(flow)}
+          {@const notice = flowNotice(flow)}
+          {@const status = flowStatus(flow)}
+          <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
+            <div
+              class="flex cursor-pointer items-start gap-2.5 px-3 py-2.5"
+              role="button"
+              tabindex="0"
+              aria-label={`${flow.id} ${KIND_LABEL[flow.kind]}`}
+              onclick={() => openDialog(flow)}
+              onkeydown={(event) => onRowKeydown(event, flow)}
+            >
+              <span class="mt-1 flex shrink-0" title={status.label}>
+                <Status tone={status.tone} pulse={status.pulse}></Status>
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="flex items-center gap-x-2">
+                  <span class="min-w-0 truncate font-mono text-sm">{flow.id}</span>
+                  <span class="shrink-0 text-xs text-muted-foreground">{KIND_LABEL[flow.kind]}</span>
+                  {@render noticeMark(notice)}
+                </span>
+                <span class="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{flow.capability}</span>
+              </span>
+              <span class="flex shrink-0 items-center gap-1">
+                {@render flowSwitch(flow, busy)}
+                {@render flowMenu(flow)}
+              </span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
+              <span class="min-w-0 truncate">{flowSummary(flow)}</span>
+              {#if flow.session}
+                <span class="mid-dot font-mono">会话 {flow.session}</span>
+              {/if}
+              {#if flow.suspended}
+                <Badge variant="destructive" title={suspensionTitle(flow)}>会话隔离</Badge>
+              {/if}
+              {@render configBadge(flow, summary)}
+              {@render reloadButton(flow, busy)}
+            </div>
+          </div>
+        {/each}
       </div>
     {/if}
 

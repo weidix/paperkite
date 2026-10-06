@@ -52,7 +52,7 @@
 </script>
 
 {#if scopes.length === 0}
-  <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+  <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
           <span class="flex size-10 items-center justify-center rounded-full bg-muted">
             <FileText class="size-5 text-muted-foreground" aria-hidden="true" />
           </span>
@@ -60,9 +60,9 @@
           <p class="max-w-sm text-xs text-muted-foreground">在 settings.yml 中配置 logging.directory 后，运行时会为核心与每个插件写入日志文件。</p>
         </div>
 {:else}
-  <div class="flex flex-col gap-4">
+  <div class="flex flex-col gap-3 sm:gap-4">
     <div class="flex flex-wrap items-center gap-2">
-      <Select bind:value={scope} options={scopeOptions} triggerClass="w-64" aria-label="日志来源" />
+      <Select bind:value={scope} options={scopeOptions} triggerClass="w-full font-mono sm:w-64" aria-label="日志来源" />
       <Select bind:value={linesText} options={lineOptions} triggerClass="w-28" aria-label="显示行数" />
       <label class="flex items-center gap-2 text-sm text-muted-foreground">
         <Switch bind:checked={autoRefresh} aria-label="自动刷新" />
@@ -78,17 +78,17 @@
 
     <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
       <div class="p-0">
-        <div class="flex items-center gap-2 border-b px-4 py-2">
+        <div class="flex items-center gap-2 border-b px-3 py-2 sm:px-4">
           <FileText class="size-4 text-muted-foreground" aria-hidden="true" />
           <span class="font-mono tracking-tight text-xs text-muted-foreground">
             {scopes.find((item) => item.scope === effectiveScope)?.path}
           </span>
         </div>
-        <div bind:this={viewport} class="h-[60vh] overflow-auto">
+        <div bind:this={viewport} class="h-[65vh] overflow-auto sm:h-[60vh]">
           {#if content.length === 0}
             <p class="px-4 py-10 text-center font-mono text-xs text-muted-foreground">暂无日志内容</p>
           {:else}
-            <pre class="whitespace-pre-wrap break-all px-4 py-3 font-mono text-xs leading-relaxed">{content.join("\n")}</pre>
+            <pre class="whitespace-pre-wrap break-all px-3 py-2.5 font-mono text-xs leading-relaxed sm:px-4 sm:py-3">{content.join("\n")}</pre>
           {/if}
         </div>
       </div>

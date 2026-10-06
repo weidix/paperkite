@@ -191,11 +191,11 @@
                 <span class="max-w-56 truncate font-mono text-xs">{word}</span>
                 <button
                   type="button"
-                  class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                   aria-label={`删除 ${word}`}
                   onclick={() => remove(word)}
                 >
-                  <X class="size-3" aria-hidden="true" />
+                  <X class="size-3.5" aria-hidden="true" />
                 </button>
               </li>
             {/each}
@@ -232,11 +232,11 @@
                 </span>
                 <button
                   type="button"
-                  class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                  class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                   aria-label={`解除 ${userName(user)}`}
                   onclick={() => removeUser(user.userId)}
                 >
-                  <X class="size-3" aria-hidden="true" />
+                  <X class="size-3.5" aria-hidden="true" />
                 </button>
               </li>
             {/each}

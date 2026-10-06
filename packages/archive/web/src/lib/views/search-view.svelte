@@ -490,9 +490,9 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <div class="sticky top-0 z-10 -mx-6 -mt-6 border-b border-border/60 bg-background/95 px-6 pb-2 pt-4 backdrop-blur-sm">
-    <div class="flex items-center gap-2">
-      <div class="relative min-w-0 flex-1 basis-60">
+  <div class="sticky top-0 z-10 -mx-3 -mt-3 border-b border-border/60 bg-background/95 px-3 pb-2 pt-3 backdrop-blur-sm sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="relative min-w-0 flex-1 basis-full sm:basis-60">
         <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input
           id="global-search"
@@ -540,8 +540,8 @@
           </div>
         {/if}
       </div>
-      <ChatPicker bind:value={selectedChats} onchange={commit} />
-      <DateRange bind:from bind:to bind:mode onchange={commit} />
+      <ChatPicker bind:value={selectedChats} onchange={commit} class="min-w-0 flex-1 sm:flex-none" />
+      <DateRange bind:from bind:to bind:mode onchange={commit} class="min-w-0 flex-1 sm:flex-none" />
       <Button class="w-20 shrink-0" disabled={loading} aria-label="检索归档消息" onclick={submit}>
         {#if loading}
           <RefreshCw class="size-3.5 animate-spin" aria-hidden="true" />
@@ -647,7 +647,7 @@
   </div>
 
   {#if loading && results === null}
-    <div class="grid gap-4">
+    <div class="grid grid-cols-1 gap-3 sm:gap-4">
       {#each Array(4) as _, i (i)}
         <div class="h-16 animate-pulse rounded-xl bg-muted"></div>
       {/each}
@@ -658,11 +658,11 @@
       <Button variant="ghost" size="sm" class="mt-3" onclick={load}>重试</Button>
     </div>
   {:else if results === null}
-    <div class="flex flex-col items-center gap-2 px-6 py-16 text-center">
+    <div class="flex flex-col items-center gap-2 px-6 py-10 text-center sm:py-16">
       <p class="text-sm font-medium">正在载入归档消息…</p>
     </div>
   {:else if results.items.length === 0}
-    <div class="rounded-lg border bg-card p-10 text-center shadow-sm">
+    <div class="rounded-lg border bg-card p-6 text-center shadow-sm sm:p-10">
       <p class="text-sm font-medium">{emptyTitle}</p>
       <p class="mt-1 font-mono text-[11px] text-muted-foreground/70">调整关键词或筛选条件后重试</p>
       <Button variant="outline" size="sm" class="mt-3" onclick={clearAllChips}>清除筛选</Button>

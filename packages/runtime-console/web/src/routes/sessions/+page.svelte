@@ -40,14 +40,14 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <div class="flex flex-wrap items-center gap-2">
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
     <h2 class="font-display text-sm font-semibold tracking-tight">Telegram 会话状态</h2>
-    <span class="flex-1"></span>
+    <span class="hidden flex-1 sm:block"></span>
     <span class="text-xs text-muted-foreground">状态变化实时同步，隔离与恢复自动完成</span>
   </div>
 
   {#if sessions.length === 0}
-    <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+    <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
       <span class="flex size-10 items-center justify-center rounded-full bg-muted">
         <Users class="size-5 text-muted-foreground" aria-hidden="true" />
       </span>
@@ -55,7 +55,7 @@
       <p class="max-w-sm text-xs text-muted-foreground">流程引用哪个会话，运行时启动后这里就会出现对应的状态。</p>
     </div>
   {:else}
-    <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
+    <div class="hidden rounded-lg border bg-card text-card-foreground shadow-sm md:block">
       <div class="p-0">
         <div class="relative w-full overflow-auto"><table class="w-full caption-bottom text-sm">
           <thead class="[&_tr]:border-b">
@@ -116,6 +116,49 @@
           </tbody>
         </table></div>
       </div>
+    </div>
+
+    <div class="flex flex-col gap-2 md:hidden">
+      {#each sessions as session (session.name)}
+        <div class="rounded-lg border bg-card px-3 py-2.5 text-card-foreground shadow-sm">
+          <div class="flex items-start gap-2.5">
+            <span class="min-w-0 flex-1">
+              <span class="block truncate font-mono tracking-tight text-sm">{session.name}</span>
+              <span class="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+                自 {formatDateTime(session.since)}
+              </span>
+            </span>
+            <Badge variant={STATE_VARIANT[session.state]} class="shrink-0 whitespace-nowrap">
+              {STATE_LABEL[session.state]}{session.state === "isolated" && session.attempts > 0 ? ` · 第 ${session.attempts} 次` : ""}
+            </Badge>
+          </div>
+          {#if session.reason}
+            <p class="mt-1.5 text-xs text-muted-foreground">{session.reason}</p>
+          {/if}
+          {#if session.flows.length > 0}
+            <div class="mt-1.5 flex flex-wrap gap-1">
+              {#each session.flows as flow (flow.kind + ":" + flow.id)}
+                <Badge variant="outline">
+                  <span class="font-mono">{flow.kind}:{flow.id}</span>
+                </Badge>
+              {/each}
+            </div>
+          {/if}
+          {#if session.state === "isolated" || session.state === "waiting-auth"}
+            <Button
+              variant="outline"
+              size="sm"
+              class="mt-2"
+              disabled={busy === session.name}
+              onclick={() => void reconnect(session)}
+              aria-label={`重连 ${session.name}`}
+            >
+              <RefreshCw class={"size-3.5 " + (busy === session.name ? "animate-spin" : "")} aria-hidden="true" />
+              立即重试
+            </Button>
+          {/if}
+        </div>
+      {/each}
     </div>
   {/if}
 </div>

@@ -71,7 +71,7 @@
 
 <div class="flex flex-col gap-4">
   <div class="flex flex-wrap items-center gap-2">
-    <Select bind:value={filter} options={filterOptions} triggerClass="w-64 font-mono" aria-label="事件类型筛选" />
+    <Select bind:value={filter} options={filterOptions} triggerClass="w-full font-mono sm:w-64" aria-label="事件类型筛选" />
     {#if paused}
       <Badge variant="outline" class="text-muted-foreground">已暂停</Badge>
     {/if}
@@ -92,7 +92,7 @@
   </div>
 
   {#if visible.length === 0}
-    <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+    <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
         <span class="flex size-10 items-center justify-center rounded-full bg-muted">
           <Radio class="size-5 text-muted-foreground" aria-hidden="true" />
         </span>
@@ -107,25 +107,27 @@
         {#each visible.slice().reverse() as entry (entry.seq)}
           {@const view = describeEvent(entry.event)}
           {@const config = eventPayload(entry.event)}
-          <div class="border-b px-4 py-3 last:border-b-0">
+          <div class="border-b px-3 py-2.5 last:border-b-0 sm:px-4 sm:py-3">
             <button
               type="button"
-              class="flex w-full items-center gap-3 text-left"
+              class="flex w-full flex-col gap-1 text-left sm:flex-row sm:items-center sm:gap-3"
               onclick={() => toggleExpanded(entry.seq)}
               aria-expanded={expanded === entry.seq}
             >
-              <span
-                class={cn(
-                  "shrink-0 font-mono text-xs tabular-nums",
-                  view.tone === "bad" ? "text-destructive" : "text-muted-foreground"
-                )}
-              >
-                {formatDateTime(entry.event.at)}
+              <span class="flex items-center gap-2 sm:contents">
+                <span
+                  class={cn(
+                    "shrink-0 font-mono text-xs tabular-nums",
+                    view.tone === "bad" ? "text-destructive" : "text-muted-foreground"
+                  )}
+                >
+                  {formatDateTime(entry.event.at)}
+                </span>
+                <Badge variant={TONE_VARIANT[view.tone]}>
+                  <span class="font-mono">{entry.event.type}</span>
+                </Badge>
               </span>
-              <Badge variant={TONE_VARIANT[view.tone]}>
-                <span class="font-mono">{entry.event.type}</span>
-              </Badge>
-              <span class="min-w-0 flex-1 truncate text-sm">
+              <span class="min-w-0 flex-1 text-sm sm:truncate">
                 <span class={cn("font-medium", view.tone === "bad" && "text-destructive")}>{view.title}</span>
                 {#if view.detail}
                   <span class="ml-2 text-xs text-muted-foreground">{view.detail}</span>
@@ -133,7 +135,7 @@
               </span>
             </button>
             {#if expanded === entry.seq}
-              <div class="mt-2 flex flex-col gap-2 pl-32">
+              <div class="mt-2 flex flex-col gap-2 sm:pl-32">
                 <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span class="font-mono tracking-tight">#{entry.seq}</span>
                   {#if "capability" in entry.event}

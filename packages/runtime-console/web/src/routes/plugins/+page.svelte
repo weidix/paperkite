@@ -51,7 +51,7 @@
     <div class="animate-pulse rounded-md bg-muted h-64 rounded-xl"></div>
   </div>
 {:else if error}
-  <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+  <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
       <span class="flex size-10 items-center justify-center rounded-full bg-muted">
         <Puzzle class="size-5 text-muted-foreground" aria-hidden="true" />
       </span>
@@ -59,7 +59,7 @@
       <p class="max-w-sm text-xs text-muted-foreground">{error}</p>
     </div>
 {:else if plugins!.length === 0}
-  <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+  <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
           <span class="flex size-10 items-center justify-center rounded-full bg-muted">
             <Puzzle class="size-5 text-muted-foreground" aria-hidden="true" />
           </span>
@@ -67,7 +67,7 @@
           <p class="max-w-sm text-xs text-muted-foreground">通过 paperkite plugin add 安装插件，或在核心 bundles 中声明内置插件。</p>
         </div>
 {:else}
-  <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
+  <div class="hidden rounded-lg border bg-card text-card-foreground shadow-sm md:block">
     <div class="p-0">
       <div class="relative w-full overflow-auto"><table class="w-full caption-bottom text-sm">
         <thead class="[&_tr]:border-b">
@@ -125,5 +125,43 @@
         </tbody>
       </table></div>
     </div>
+  </div>
+
+  <div class="flex flex-col gap-2 md:hidden">
+    {#each plugins! as plugin (plugin.name)}
+      <div class="rounded-lg border bg-card px-3 py-2.5 text-card-foreground shadow-sm">
+        <div class="flex items-start gap-2.5">
+          <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50 text-muted-foreground">
+            <Package class="size-3.5" aria-hidden="true" />
+          </span>
+          <p class="min-w-0 flex-1 break-all font-mono tracking-tight text-sm">{plugin.name}</p>
+          <span class="shrink-0 font-mono text-xs text-muted-foreground">{plugin.version ?? "-"}</span>
+        </div>
+        <div class="mt-1.5 flex flex-wrap gap-1">
+          {#each plugin.capabilities as item (item.name)}
+            {@const refs = refCounts.get(item.name) ?? 0}
+            <Badge
+              variant={refs > 0 ? "default" : "outline"}
+              title={refs > 0 ? `被 ${refs} 个流程引用` : "没有启用的流程引用该能力"}
+            >
+              <span class="font-mono">{item.name}</span>
+              <span class="text-[10px] opacity-70">· {KIND_LABEL[item.kind]}</span>
+            </Badge>
+          {/each}
+        </div>
+        <div class="mt-1.5 flex flex-wrap items-center gap-1 border-t border-border/60 pt-1.5">
+          {#if plugin.loaded}
+            <Badge variant="secondary" class="whitespace-nowrap">已加载</Badge>
+          {:else}
+            <Badge variant="outline" class="whitespace-nowrap text-muted-foreground">未加载</Badge>
+          {/if}
+          {#if plugin.used}
+            <Badge variant="outline" class="whitespace-nowrap" title="启用流程正在使用该插件的能力">被引用</Badge>
+          {:else}
+            <Badge variant="ghost" class="whitespace-nowrap" title="装了但没有启用流程使用该插件的能力">未被引用</Badge>
+          {/if}
+        </div>
+      </div>
+    {/each}
   </div>
 {/if}

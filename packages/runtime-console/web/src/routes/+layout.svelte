@@ -133,7 +133,7 @@
   </aside>
 
   <div class="relative z-10 flex min-w-0 flex-1 flex-col">
-    <header class="flex h-14 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm">
+    <header class="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-2.5 backdrop-blur-sm sm:h-14 sm:gap-3 sm:px-4">
       <Sheet bind:open={navOpen} side="left" contentClass="w-64 sm:max-w-xs">
         {#snippet trigger()}
           <Button variant="ghost" size="sm" class="md:hidden" aria-label="打开导航" onclick={() => (navOpen = true)}>
@@ -171,7 +171,7 @@
         </div>
       </Sheet>
 
-      <h1 class="font-display text-base font-semibold tracking-tight">{current.label}</h1>
+      <h1 class="min-w-0 font-display text-base font-semibold tracking-tight">{current.label}</h1>
       <span class="flex-1"></span>
       <LiveBadge label={snapshot?.running ? "运行中" : "已停止"} tone={snapshot?.running ? "ok" : "bad"} />
       <LiveBadge label={connected ? "已连接" : "重连中"} tone={connected ? "ok" : "bad"} />
@@ -184,22 +184,24 @@
       </Button>
     </header>
 
-    <main class="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+    <main class="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
       {#if dirtyBanner}
-        <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3">
+        <div class="mb-3 flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 sm:mb-4 sm:gap-3 sm:px-4 sm:py-3">
           <TriangleAlert class="size-4 shrink-0 text-destructive" aria-hidden="true" />
-          <div class="flex min-w-0 flex-col">
-            <span class="text-sm font-medium">flows.yml 已修改，当前运行的是旧配置</span>
+          <div class="flex min-w-0 flex-1 flex-col">
+            <span class="truncate text-sm font-medium">
+              <span class="sm:hidden">flows.yml 已修改，未生效</span>
+              <span class="max-sm:hidden">flows.yml 已修改，当前运行的是旧配置</span>
+            </span>
             {#if snapshot?.flowsFile}
               <span class="truncate font-mono text-xs text-muted-foreground" title={snapshot.flowsFile}>{snapshot.flowsFile}</span>
             {/if}
           </div>
-          <span class="flex-1"></span>
-          <Button size="sm" onclick={() => void reloadConfig()} disabled={reloading}>
+          <Button size="sm" class="shrink-0" onclick={() => void reloadConfig()} disabled={reloading}>
             <RefreshCw class={cn("size-3.5", reloading && "animate-spin")} aria-hidden="true" />
             立即重载
           </Button>
-          <Button variant="ghost" size="icon" class="size-7" onclick={() => (dismissedDirty = true)} aria-label="关闭提示">
+          <Button variant="ghost" size="icon" class="size-7 shrink-0" onclick={() => (dismissedDirty = true)} aria-label="关闭提示">
             <X class="size-3.5" aria-hidden="true" />
           </Button>
         </div>

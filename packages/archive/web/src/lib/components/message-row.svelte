@@ -93,23 +93,25 @@
 >
   <div class="flex items-stretch">
     <div
-      class="flex min-w-0 flex-1 cursor-pointer gap-3 px-4 py-2 text-left"
+      class="flex min-w-0 flex-1 cursor-pointer gap-3 px-3 py-2 text-left sm:px-4"
       role="button"
       tabindex="0"
       aria-label="查看消息 #{(record.messageId)}"
       onclick={openRow}
       onkeydown={onRowKeydown}
     >
-    <div class="w-[102px] shrink-0 pt-0.5 text-right font-mono text-[10px] leading-4 text-muted-foreground">
+    <div class="hidden w-[102px] shrink-0 pt-0.5 text-right font-mono text-[10px] leading-4 text-muted-foreground sm:block">
       <div>{fmtTs(record.date)}</div>
       <div class="text-muted-foreground/60">#{record.messageId}</div>
     </div>
     <div class="min-w-0 flex-1">
-      <div class="flex flex-wrap items-baseline gap-x-2 text-xs">
+      <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
         <span class="font-medium">{senderName(record)}</span>
         {#if showChat && record.chatTitle}
           <span class="font-mono text-[10px] text-muted-foreground">{record.chatTitle}</span>
         {/if}
+        <span class="font-mono text-[10px] text-muted-foreground sm:hidden">{fmtTs(record.date)}</span>
+        <span class="font-mono text-[10px] text-muted-foreground/60 sm:hidden">#{record.messageId}</span>
         {#if record.mediaType && record.mediaType !== "text"}
           <span class="inline-flex items-center gap-0.5 font-mono text-[10px] text-muted-foreground">
             <Paperclip class="size-3" aria-hidden="true" />
@@ -171,8 +173,7 @@
         class="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-muted-foreground transition-colors hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring"
         aria-label="预览媒体"
         onclick={() => openMessageLightbox(record)}
-      >
-        {#if thumb.url && !thumbFailed}
+      >        {#if thumb.url && !thumbFailed}
           <img
             src={thumb.url}
             alt=""
@@ -205,7 +206,7 @@
   </div>
   </div>
   {#if canExpandBase && (expanded || clipped)}
-    <div class="flex self-start pb-2 pl-[130px]">
+    <div class="flex self-start pb-2 pl-3 sm:pl-[130px]">
       <button
         class="inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         onclick={() => (expanded = !expanded)}

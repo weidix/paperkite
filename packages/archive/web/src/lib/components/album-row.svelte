@@ -96,24 +96,28 @@
   class="group transition-colors {anchor ? 'bg-accent/70' : 'hover:bg-accent/50'}"
   id="msg-{entry.recordId}"
 >
-  <div class="flex items-stretch">
+  <div class="flex flex-wrap items-stretch">
     <div
-      class="flex min-w-0 flex-1 cursor-pointer gap-3 px-4 py-2 text-left"
+      class="order-1 flex min-w-0 flex-1 cursor-pointer gap-3 px-3 py-2 text-left sm:px-4"
       role="button"
       tabindex="0"
       aria-label="查看相册（{entry.rows.length} 张）"
       onclick={openRow}
       onkeydown={onRowKeydown}
     >
-      <div class="w-[102px] shrink-0 pt-0.5 text-right font-mono text-[10px] leading-4 text-muted-foreground">
+      <div class="hidden w-[102px] shrink-0 pt-0.5 text-right font-mono text-[10px] leading-4 text-muted-foreground sm:block">
         <div>{first ? fmtTs(first.date) : ""}</div>
         <div class="text-muted-foreground/60">{first ? `#${first.messageId}` : ""}</div>
       </div>
       <div class="min-w-0 flex-1">
-        <div class="flex flex-wrap items-baseline gap-x-2 text-xs">
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
           <span class="font-medium">{first ? senderName(first) : ""}</span>
           {#if showChat && first?.chatTitle}
             <span class="font-mono text-[10px] text-muted-foreground">{first.chatTitle}</span>
+          {/if}
+          {#if first}
+            <span class="font-mono text-[10px] text-muted-foreground sm:hidden">{fmtTs(first.date)}</span>
+            <span class="font-mono text-[10px] text-muted-foreground/60 sm:hidden">#{first.messageId}</span>
           {/if}
           <span class="inline-flex items-center gap-0.5 font-mono text-[10px] text-muted-foreground">
             <Images class="size-3" aria-hidden="true" />
@@ -168,7 +172,7 @@
       </div>
     </div>
     {#if inlineThumb && thumbs.length > 0}
-      <div class="flex shrink-0 items-center gap-1 pl-1">
+      <div class="order-3 flex w-full shrink-0 items-center gap-1 px-3 pb-2 sm:order-2 sm:w-auto sm:px-0 sm:pb-0 sm:pl-1">
         {#each thumbs as item, i (item.row.recordId)}
           {@const spec = fileThumbOf(item.row)}
           <button
@@ -204,7 +208,7 @@
         {/if}
       </div>
     {/if}
-    <div class="flex w-16 shrink-0 items-center justify-end gap-0.5 pr-1.5">
+    <div class="order-2 flex w-16 shrink-0 items-center justify-end gap-0.5 pr-1.5 sm:order-3">
       {#if first}
         <UserMenu record={first} />
         <MessageMenu
@@ -216,7 +220,7 @@
     </div>
   </div>
   {#if captionClipped || captionExpanded}
-    <div class="flex self-start pb-2 pl-[130px]">
+    <div class="flex self-start pb-2 pl-3 sm:pl-[130px]">
       <button
         class="inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         onclick={() => (captionExpanded = !captionExpanded)}

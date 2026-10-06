@@ -9,12 +9,15 @@
 
   let {
     value = $bindable([]),
-    onchange
+    onchange,
+    class: className = ""
   }: {
     /** 已选会话 ID 列表（空 = 全部会话）。 */
     value?: string[];
     /** 选中或清除后调用（父组件 commit 即时重查）。 */
     onchange?: () => void;
+    /** 触发器容器宽度；窄屏由父级 flex 尺寸决定。 */
+    class?: string;
   } = $props();
 
   let open = $state(false);
@@ -118,12 +121,12 @@
   }
 </script>
 
-<div bind:this={rootEl} class="relative shrink-0">
+<div bind:this={rootEl} class={cn("relative w-36", className)}>
   <button
     type="button"
     class={cn(
-      "inline-flex h-9 items-center gap-1.5 rounded-md border border-input bg-background pl-3 text-sm shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-      value.length > 0 ? "w-36 pr-8" : "w-36 pr-2",
+      "inline-flex h-9 w-full items-center gap-1.5 rounded-md border border-input bg-background pl-3 text-sm shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+      value.length > 0 ? "pr-8" : "pr-2",
       value.length > 0 ? "text-foreground" : "text-muted-foreground"
     )}
     aria-haspopup="listbox"
@@ -147,7 +150,7 @@
 
   {#if open}
     <div
-      class="absolute right-0 top-full z-30 mt-1.5 flex max-h-80 w-72 flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
+      class="absolute left-0 top-full z-30 mt-1.5 flex max-h-80 w-72 flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[70vh] max-sm:w-auto sm:left-auto sm:right-0"
       role="listbox"
       aria-multiselectable="true"
       aria-label="会话筛选（多选）"

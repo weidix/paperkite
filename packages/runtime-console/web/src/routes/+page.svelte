@@ -76,7 +76,7 @@
 
 <div class="flex flex-col gap-4">
   <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-    <div class="flex flex-wrap items-center justify-between gap-4 px-6 py-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:gap-4 sm:px-6 sm:py-5">
       <div class="flex items-center gap-4">
         <span
           class={cn(
@@ -126,10 +126,10 @@
   />
 
   {#if snapshot}
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="flex items-start gap-3 px-6 py-4">
-          <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+        <div class="flex items-start gap-2.5 px-3 py-3 sm:gap-3 sm:px-6 sm:py-4">
+          <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
             <Zap class="size-4" aria-hidden="true" />
           </span>
           <div class="min-w-0">
@@ -142,8 +142,8 @@
         </div>
       </div>
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="flex items-start gap-3 px-6 py-4">
-          <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+        <div class="flex items-start gap-2.5 px-3 py-3 sm:gap-3 sm:px-6 sm:py-4">
+          <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
             <CalendarClock class="size-4" aria-hidden="true" />
           </span>
           <div class="min-w-0">
@@ -160,8 +160,8 @@
         </div>
       </div>
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="flex items-start gap-3 px-6 py-4">
-          <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+        <div class="flex items-start gap-2.5 px-3 py-3 sm:gap-3 sm:px-6 sm:py-4">
+          <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
             <Play class="size-4" aria-hidden="true" />
           </span>
           <div class="min-w-0">
@@ -172,8 +172,8 @@
         </div>
       </div>
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="flex items-start gap-3 px-6 py-4">
-          <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+        <div class="flex items-start gap-2.5 px-3 py-3 sm:gap-3 sm:px-6 sm:py-4">
+          <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
             <Package class="size-4" aria-hidden="true" />
           </span>
           <div class="min-w-0">
@@ -190,7 +190,7 @@
     </div>
 
     <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-      <div class="flex flex-col gap-3 px-6 py-4">
+      <div class="flex flex-col gap-3 px-4 py-3.5 sm:px-6 sm:py-4">
         <div class="flex items-baseline justify-between">
           <p class="text-xs font-medium tracking-wide text-muted-foreground">运行时构成</p>
           <p class="font-mono text-[11px] tabular-nums text-muted-foreground/70">共 {flows.length} 条流程</p>
@@ -217,16 +217,16 @@
       </div>
     </div>
   {:else}
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {#each [0, 1, 2, 3] as index (index)}
         <div class="h-24 animate-pulse rounded-xl bg-muted"></div>
       {/each}
     </div>
   {/if}
 
-  <div class="grid gap-4 lg:grid-cols-2">
+  <div class="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2">
     <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-      <div class="flex flex-col gap-1.5 px-6 pb-2 pt-6">
+      <div class="flex flex-col gap-1.5 px-4 pb-2 pt-4 sm:px-6 sm:pt-6">
         <h3 class="flex items-center gap-2 font-display text-sm font-semibold leading-none tracking-tight">
           <Activity class="size-4 text-muted-foreground" aria-hidden="true" />
           正在执行的动作
@@ -235,9 +235,9 @@
           {/if}
         </h3>
       </div>
-      <div class="p-6 pt-0">
+      <div class="p-4 pt-0 sm:p-6 sm:pt-0">
         {#if activeActions.length === 0}
-          <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+          <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
             <span class="flex size-10 items-center justify-center rounded-full bg-muted">
               <FileClock class="size-5 text-muted-foreground" aria-hidden="true" />
             </span>
@@ -249,10 +249,10 @@
         {:else}
           <div class="flex flex-col gap-2">
             {#each activeActions as action (action.id)}
-              <div class="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-muted/30 px-3 py-2">
                 <Status tone="ok" pulse></Status>
                 <span class="font-mono text-sm tracking-tight">{action.capability}</span>
-                <span class="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:flex-nowrap">
                   <span class="font-mono">#{action.id}</span>
                   {#if action.session}
                     <span class="font-mono">{action.session}</span>
@@ -267,7 +267,7 @@
     </div>
 
     <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-      <div class="flex items-center justify-between gap-1.5 px-6 pb-2 pt-6">
+      <div class="flex items-center justify-between gap-1.5 px-4 pb-2 pt-4 sm:px-6 sm:pt-6">
         <h3 class="flex items-center gap-2 font-display text-sm font-semibold leading-none tracking-tight">
           <Activity class="size-4 text-muted-foreground" aria-hidden="true" />
           实时活动
@@ -277,9 +277,9 @@
           <Button variant="ghost" size="sm">查看全部</Button>
         </a>
       </div>
-      <div class="p-6 pt-0">
+      <div class="p-4 pt-0 sm:p-6 sm:pt-0">
         {#if events.length === 0}
-          <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+          <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
             <span class="flex size-10 items-center justify-center rounded-full bg-muted">
               <FileClock class="size-5 text-muted-foreground" aria-hidden="true" />
             </span>

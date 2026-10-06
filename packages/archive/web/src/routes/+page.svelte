@@ -104,7 +104,7 @@
   <div class="relative z-10 flex min-w-0 flex-1 flex-col">
     <Topbar bind:railOpen />
     <main class="min-w-0 flex-1 overflow-y-auto">
-      <div class="mx-auto w-full max-w-5xl px-6 py-6">
+      <div class="mx-auto w-full max-w-5xl px-3 py-3 sm:px-6 sm:py-6">
         {#if viewStore.current.kind === "message"}
           <MessageView recordId={viewStore.current.recordId} />
         {:else if viewStore.current.kind === "overview"}
@@ -124,8 +124,8 @@
         aria-label="关闭会话清单"
         onclick={() => (railOpen = false)}
       ></button>
-      <aside class="absolute inset-y-0 left-0 flex w-64 animate-fade-in flex-col border-r bg-card shadow-sm">
-        <div class="flex h-14 shrink-0 items-center justify-between border-b px-4">
+      <aside class="absolute inset-y-0 left-0 flex w-[85vw] max-w-64 animate-fade-in flex-col border-r bg-card shadow-sm">
+        <div class="flex h-12 shrink-0 items-center justify-between border-b px-3 sm:h-14 sm:px-4">
           <button
             type="button"
             class="flex items-center gap-2.5 rounded-md text-left"

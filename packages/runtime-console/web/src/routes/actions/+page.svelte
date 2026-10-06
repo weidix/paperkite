@@ -104,15 +104,15 @@
   }
 </script>
 
-<div class="grid gap-4 lg:grid-cols-2">
+<div class="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2">
   <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-    <div class="flex flex-col gap-1.5 px-6 pb-3 pt-6">
+    <div class="flex flex-col gap-1.5 px-4 pb-3 pt-4 sm:px-6 sm:pt-6">
       <h3 class="flex items-center gap-2 font-display text-sm font-semibold leading-none tracking-tight">
         <Play class="size-4 text-muted-foreground" aria-hidden="true" />
         执行动作
       </h3>
     </div>
-    <div class="flex flex-col gap-4 p-6 pt-0">
+    <div class="flex flex-col gap-4 p-4 pt-0 sm:p-6 sm:pt-0">
       <div role="alert" class="relative w-full rounded-lg border bg-card px-4 py-3 text-sm text-card-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground">
         <SlidersHorizontal class="size-4" aria-hidden="true" />
         <div class="inline-flex items-center gap-2 font-medium">临时执行原语</div>
@@ -156,7 +156,7 @@
         {/if}
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div class="flex flex-col gap-1.5">
           <Label for="action-session">会话（可选）</Label>
           <input id="action-session" bind:value={session} class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 font-mono" placeholder="会话名" />
@@ -190,15 +190,15 @@
   </div>
 
   <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-    <div class="flex flex-col gap-1.5 px-6 pb-3 pt-6">
+    <div class="flex flex-col gap-1.5 px-4 pb-3 pt-4 sm:px-6 sm:pt-6">
       <h3 class="flex items-center gap-2 font-display text-sm font-semibold leading-none tracking-tight">
         最近动作
         <Badge variant="secondary">{recent.length}</Badge>
       </h3>
     </div>
-    <div class="p-6 pt-0">
+    <div class="p-4 pt-0 sm:p-6 sm:pt-0">
       {#if recent.length === 0}
-        <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
+        <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center sm:px-6 sm:py-12">
           <span class="flex size-10 items-center justify-center rounded-full bg-muted">
             <Play class="size-5 text-muted-foreground" aria-hidden="true" />
           </span>
@@ -209,14 +209,14 @@
         <div class="flex flex-col">
           {#each recent as entry (entry.seq)}
             {@const view = describeEvent(entry.event)}
-            <div class="flex items-baseline gap-3 border-b py-2 last:border-b-0">
+            <div class="flex flex-wrap items-baseline gap-x-3 border-b py-2 last:border-b-0">
               <span class="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
                 {formatClock(entry.event.at)}
               </span>
               <span class={cn("min-w-0 flex-1 truncate text-sm font-medium", view.tone === "bad" && "text-destructive")}>
                 {view.title}
               </span>
-              <span class="shrink-0 text-xs text-muted-foreground">{view.detail}</span>
+              <span class="w-full text-xs text-muted-foreground sm:w-auto sm:shrink-0">{view.detail}</span>
             </div>
           {/each}
         </div>

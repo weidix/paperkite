@@ -39,7 +39,7 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <section class="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card px-6 py-5 shadow-sm">
+  <section class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-4 shadow-sm sm:gap-4 sm:px-6 sm:py-5">
     <div>
       <h1 class="font-display text-lg font-semibold tracking-tight">归档总览</h1>
       <p class="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-muted-foreground">
@@ -60,10 +60,10 @@
     </div>
   </section>
 
-  <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <div class="rounded-lg border bg-card px-6 py-4 shadow-sm">
-      <div class="flex items-start gap-3">
-        <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+  <section class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div class="rounded-lg border bg-card px-3 py-3 shadow-sm sm:px-6 sm:py-4">
+      <div class="flex items-start gap-2.5 sm:gap-3">
+        <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
           <Archive class="size-4" aria-hidden="true" />
         </span>
         <div class="min-w-0">
@@ -72,9 +72,9 @@
         </div>
       </div>
     </div>
-    <div class="rounded-lg border bg-card px-6 py-4 shadow-sm">
-      <div class="flex items-start gap-3">
-        <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+    <div class="rounded-lg border bg-card px-3 py-3 shadow-sm sm:px-6 sm:py-4">
+      <div class="flex items-start gap-2.5 sm:gap-3">
+        <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
           <Hash class="size-4" aria-hidden="true" />
         </span>
         <div class="min-w-0">
@@ -86,9 +86,9 @@
         </div>
       </div>
     </div>
-    <div class="rounded-lg border bg-card px-6 py-4 shadow-sm">
-      <div class="flex items-start gap-3">
-        <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+    <div class="rounded-lg border bg-card px-3 py-3 shadow-sm sm:px-6 sm:py-4">
+      <div class="flex items-start gap-2.5 sm:gap-3">
+        <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
           <ShieldBan class="size-4" aria-hidden="true" />
         </span>
         <div class="min-w-0">
@@ -102,9 +102,9 @@
         </div>
       </div>
     </div>
-    <div class="rounded-lg border bg-card px-6 py-4 shadow-sm">
-      <div class="flex items-start gap-3">
-        <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+    <div class="rounded-lg border bg-card px-3 py-3 shadow-sm sm:px-6 sm:py-4">
+      <div class="flex items-start gap-2.5 sm:gap-3">
+        <span class="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground sm:size-8">
           <UserRound class="size-4" aria-hidden="true" />
         </span>
         <div class="min-w-0">
@@ -121,7 +121,7 @@
   </section>
 
   <section class="rounded-lg border bg-card shadow-sm">
-    <div class="flex items-center justify-between px-6 pb-2 pt-4">
+    <div class="flex items-center justify-between px-4 pb-2 pt-3 sm:px-6 sm:pt-4">
       <p class="text-xs font-medium tracking-wide text-muted-foreground">最近活跃会话</p>
       <button
         type="button"
@@ -141,7 +141,7 @@
           <Button variant="ghost" size="sm" class="mt-3" onclick={() => loadChats(true)}>重试</Button>
         </div>
       {:else if chats.loading && chats.items.length === 0}
-        <div class="grid gap-1.5">
+        <div class="grid grid-cols-1 gap-1.5">
           {#each Array(5) as _, i (i)}
             <div class="h-11 animate-pulse rounded-md bg-muted"></div>
           {/each}
@@ -152,7 +152,7 @@
           <p class="mt-1 font-mono text-[11px] text-muted-foreground/70">archive.sync 落库后这里会出现会话</p>
         </div>
       {:else}
-        <div class="grid gap-1.5">
+        <div class="grid grid-cols-1 gap-1.5">
           {#each recent as chat (chat.chatId)}
             <button
               type="button"
@@ -161,7 +161,7 @@
             >
               <span class="min-w-0 flex-1">
                 <span class="flex items-baseline gap-2">
-                  <span class="truncate text-[13px] font-medium leading-5">{chatLabel(chat)}</span>
+                  <span class="min-w-0 truncate text-[13px] font-medium leading-5">{chatLabel(chat)}</span>
                   {#if chat.username}
                     <span class="shrink-0 font-mono text-[10px] text-muted-foreground/80">@{chat.username}</span>
                   {/if}

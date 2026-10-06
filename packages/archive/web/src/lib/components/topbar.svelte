@@ -20,7 +20,7 @@
   );
 </script>
 
-<header class="flex h-14 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm">
+<header class="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-sm sm:h-14 sm:gap-3 sm:px-4">
   <Button
     variant="ghost"
     size="icon"

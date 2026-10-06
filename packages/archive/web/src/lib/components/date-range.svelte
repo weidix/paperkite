@@ -42,13 +42,16 @@
     from = $bindable(""),
     to = $bindable(""),
     mode = $bindable<TimeMode>("include"),
-    onchange
+    onchange,
+    class: className = ""
   }: {
     from?: string;
     to?: string;
     mode?: TimeMode;
     /** 预设/开关即时生效；手动点选经应用按钮提交。 */
     onchange?: () => void;
+    /** 触发器容器宽度；窄屏由父级 flex 尺寸决定。 */
+    class?: string;
   } = $props();
 
   let open = $state(false);
@@ -160,11 +163,11 @@
   });
 </script>
 
-<div bind:this={rootEl} class="relative shrink-0">
+<div bind:this={rootEl} class={cn("relative w-36", className)}>
   <button
     type="button"
     class={cn(
-      "inline-flex h-9 w-36 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+      "inline-flex h-9 w-full items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
       (from !== "" || to !== "") ? "text-foreground" : "text-muted-foreground"
     )}
     aria-haspopup="dialog"
@@ -178,7 +181,7 @@
 
   {#if open}
     <div
-      class="absolute right-0 top-full z-30 mt-1.5 w-80 rounded-md border bg-popover p-2.5 text-popover-foreground shadow-md"
+      class="absolute right-0 top-full z-30 mt-1.5 w-80 rounded-md border bg-popover p-2.5 text-popover-foreground shadow-md max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[70vh] max-sm:w-auto max-sm:overflow-y-auto"
       role="dialog"
       aria-label="日期范围"
     >

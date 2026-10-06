@@ -91,7 +91,7 @@
     type="button"
     disabled={senderId === ""}
     class={cn(
-      "rounded-md p-1.5 text-muted-foreground opacity-40 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100",
+      "rounded-md p-2 text-muted-foreground opacity-40 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100 max-sm:opacity-100 sm:p-1.5",
       "disabled:cursor-not-allowed disabled:opacity-20"
     )}
     aria-label={senderId ? `用户 ${senderLabelOf(senderId)} 的操作` : "该消息没有发送者"}
@@ -99,7 +99,7 @@
     aria-expanded={open}
     onclick={() => (open = !open)}
   >
-    <UserRoundSearch class="size-3.5" aria-hidden="true" />
+    <UserRoundSearch class="size-4 sm:size-3.5" aria-hidden="true" />
   </button>
 
   {#if open}

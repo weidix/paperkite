@@ -166,13 +166,13 @@
 <div class="relative shrink-0">
   <button
     type="button"
-    class="rounded-md p-1.5 text-muted-foreground opacity-40 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100"
+    class="rounded-md p-2 text-muted-foreground opacity-40 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 group-hover:opacity-100 max-sm:opacity-100 sm:p-1.5"
     aria-label="消息操作"
     aria-haspopup="dialog"
     aria-expanded={open}
     onclick={toggle}
   >
-    <MoreHorizontal class="size-3.5" aria-hidden="true" />
+    <MoreHorizontal class="size-4 sm:size-3.5" aria-hidden="true" />
   </button>
 
   {#if open}

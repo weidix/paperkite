@@ -318,7 +318,7 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <div class="sticky top-0 z-20 -mx-6 -mt-6 border-b border-border/60 bg-background/95 px-6 pb-3 pt-6 backdrop-blur-sm">
+  <div class="sticky top-0 z-20 -mx-3 -mt-3 border-b border-border/60 bg-background/95 px-3 pb-2 pt-3 backdrop-blur-sm sm:-mx-6 sm:-mt-6 sm:px-6 sm:pb-3 sm:pt-6">
     <div class="flex items-center gap-2">
       <Button variant="ghost" size="icon" class="size-8" aria-label="返回检索" onclick={() => navigate(backToSearch())}>
         <ArrowLeft class="size-4" aria-hidden="true" />
@@ -332,10 +332,10 @@
             })}
           </h1>
           {#if archiveState?.session}
-            <span class="shrink-0 font-mono text-[10px] text-muted-foreground">会话 {archiveState.session}</span>
+            <span class="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:inline">会话 {archiveState.session}</span>
           {/if}
         </div>
-        <div class="mt-0.5 font-mono text-[11px] text-muted-foreground">
+        <div class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
           {#if messageAnchor}
             #{messageAnchor.messageId} · 行 {messageAnchor.recordId} · {fmtTs(messageAnchor.date)} · {messageAnchor.messageType}
           {:else if album}
@@ -346,12 +346,12 @@
         </div>
       </div>
       {#if anchorRecord?.senderId}
-        <Button variant="ghost" size="sm" class="hidden sm:inline-flex" onclick={openSenderInChat}>
+        <Button variant="ghost" size="sm" class="max-sm:hidden" onclick={openSenderInChat}>
           <UserRoundSearch class="size-3.5" aria-hidden="true" />
           该用户在此会话
         </Button>
       {/if}
-      <Button variant="ghost" size="sm" class="hidden sm:inline-flex" onclick={openInChat}>
+      <Button variant="ghost" size="sm" class="max-sm:hidden" onclick={openInChat}>
         在会话中打开
         <ChevronRight class="size-3.5" aria-hidden="true" />
       </Button>
@@ -368,7 +368,7 @@
         <Button variant="ghost" size="sm" class="mt-3" onclick={() => loadContext(recordId)}>重试</Button>
       </div>
     {:else if anchor === null}
-      <div class="grid gap-4">
+      <div class="grid grid-cols-1 gap-4">
         {#each Array(4) as _, i (i)}
           <div class="h-16 animate-pulse rounded-xl bg-muted"></div>
         {/each}
@@ -381,7 +381,7 @@
         </div>
       {/if}
       <div class="rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="px-4 py-3">
+        <div class="px-3 py-3 sm:px-4">
           <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span class="truncate text-sm font-medium">{anchorRecord ? senderName(anchorRecord) : ""}</span>
             <span class="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
@@ -473,7 +473,7 @@
       </div>
 
       <div class="mt-2 rounded-lg border bg-card text-card-foreground shadow-sm">
-        <div class="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
+        <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2.5 sm:px-4">
           <Reply class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span class="font-display text-sm font-semibold tracking-tight">回复链</span>
           {#if chain?.replyToMessageId !== undefined}
@@ -486,19 +486,19 @@
           </span>
         </div>
         {#if chainError}
-          <div class="flex items-center gap-2 px-4 py-3">
+          <div class="flex items-center gap-2 px-3 py-3 sm:px-4">
             <p class="min-w-0 flex-1 font-mono text-[11px] text-muted-foreground">{chainError}</p>
             <Button variant="ghost" size="sm" onclick={() => (chainSeq += 1)}>重试</Button>
           </div>
         {:else if chain === null}
-          <div class="grid gap-1 p-4">
+          <div class="grid grid-cols-1 gap-1 p-4">
             {#each Array(2) as _, i (i)}
               <div class="h-10 animate-pulse rounded-lg bg-muted"></div>
             {/each}
           </div>
         {:else}
           {#if chain.parent}
-            <div class="border-b border-border/60 px-4 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground">
+            <div class="border-b border-border/60 px-3 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground sm:px-4">
               回复对象
             </div>
             {#if chain.parent.kind === "album"}
@@ -508,7 +508,7 @@
             {/if}
           {/if}
           {#if chain.children.length > 0}
-            <div class="border-b border-border/60 px-4 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground">
+            <div class="border-b border-border/60 px-3 pt-2.5 font-mono text-[10px] tracking-widest text-muted-foreground sm:px-4">
               回复者 · {fmtCount(chain.children.length)}
             </div>
             {#each chain.children as entry (entryRecordId(entry))}
@@ -520,7 +520,7 @@
             {/each}
           {/if}
           {#if !chain.parent && chain.children.length === 0}
-            <p class="px-4 py-3 font-mono text-[11px] text-muted-foreground">这条消息没有回复关系。</p>
+            <p class="px-3 py-3 font-mono text-[11px] text-muted-foreground sm:px-4">这条消息没有回复关系。</p>
           {/if}
         {/if}
       </div>
