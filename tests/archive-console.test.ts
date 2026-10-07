@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createServer } from "node:net";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Api } from "telegram";
@@ -771,6 +772,47 @@ test("archive console service boots over http and stops on abort", async () => {
   controller.abort();
   await running;
   await assert.rejects(fetch(base + "/api/state"));
+});
+
+test("archive console serves its bundled shell when no publicDir is configured", async (t) => {
+  // 从编译产物启动：模块位置决定静态资源目录，工作目录不再参与解析
+  const compiled = resolve("packages/archive/dist/console/service.js");
+  try {
+    await access(resolve("packages/archive/public/index.html"));
+    await access(compiled);
+  } catch {
+    t.skip("需要 pnpm build 先产出 dist 与 public");
+    return;
+  }
+  const { ArchiveConsoleWebService: CompiledService, bundledPublicDirectory } = await import(pathToFileURL(compiled).href) as {
+    ArchiveConsoleWebService: new () => { run(context: ServiceContext<Record<string, unknown>>): Promise<void> };
+    bundledPublicDirectory(moduleUrl: string): string;
+  };
+  // 编译产物位于 dist/console/，解析结果必须落在包根的 public 上
+  const resolved = bundledPublicDirectory(pathToFileURL(compiled).href);
+  assert.equal(resolved, resolve("packages/archive/public"));
+  await assert.doesNotReject(access(join(resolved, "index.html")));
+  const tmp = await mkdtemp(join(tmpdir(), "paperkite-archive-bundled-"));
+  const port = await freePort();
+  const controller = new AbortController();
+  const running = new CompiledService().run({
+    id: "archive-console",
+    abi: 0,
+    capability: "archive.console",
+    config: { file: join(tmp, "archive.db"), host: "127.0.0.1", port },
+    signal: controller.signal,
+    logger
+  });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await waitForHttp(base + "/api/state");
+    const page = await fetch(base + "/");
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /_app\/immutable/);
+  } finally {
+    controller.abort();
+    await running;
+  }
 });
 
 test("archive console blockwords hide matching messages across all surfaces", async () => {

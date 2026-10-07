@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
@@ -96,13 +96,20 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * 前端资源目录：本模块位于 <包根>/{src,dist}/console/，上两级是包根，public 与之同级。
+ * 依赖模块自身位置而非工作目录，全局安装的插件才能找到随包分发的前端。
+ */
+export function bundledPublicDirectory(moduleUrl: string): string {
+  return fileURLToPath(new URL("../../public", moduleUrl));
+}
+
 async function publicDirectory(configured: string | undefined): Promise<string> {
-  if (configured) return resolve(configured);
-  const local = fileURLToPath(new URL("../public", import.meta.url));
+  const local = configured ? resolve(configured) : bundledPublicDirectory(import.meta.url);
   try {
-    await access(local);
+    await access(join(local, "index.html"));
     return local;
   } catch {
-    return resolve(process.cwd(), "packages/archive/public");
+    throw new Error(`archive console 前端资源缺失：${local} 下没有 index.html，请先构建插件前端`);
   }
 }
