@@ -44,6 +44,7 @@ import {
   toIsoDate,
   uniqueGroupKeys
 } from "./model.js";
+import { resolveMime } from "../mime.js";
 
 const MESSAGE_COLUMNS = `
   m.id AS row_id, m.message_id, m.chat_id, m.grouped_id, m.chat_title, m.date,
@@ -906,7 +907,7 @@ export class SqliteArchiveStore implements ArchiveStore {
 
   private fetchMediaFiles(pairs: readonly (readonly [string, number])[]): Map<string, StoredMediaFile[]> {
     const sql = `
-      SELECT id, message_id, chat_id, media_type, mime_type
+      SELECT id, message_id, chat_id, media_type, file_name, file_path, mime_type
         FROM media_files
        WHERE ${pairClause("message_id", pairs)}
        ORDER BY id ASC
@@ -971,16 +972,23 @@ function pushGrouped<T>(map: Map<string, T[]>, key: string, item: T): void {
   items.push(item);
 }
 
+/** 消息级 mime：优先取已按文件名解析过的媒体文件，缺媒体时退回原值。 */
+function recordMime(stored: string | undefined, mediaFiles: readonly StoredMediaFile[]): string | undefined {
+  return mediaFiles[0]?.mimeType ?? resolveMime(stored);
+}
+
 function toStoredMediaFile(row: Record<string, unknown>): StoredMediaFile {
+  const fileName = optionalString(row.file_name);
+  const filePath = optionalString(row.file_path);
   return {
     id: String(row.id),
     messageId: Number(row.message_id),
     chatId: String(row.chat_id),
     mediaType: String(row.media_type ?? "document"),
-    fileName: optionalString(row.file_name),
-    filePath: optionalString(row.file_path),
+    fileName,
+    filePath,
     fileSize: optionalNumber(row.file_size),
-    mimeType: optionalString(row.mime_type)
+    mimeType: resolveMime(optionalString(row.mime_type), fileName, filePath)
   };
 }
 
@@ -994,7 +1002,7 @@ function toAlbumRow(row: Record<string, unknown>): AlbumRow {
     hasMedia: Boolean(row.has_media),
     mediaType: optionalString(row.media_type),
     messageType: optionalString(row.message_type),
-    mimeType: optionalString(row.mime_type)
+    mimeType: resolveMime(optionalString(row.mime_type))
   };
 }
 
@@ -1022,7 +1030,7 @@ function toMessageRecord(
     hasMedia: Boolean(row.has_media),
     mediaType: optionalString(row.media_type),
     messageType: optionalString(row.message_type) ?? "text",
-    mimeType: optionalString(row.mime_type),
+    mimeType: recordMime(optionalString(row.mime_type), mediaFiles),
     replyToMessageId: row.reply_to_msg_id === null || row.reply_to_msg_id === undefined ? undefined : Number(row.reply_to_msg_id),
     replyToText: optionalString(row.reply_to_text),
     forwardFromId: optionalString(row.forward_from_id),

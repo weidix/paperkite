@@ -11,9 +11,20 @@ import { showLightbox, type LightboxItem } from "$lib/state.svelte";
 /** 媒体视觉类型：image/video 出缩略图，audio/file 出图标。 */
 export type MediaKind = "image" | "video" | "audio" | "file";
 
+/** Telegram 报的占位类型无法用于分流，等同于缺值。 */
+function isOpaqueMime(mime: string | undefined): boolean {
+  const value = mime?.trim().toLowerCase() ?? "";
+  return value === "" || value === "application/octet-stream" || value === "binary/octet-stream";
+}
+
+/** 具体类型：占位或缺值时返回空串，交给 mediaType 兜底。 */
+function concreteMime(mime: string | undefined): string {
+  return isOpaqueMime(mime) ? "" : mime!.trim().toLowerCase();
+}
+
 /** 落盘文件的类型判定：mime 优先，照片/贴纸/动图按图片处理。 */
 export function kindOfFile(file: StoredMediaFile): MediaKind {
-  const mime = file.mimeType ?? "";
+  const mime = concreteMime(file.mimeType);
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
@@ -25,7 +36,7 @@ export function kindOfFile(file: StoredMediaFile): MediaKind {
 
 /** 消息行类型判定：与 kindOfFile 同序，供未落盘行使用。 */
 export function kindOfRow(row: { mediaType?: string; mimeType?: string }): MediaKind {
-  const mime = row.mimeType ?? "";
+  const mime = concreteMime(row.mimeType);
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
@@ -41,11 +52,14 @@ export interface RowThumb {
   readonly url?: string;
 }
 
-/** 消息行缩略图：优先落盘文件，未落盘的 image/video 用原生缩略图。 */
+/** 消息行缩略图：图片用落盘文件，视频用原生封面，未落盘行走原生缩略图。 */
 export function fileThumbOf(record: MessageRecord): RowThumb {
   const file = record.mediaFiles[0];
-  if (file !== undefined) return { kind: kindOfFile(file), url: mediaDiskUrl(file.id) };
-  return rowThumbOf(record);
+  if (file === undefined) return rowThumbOf(record);
+  const kind = kindOfFile(file);
+  if (kind === "image") return { kind, url: mediaDiskUrl(file.id) };
+  if (kind === "video" && record.hasMedia) return { kind, url: mediaRowUrl(record.recordId) };
+  return { kind };
 }
 
 export function rowThumbOf(row: { recordId: string; hasMedia: boolean; mediaType?: string; mimeType?: string }): RowThumb {
@@ -54,14 +68,15 @@ export function rowThumbOf(row: { recordId: string; hasMedia: boolean; mediaType
   return { kind, url: mediaRowUrl(row.recordId) };
 }
 
-/** 预览 mime：库里缺 mime 时按媒体类型给占位，保证预览分支正确分流。 */
+/** 预览 mime：库里缺 mime 或只报占位类型时按媒体类型给具体值，保证预览分支正确分流。 */
 export function previewMimeOf(value: { readonly mimeType?: string; readonly mediaType?: string }): string {
   const mime = value.mimeType?.trim();
-  if (mime) return mime;
+  if (mime && !isOpaqueMime(mime)) return mime;
   switch (value.mediaType) {
     case "video": return "video/mp4";
     case "audio": return "audio/mpeg";
-    case "animation": return "image/gif";
+    case "sticker": return "image/webp";
+    case "animation": return "video/mp4";
     default: return "application/octet-stream";
   }
 }
@@ -100,7 +115,7 @@ export function openAlbumLightbox(entry: AlbumContextEntry, rowIndex = 0): void 
 function itemForFile(file: StoredMediaFile): LightboxItem {
   return {
     name: file.fileName ?? `media_${file.id}`,
-    mime: file.mimeType ?? "",
+    mime: previewMimeOf(file),
     size: file.fileSize,
     spec: file.mediaType,
     load: () => loadPreview(file)
@@ -124,7 +139,12 @@ async function loadPreview(file: StoredMediaFile): Promise<{ url: string; source
   try {
     const meta = await fetchMediaMeta(file.id);
     if (meta.onDisk) {
-      return { url: mediaDiskUrl(file.id), source: "落盘", mime: file.mimeType ?? "", downloadUrl: mediaDownloadUrl(file.id, "file") };
+      return {
+        url: mediaDiskUrl(file.id),
+        source: "落盘",
+        mime: meta.file.mimeType ?? previewMimeOf(file),
+        downloadUrl: mediaDownloadUrl(file.id, "file")
+      };
     }
   } catch {
     // 元数据不可得时按在线取回处理

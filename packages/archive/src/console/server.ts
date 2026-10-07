@@ -6,7 +6,8 @@ import type { ArchiveStore, MessageEntity, MessageRecord, StoredMediaFile, TimeM
 import { normalizeContextLimit, normalizeDate, normalizeLimit, normalizeOffset, normalizeRecordId, normalizeTimeMode } from "../storage/index.js";
 import { normalizeEntities, type TelegramMessage } from "../archiver.js";
 import { LiveMediaError, LiveMediaStreamer } from "./live.js";
-import { diskMediaInfo, extFromMime, fetchLiveMedia, fetchLiveThumb, fileNameOf, isMissingPeer, isPhotoLike, mimeFromName, parseRange, resolveChatEntity } from "./media.js";
+import { resolveMime, extFromMime } from "../mime.js";
+import { diskMediaInfo, fetchLiveMedia, fetchLiveThumb, fileNameOf, isMissingPeer, isPhotoLike, parseRange, resolveChatEntity } from "./media.js";
 
 export interface ArchiveConsoleServerOptions {
   readonly store: ArchiveStore;
@@ -276,7 +277,8 @@ function registerRoutes(
     try {
       const file = await store.getMediaFileById(recordIdOr(request.params.id));
       if (!file) throw new HttpError(404, "媒体记录不存在");
-      return { file, onDisk: (await diskMediaInfo(file, mediaDir)) !== undefined };
+      const info = await diskMediaInfo(file, mediaDir);
+      return { file: info?.mime !== undefined ? { ...file, mimeType: info.mime } : file, onDisk: info !== undefined };
     } catch (error) {
       return sendError(reply, error, logger);
     }
@@ -345,7 +347,7 @@ function registerRoutes(
         if (!file) throw new HttpError(404, "媒体记录不存在");
         const info = await diskMediaInfo(file, mediaDir);
         if (!info) throw new HttpError(404, "媒体文件未落盘");
-        return sendMediaStream(request, reply, file, info.path, info.size, file.mimeType);
+        return sendMediaStream(request, reply, file, info.path, info.size, info.mime ?? file.mimeType);
       } catch (error) {
         return sendError(reply, error, logger);
       }
@@ -378,7 +380,7 @@ async function sendMediaStream(
   size: number,
   storedMime: string | undefined
 ): Promise<FastifyReply | undefined> {
-  const mime = storedMime?.trim() || mimeFromName(path);
+  const mime = resolveMime(storedMime, file.fileName, path) ?? "application/octet-stream";
   const name = fileNameOf(file, path);
   reply.header("content-type", mime);
   reply.header("accept-ranges", "bytes");

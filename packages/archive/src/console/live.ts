@@ -6,7 +6,8 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
 import type { ArchiveClient } from "../archiver.js";
 import type { StoredMediaFile } from "../storage/index.js";
-import { extFromMime, fetchMessage, fileNameOf, isMissingPeer, liveMediaMime, parseRange, unwrapWebPage } from "./media.js";
+import { extFromMime } from "../mime.js";
+import { fetchMessage, fileNameOf, isMissingPeer, liveMediaMime, parseRange, unwrapWebPage } from "./media.js";
 
 const CHUNK_BYTES = 512 * 1024;
 

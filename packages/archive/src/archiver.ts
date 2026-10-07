@@ -1,6 +1,7 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, open } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { RuntimeLogger } from "@paperkite/sdk";
+import { isOpaqueMime, resolveMime, sniffMime } from "./mime.js";
 import type { ArchiveStore, LastMessageInfo, MediaRow, MessageEntity, MessageRow } from "./storage/index.js";
 
 export interface TelegramMessage {
@@ -368,12 +369,14 @@ export class MessageArchiver {
         const ext = photoOf(message.media) ? "jpg" : documentExtension(document) ?? "bin";
         const filePath = await client.downloadMedia(message, { outputFile: join(chatDir, `msg_${message.id}.${ext}`) });
         if (!filePath) continue;
+        const name = basename(String(filePath));
+        const declared = resolveMime(optionalText(document?.mimeType), documentFileName(document), name);
         results.push({
           messageId: message.id,
-          fileName: basename(String(filePath)),
+          fileName: name,
           filePath: String(filePath),
           fileSize: optionalNumber(document?.size),
-          mimeType: optionalText(document?.mimeType)
+          mimeType: (await resolveStoredMime(declared, String(filePath))) ?? declared
         });
       } catch (error) {
         this.deps.logger.warn("failed to download media for message " + message.id, error);
@@ -435,7 +438,7 @@ function describeMedia(media: unknown): { messageType: string; mediaType?: strin
   if (className(media) === "MessageMediaDocument") {
     const document = recordOf(documentOf(media) ?? media);
     const attributes = Array.isArray(document?.attributes) ? document.attributes as unknown[] : [];
-    const mimeType = optionalText(document?.mimeType);
+    const mimeType = resolveMime(optionalText(document?.mimeType), documentFileName(document));
     if (attributes.some(hasName("DocumentAttributeSticker"))) {
       return { messageType: "sticker", mediaType: "sticker", mimeType: mimeType ?? "image/webp" };
     }
@@ -448,6 +451,32 @@ function describeMedia(media: unknown): { messageType: string; mediaType?: strin
     return { messageType: "document", mediaType: "document", mimeType };
   }
   return { messageType: "text" };
+}
+
+function documentFileName(document: unknown): string | undefined {
+  const attributes = Array.isArray(recordOf(document)?.attributes) ? recordOf(document)!.attributes as unknown[] : [];
+  for (const attribute of attributes) {
+    if (!hasName("DocumentAttributeFilename")(attribute)) continue;
+    const fileName = optionalText(recordOf(attribute)?.fileName);
+    if (fileName) return fileName;
+  }
+  return undefined;
+}
+
+/** 声明类型仍不可用时读文件头判定：仅覆盖无需解码的常见容器。 */
+async function resolveStoredMime(declared: string | undefined, path: string): Promise<string | undefined> {
+  if (!isOpaqueMime(declared)) return declared;
+  let handle;
+  try {
+    handle = await open(path, "r");
+    const buffer = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead > 0 ? sniffMime(buffer.subarray(0, bytesRead)) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 }
 
 function documentExtension(document: unknown): string | undefined {

@@ -224,7 +224,7 @@ async function seed(store: SqliteArchiveStore, mediaDir: string, video = false):
 }
 
 /** 文档型消息夹具：真实 gramjs 对象，供 getFileInfo/iterMediaChunks 走构造。 */
-function videoMessage(id: number, size: number, mime = "video/mp4"): TelegramMessage {
+function videoMessage(id: number, size: number, mime = "video/mp4", fileName?: string): TelegramMessage {
   return {
     id,
     date: 0,
@@ -237,7 +237,9 @@ function videoMessage(id: number, size: number, mime = "video/mp4"): TelegramMes
         size,
         fileReference: Buffer.from("ref"),
         date: 0,
-        attributes: [],
+        attributes: fileName === undefined
+          ? []
+          : [new Api.DocumentAttributeFilename({ fileName } as unknown as ConstructorParameters<typeof Api.DocumentAttributeFilename>[0])],
         thumbs: [],
         videoThumbs: []
       } as unknown as ConstructorParameters<typeof Api.Document>[0])
@@ -1399,6 +1401,95 @@ test("archive console album folds the whole group when only one member matches",
     assert.equal(body.totalMessages, 3);
     const album = body.items.find((item: { kind: string }) => item.kind === "album");
     assert.equal(album.rows.length, 2);
+  } finally {
+    await h.close();
+  }
+});
+
+/** ISO BMFF 头：ftyp/isom，供字节判定用例使用。 */
+const MP4_HEAD = Buffer.from("0000001c6674797069736f6d0000020069736f6d69736f323000000008667265650000", "hex");
+
+test("archive console resolves an opaque stored mime from the file name", async () => {
+  const h = await harness();
+  try {
+    const path = join(h.mediaDir, "clip.mp4");
+    await writeFile(path, MP4_HEAD);
+    await h.store.saveBatch(
+      [{
+        messageId: 20, chatId: "100", chatTitle: "测试群", date: "2025-03-05T10:00:00.000Z",
+        text: "以文档形式发出的视频", messageType: "document", hasMedia: true, mediaType: "document"
+      }],
+      [{
+        messageId: 20, chatId: "100", mediaType: "document", fileName: "clip.mp4",
+        filePath: path, fileSize: MP4_HEAD.length, mimeType: "application/octet-stream"
+      }]
+    );
+
+    const search = await h.server.inject({ method: "GET", url: "/api/search?limit=50" });
+    const items = search.json().items as { kind: string; record?: unknown; rows?: unknown[] }[];
+    const record = items
+      .map((item) => (item.kind === "album" ? item.rows![0] : item.record))
+      .find((row) => (row as { messageId: number }).messageId === 20) as {
+        mimeType: string;
+        mediaFiles: { id: string; fileName?: string; mimeType?: string }[];
+      };
+    assert.equal(record.mimeType, "video/mp4");
+    assert.equal(record.mediaFiles[0]?.fileName, "clip.mp4");
+    assert.equal(record.mediaFiles[0]?.mimeType, "video/mp4");
+
+    const bytes = await h.server.inject({ method: "GET", url: `/api/mediafiles/${record.mediaFiles[0]!.id}/file` });
+    assert.equal(bytes.statusCode, 200);
+    assert.equal(bytes.headers["content-type"], "video/mp4");
+
+    const meta = await h.server.inject({ method: "GET", url: `/api/mediafiles/${record.mediaFiles[0]!.id}` });
+    assert.equal(meta.json().file.mimeType, "video/mp4");
+    assert.equal(meta.json().onDisk, true);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console sniffs the bytes when the stored mime and the file name are both unusable", async () => {
+  const h = await harness();
+  try {
+    const path = join(h.mediaDir, "blob.bin");
+    await writeFile(path, MP4_HEAD);
+    await h.store.saveBatch(
+      [{
+        messageId: 21, chatId: "100", chatTitle: "测试群", date: "2025-03-05T11:00:00.000Z",
+        text: "没有扩展名的视频", messageType: "document", hasMedia: true, mediaType: "document"
+      }],
+      [{
+        messageId: 21, chatId: "100", mediaType: "document", fileName: "blob.bin",
+        filePath: path, fileSize: MP4_HEAD.length, mimeType: "application/octet-stream"
+      }]
+    );
+
+    const meta = await h.server.inject({ method: "GET", url: "/api/mediafiles/4" });
+    assert.equal(meta.json().file.fileName, "blob.bin");
+    assert.equal(meta.json().file.mimeType, "video/mp4");
+
+    const bytes = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/file" });
+    assert.equal(bytes.headers["content-type"], "video/mp4");
+    assert.deepEqual([...bytes.rawPayload], [...MP4_HEAD]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("archive console streams a telegram document by its file name when the mime is opaque", async () => {
+  const chunks = [Buffer.from("0123456789abcdefghij")];
+  const h = await harness({
+    session: true,
+    seedVideo: true,
+    chunks,
+    message: videoMessage(6, 20, "application/octet-stream", "clip.mp4")
+  });
+  try {
+    const full = await h.server.inject({ method: "GET", url: "/api/mediafiles/4/live" });
+    assert.equal(full.statusCode, 200);
+    assert.equal(full.headers["content-type"], "video/mp4");
+    assert.equal(full.rawPayload.toString(), "0123456789abcdefghij");
   } finally {
     await h.close();
   }

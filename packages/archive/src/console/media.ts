@@ -1,8 +1,9 @@
-import { readFile, stat } from "node:fs/promises";
-import { extname, resolve, sep } from "node:path";
+import { open, readFile, stat } from "node:fs/promises";
+import { resolve, sep } from "node:path";
 import { utils } from "telegram";
 import type { RuntimeLogger, SessionAccess } from "@paperkite/sdk";
 import type { ArchiveClient, TelegramMessage, ThumbParam } from "../archiver.js";
+import { isOpaqueMime, resolveMime, sniffMime } from "../mime.js";
 import type { StoredMediaFile } from "../storage/index.js";
 
 export interface LiveMediaResult {
@@ -26,32 +27,6 @@ export interface LiveMediaOptions {
   readonly logger: RuntimeLogger;
 }
 
-const EXT_MIME: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".heic": "image/heic",
-  ".avif": "image/avif",
-  ".svg": "image/svg+xml",
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-  ".mkv": "video/x-matroska",
-  ".mp3": "audio/mpeg",
-  ".ogg": "audio/ogg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".pdf": "application/pdf",
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".json": "application/json",
-  ".zip": "application/zip",
-  ".7z": "application/x-7z-compressed",
-  ".rar": "application/vnd.rar"
-};
-
 /** 落盘路径解析：配置 mediaDir 时限定其内，否则相对进程工作目录解析。 */
 export function resolveMediaPath(raw: string | undefined, mediaDir: string | undefined): string | undefined {
   const text = raw?.trim();
@@ -62,21 +37,12 @@ export function resolveMediaPath(raw: string | undefined, mediaDir: string | und
   return path;
 }
 
-export function mimeFromName(path: string): string {
-  return EXT_MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
-}
-
 /** 图片类媒体整图取回，其余（视频/音频/文档）走渐进式流。 */
 export function isPhotoLike(value: { readonly mediaType?: string; readonly mimeType?: string }): boolean {
   const mime = value.mimeType ?? "";
   if (mime.startsWith("image/")) return true;
   const type = value.mediaType;
   return type === "photo" || type === "sticker";
-}
-
-/** MIME 反查扩展名（用于在线取回媒体的下载命名）。 */
-export function extFromMime(mime: string): string {
-  return Object.entries(EXT_MIME).find(([, value]) => value === mime)?.[0] ?? "";
 }
 
 export function fileNameOf(file: StoredMediaFile, path: string): string {
@@ -179,7 +145,7 @@ export async function fetchLiveThumb(
     if (result.state === "no-thumb") return { ok: false, missing: false, noThumb: true };
     if (result.state === "unavailable") return { ok: false, missing: false };
     const buffer = result.bytes instanceof Buffer ? result.bytes : await readFile(result.bytes);
-    return { ok: true, bytes: buffer, mime: snifImageMime(buffer) ?? result.mime };
+    return { ok: true, bytes: buffer, mime: sniffMime(buffer) ?? result.mime };
   } catch (error) {
     const missing = isMissingPeer(error);
     if (missing) {
@@ -271,18 +237,6 @@ function numberValue(value: unknown): number | undefined {
   return Number.isFinite(number) ? number : undefined;
 }
 
-/** 贴纸/动图缩略图常以 webp 字节返回：按魔数修正 content-type。 */
-function snifImageMime(bytes: Buffer): string | undefined {
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
-    return "image/webp";
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
-  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return "image/gif";
-  return undefined;
-}
-
 function arrayOf(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
@@ -361,15 +315,29 @@ function isUnresolvedEntityError(error: unknown): boolean {
   return /could not find (the )?input entity/i.test(message);
 }
 
+/** 在线媒体的可预览类型：显式 mime 不可用时按文档文件名兜底，避免把视频当成二进制流下发。 */
 export function liveMediaMime(message: TelegramMessage): string {
   const media = message.media;
   if (className(media) === "MessageMediaPhoto") return "image/jpeg";
   if (className(media) === "MessageMediaDocument") {
     const document = recordOf(recordOf(media)?.document);
-    const mime = document?.mimeType;
-    if (typeof mime === "string" && mime.trim()) return mime.trim();
+    const resolved = resolveMime(optionalMime(document?.mimeType), documentFileName(document));
+    if (resolved) return resolved;
   }
   return "application/octet-stream";
+}
+
+function optionalMime(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** 文档属性里的原始文件名：Telegram 报 octet-stream 时据此推断真实类型。 */
+function documentFileName(document: Record<string, unknown> | undefined): string | undefined {
+  for (const attribute of arrayOf(document?.attributes)) {
+    const fileName = recordOf(attribute)?.fileName;
+    if (typeof fileName === "string" && fileName.trim()) return fileName.trim();
+  }
+  return undefined;
 }
 
 function className(value: unknown): string {
@@ -386,6 +354,23 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 export interface DiskMediaInfo {
   readonly path: string;
   readonly size: number;
+  /** 声明类型不可用时按字节头判定的类型，供预览分流与下发使用。 */
+  readonly mime?: string;
+}
+
+/** 读取文件头判定媒体类型：扩展名缺失（.bin 等）时仍能把视频交回播放器。 */
+export async function sniffFileMime(path: string): Promise<string | undefined> {
+  let handle;
+  try {
+    handle = await open(path, "r");
+    const buffer = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead > 0 ? sniffMime(buffer.subarray(0, bytesRead)) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 }
 
 export async function diskMediaInfo(
@@ -396,7 +381,10 @@ export async function diskMediaInfo(
   if (!path) return undefined;
   try {
     const info = await stat(path);
-    return info.isFile() ? { path, size: info.size } : undefined;
+    if (!info.isFile()) return undefined;
+    const declared = resolveMime(file.mimeType, file.fileName, file.filePath);
+    const mime = isOpaqueMime(declared) ? await sniffFileMime(path) : undefined;
+    return { path, size: info.size, ...(mime !== undefined ? { mime } : {}) };
   } catch {
     return undefined;
   }
