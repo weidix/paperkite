@@ -181,7 +181,7 @@
 
   {#if open}
     <div
-      class="absolute right-0 top-full z-30 mt-1.5 w-80 rounded-md border bg-popover p-2.5 text-popover-foreground shadow-md max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[70vh] max-sm:w-auto max-sm:overflow-y-auto"
+      class="fixed inset-x-2 bottom-2 z-30 max-h-[70vh] overflow-y-auto rounded-lg border bg-popover p-2.5 text-popover-foreground shadow-lg sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-1.5 sm:max-h-none sm:w-80 sm:overflow-visible sm:rounded-md sm:shadow-md"
       role="dialog"
       aria-label="日期范围"
     >

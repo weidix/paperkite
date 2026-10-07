@@ -150,7 +150,7 @@
 
   {#if open}
     <div
-      class="absolute left-0 top-full z-30 mt-1.5 flex max-h-80 w-72 flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[70vh] max-sm:w-auto sm:left-auto sm:right-0"
+      class="fixed inset-x-2 bottom-2 z-30 flex max-h-[70vh] flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-1.5 sm:max-h-80 sm:w-72 sm:rounded-md sm:shadow-md"
       role="listbox"
       aria-multiselectable="true"
       aria-label="会话筛选（多选）"

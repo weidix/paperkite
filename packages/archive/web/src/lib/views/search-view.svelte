@@ -490,8 +490,10 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <div class="sticky top-0 z-10 -mx-3 -mt-3 border-b border-border/60 bg-background/95 px-3 pb-2 pt-3 backdrop-blur-sm sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-4">
-    <div class="flex flex-wrap items-center gap-2">
+  <div class="sticky top-0 z-10 -mx-3 -mt-3 border-b border-border/60 px-3 pb-2 pt-3 sm:-mx-6 sm:-mt-6 sm:px-6 sm:pt-4">
+    <!-- 模糊单独成层：带 backdrop-filter 的容器会成为 fixed 后代的包含块，弹层会锚到工具条而不是视口 -->
+    <div class="pointer-events-none absolute inset-0 -z-10 bg-background/95 backdrop-blur-sm" aria-hidden="true"></div>
+    <div class="relative flex flex-wrap items-center gap-2">
       <div class="relative min-w-0 flex-1 basis-full sm:basis-60">
         <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input
