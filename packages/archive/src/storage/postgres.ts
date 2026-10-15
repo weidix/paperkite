@@ -736,8 +736,8 @@ export class PostgresArchiveStore implements ArchiveStore {
     const q = (query.q ?? "").trim().replace(/^@/, "");
     if (q) {
       conditions.push(`(
-        m.sender_id = $${values.length + 1}
-        OR m.sender_id ILIKE $${values.length + 2}
+        m.sender_id::text = $${values.length + 1}
+        OR m.sender_id::text ILIKE $${values.length + 2}
         OR m.sender_username ILIKE $${values.length + 3}
         OR m.sender_first_name ILIKE $${values.length + 4}
         OR m.sender_last_name ILIKE $${values.length + 5}

@@ -322,6 +322,28 @@ test("postgres migration creates blocked indexes only after the column lands", a
   assert.ok(firstBlockedIndex >= 0);
 });
 
+test("postgres sender search compares ids as text so bigint sender_id columns take text queries", async () => {
+  const statements: Array<{ text: string; values: unknown[] }> = [];
+  const pool = {
+    query: async (text: string, values: unknown[] = []) => {
+      statements.push({ text, values });
+      return text.startsWith("SELECT COUNT(DISTINCT") ? { rows: [{ count: 0 }] } : { rows: [] };
+    },
+    end: async () => undefined
+  };
+  const store = new PostgresArchiveStore("postgresql://localhost/archive", "public", {
+    pool: pool as never
+  });
+  const result = await store.searchSenders({ q: "@alice" });
+  await store.close();
+  assert.deepEqual(result, { items: [], total: 0 });
+  const search = statements.find((statement) => statement.text.includes("sender_username ILIKE"));
+  assert.ok(search, JSON.stringify(statements));
+  assert.match(search.text, /m\.sender_id::text = \$\d+/);
+  assert.match(search.text, /m\.sender_id::text ILIKE \$\d+/);
+  assert.deepEqual(search.values, ["alice", "%alice%", "%alice%", "%alice%", "%alice%"]);
+});
+
 test("paramPlaceholders emits positional $n bindings so batch inserts never bind literals", () => {
   assert.equal(
     paramPlaceholders(1, 18),
