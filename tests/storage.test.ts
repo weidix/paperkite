@@ -322,7 +322,53 @@ test("postgres migration creates blocked indexes only after the column lands", a
   assert.ok(firstBlockedIndex >= 0);
 });
 
-test("postgres sender search compares ids as text so bigint sender_id columns take text queries", async () => {
+test("postgres init creates pg_bigm indexes for the sender name columns", async () => {
+  const statements: string[] = [];
+  const pool = {
+    connect: async () => ({
+      query: async (text: string, _values?: unknown[]) => {
+        statements.push(text);
+        if (text.includes("pg_extension")) return { rows: [{ opclass: "public.gin_bigm_ops" }] };
+        return { rows: [{ column_name: "blocked" }, { column_name: "entities" }] };
+      },
+      release: () => undefined
+    }),
+    end: async () => undefined
+  };
+  const store = new PostgresArchiveStore("postgresql://localhost/archive", "public", {
+    pool: pool as never
+  });
+  await store.init();
+  await store.close();
+  for (const column of ["sender_username", "sender_first_name", "sender_last_name"]) {
+    assert.ok(
+      statements.some((text) => text.includes(`USING gin (lower(${column}) public.gin_bigm_ops)`)),
+      column
+    );
+  }
+});
+
+test("postgres init skips pg_bigm indexes when the extension is absent", async () => {
+  const statements: string[] = [];
+  const pool = {
+    connect: async () => ({
+      query: async (text: string, _values?: unknown[]) => {
+        statements.push(text);
+        return { rows: [{ column_name: "blocked" }, { column_name: "entities" }] };
+      },
+      release: () => undefined
+    }),
+    end: async () => undefined
+  };
+  const store = new PostgresArchiveStore("postgresql://localhost/archive", "public", {
+    pool: pool as never
+  });
+  await store.init();
+  await store.close();
+  assert.equal(statements.some((text) => text.includes("USING gin (lower(")), false);
+});
+
+test("postgres sender search matches names through lower(column) LIKE for the bigm indexes", async () => {
   const statements: Array<{ text: string; values: unknown[] }> = [];
   const pool = {
     query: async (text: string, values: unknown[] = []) => {
@@ -334,14 +380,41 @@ test("postgres sender search compares ids as text so bigint sender_id columns ta
   const store = new PostgresArchiveStore("postgresql://localhost/archive", "public", {
     pool: pool as never
   });
-  const result = await store.searchSenders({ q: "@alice" });
+  const result = await store.searchSenders({ q: "@Alice" });
   await store.close();
   assert.deepEqual(result, { items: [], total: 0 });
-  const search = statements.find((statement) => statement.text.includes("sender_username ILIKE"));
+  const search = statements.find((statement) => statement.text.includes("lower(m.sender_username) LIKE"));
   assert.ok(search, JSON.stringify(statements));
-  assert.match(search.text, /m\.sender_id::text = \$\d+/);
-  assert.match(search.text, /m\.sender_id::text ILIKE \$\d+/);
-  assert.deepEqual(search.values, ["alice", "%alice%", "%alice%", "%alice%", "%alice%"]);
+  assert.doesNotMatch(search.text, /m\.sender_id =/);
+  assert.deepEqual(search.values, ["%alice%", "%alice%", "%alice%"]);
+});
+
+test("postgres sender search sends digit queries to the sender_id index", async () => {
+  const statements: Array<{ text: string; values: unknown[] }> = [];
+  const pool = {
+    query: async (text: string, values: unknown[] = []) => {
+      statements.push({ text, values });
+      return text.startsWith("SELECT COUNT(DISTINCT") ? { rows: [{ count: 0 }] } : { rows: [] };
+    },
+    end: async () => undefined
+  };
+  const store = new PostgresArchiveStore("postgresql://localhost/archive", "public", {
+    pool: pool as never
+  });
+  const result = await store.searchSenders({ q: "42" });
+  assert.deepEqual(result, { items: [], total: 0 });
+  const search = statements.find((statement) => statement.text.includes("lower(m.sender_username) LIKE"));
+  assert.ok(search, JSON.stringify(statements));
+  assert.match(search.text, /m\.sender_id = \$\d+/);
+  assert.doesNotMatch(search.text, /sender_id::text/);
+  assert.deepEqual(search.values, ["42", "%42%", "%42%", "%42%"]);
+
+  statements.length = 0;
+  await store.searchSenders({ q: "12345678901234567890" });
+  await store.close();
+  const guarded = statements.find((statement) => statement.text.includes("lower(m.sender_username) LIKE"));
+  assert.ok(guarded, JSON.stringify(statements));
+  assert.doesNotMatch(guarded.text, /m\.sender_id =/);
 });
 
 test("paramPlaceholders emits positional $n bindings so batch inserts never bind literals", () => {

@@ -170,6 +170,7 @@ export class PostgresArchiveStore implements ArchiveStore {
       `);
       await this.ensureLegacyColumns(client);
       await this.ensureBlockedIndexes(client);
+      await this.ensureSenderNameIndexes(client);
       const words = await client.query(
         `SELECT word FROM ${this.table("blockwords")} ORDER BY word`
       );
@@ -226,6 +227,27 @@ export class PostgresArchiveStore implements ArchiveStore {
       CREATE INDEX IF NOT EXISTS idx_messages_blocked_one
          ON ${this.table("messages")} (blocked) WHERE blocked = TRUE;
     `);
+  }
+
+  /**
+   * 发送者姓名模糊搜索索引：pg_bigm 只提供 LIKE，索引表达式与查询一律走 lower()。
+   * 扩展未安装时跳过，搜索退化为顺序扫描但功能保持可用。
+   */
+  private async ensureSenderNameIndexes(client: PoolClient): Promise<void> {
+    const extension = await client.query(
+      `SELECT quote_ident(n.nspname) || '.gin_bigm_ops' AS opclass
+         FROM pg_extension e
+         JOIN pg_namespace n ON n.oid = e.extnamespace
+        WHERE e.extname = 'pg_bigm'`
+    );
+    const opclass = extension.rows[0]?.opclass as string | undefined;
+    if (!opclass) return;
+    for (const column of ["sender_username", "sender_first_name", "sender_last_name"]) {
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_messages_${column}_lower_bigm
+           ON ${this.table("messages")} USING gin (lower(${column}) ${opclass})`
+      );
+    }
   }
 
   async close(): Promise<void> {
@@ -735,15 +757,19 @@ export class PostgresArchiveStore implements ArchiveStore {
     const values: unknown[] = [];
     const q = (query.q ?? "").trim().replace(/^@/, "");
     if (q) {
-      conditions.push(`(
-        m.sender_id::text = $${values.length + 1}
-        OR m.sender_id::text ILIKE $${values.length + 2}
-        OR m.sender_username ILIKE $${values.length + 3}
-        OR m.sender_first_name ILIKE $${values.length + 4}
-        OR m.sender_last_name ILIKE $${values.length + 5}
-      )`);
-      const like = `%${escapeLike(q)}%`;
-      values.push(q, like, like, like, like);
+      const matches: string[] = [];
+      // 纯数字才比较 sender_id：bigint 列收到文本会直接报错，转成文本又用不上 idx_messages_sender；
+      // 位数上限保证参数落在 bigint 取值范围内。
+      if (/^\d{1,18}$/.test(q)) {
+        values.push(q);
+        matches.push(`m.sender_id = $${values.length}`);
+      }
+      const like = `%${escapeLike(q.toLowerCase())}%`;
+      for (const column of ["sender_username", "sender_first_name", "sender_last_name"]) {
+        values.push(like);
+        matches.push(`lower(m.${column}) LIKE $${values.length}`);
+      }
+      conditions.push(`(${matches.join(" OR ")})`);
     }
     if (query.chatId?.trim()) {
       conditions.push(`m.chat_id = $${values.length + 1}`);
