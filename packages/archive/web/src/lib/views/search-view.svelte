@@ -341,7 +341,7 @@
     }));
     const merged = [...chatMatches, ...userMatches].slice(0, 10);
     candidates = merged;
-    candIndex = merged.length > 0 ? 0 : -1;
+    candIndex = -1;
   });
 
   /** 选中候选：清空查询框并 commit；会话候选设该会话，用户候选增补 users。 */
@@ -389,7 +389,9 @@
       if (candidates.length === 0) return;
       event.preventDefault();
       const delta = event.key === "ArrowDown" ? 1 : -1;
-      candIndex = (candIndex + delta + candidates.length) % candidates.length;
+      candIndex = candIndex < 0
+        ? (delta > 0 ? 0 : candidates.length - 1)
+        : (candIndex + delta + candidates.length) % candidates.length;
     }
   }
 
