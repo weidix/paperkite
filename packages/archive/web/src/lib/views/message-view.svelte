@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronRight, Reply, UserRoundSearch, X } from "lucide-svelte";
+  import { ArrowLeft, ChevronRight, LocateFixed, Reply, UserRoundSearch, X } from "lucide-svelte";
   import { tick } from "svelte";
   import { fetchContext, fetchLiveText, fetchReplyChain, fetchState, mediaDiskUrl, mediaRowUrl, type ArchiveState } from "$lib/api";
   import { chatLabel, fmtCount, fmtTs, richSegments, senderName, telegramMessageRefOf, urlRangesOf } from "$lib/format";
@@ -93,6 +93,23 @@
     tick().then(() => {
       document.getElementById(`msg-${id}`)?.scrollIntoView({ block: "center" });
     });
+  });
+
+  /** 锚点行是否在可视区内：离开时给出回到锚点的入口。 */
+  let anchorInView = $state(true);
+
+  $effect(() => {
+    const element = anchorElement();
+    if (element === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry !== undefined) anchorInView = entry.isIntersecting;
+      },
+      { root: document.querySelector("main") }
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
   });
 
   $effect(() => {
@@ -308,6 +325,15 @@
     return entry.kind === "album" ? (entry.focusRecordId ?? entry.recordId) : entry.record.recordId;
   }
 
+  /** 锚点行元素：相册按条目首条记录挂载，与 entryRecordId 一致。 */
+  function anchorElement(): HTMLElement | null {
+    return anchor === null ? null : document.getElementById(`msg-${entryRecordId(anchor)}`);
+  }
+
+  function jumpToAnchor(): void {
+    anchorElement()?.scrollIntoView({ block: "center" });
+  }
+
   function ctxCount(loaded: number, total: number): string {
     return loaded >= total ? `共 ${fmtCount(total)} 条` : `${fmtCount(loaded)}/${fmtCount(total)}`;
   }
@@ -355,6 +381,19 @@
         在会话中打开
         <ChevronRight class="size-3.5" aria-hidden="true" />
       </Button>
+      {#if anchor !== null && !anchorInView}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="max-sm:size-8 max-sm:px-0"
+          aria-label="回到锚点消息"
+          title="回到锚点消息"
+          onclick={jumpToAnchor}
+        >
+          <LocateFixed class="size-3.5" aria-hidden="true" />
+          <span class="max-sm:hidden">回到锚点</span>
+        </Button>
+      {/if}
       <Button variant="ghost" size="icon" class="size-8" aria-label="关闭" onclick={() => navigate(backToSearch())}>
         <X class="size-4" aria-hidden="true" />
       </Button>
@@ -548,6 +587,13 @@
           <MessageRow record={anchor.record} anchor fullText highlights={terms} />
         {/if}
       </div>
+      {#each after as entry (entryRecordId(entry))}
+        {#if entry.kind === "album"}
+          <AlbumRow {entry} highlights={terms} />
+        {:else}
+          <MessageRow record={entry.record} highlights={terms} />
+        {/if}
+      {/each}
       <div class="mb-1 mt-3 flex items-center gap-3 px-1">
         <span class="font-mono text-[10px] tracking-widest text-muted-foreground">更晚 · {ctxCount(after.length, afterTotal)}</span>
         <span class="h-px flex-1 bg-border/70" aria-hidden="true"></span>
@@ -557,13 +603,6 @@
           </Button>
         {/if}
       </div>
-      {#each after as entry (entryRecordId(entry))}
-        {#if entry.kind === "album"}
-          <AlbumRow {entry} highlights={terms} />
-        {:else}
-          <MessageRow record={entry.record} highlights={terms} />
-        {/if}
-      {/each}
       <p class="mt-3 px-1 font-mono text-[10px] text-muted-foreground">
         上下文仅限本会话 · 点击任一行可移动锚点
       </p>
