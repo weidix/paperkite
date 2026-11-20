@@ -87,15 +87,14 @@
   const days = $derived(groupByDay(results?.items ?? []));
   const terms = $derived(queryTerms(view?.q ?? ""));
 
-  /** 列表首次渲染后按上次记录的位置恢复一次。 */
+  /** 列表首次渲染后恢复上次位置；没有同条件记录（换了条件或从别的页面进来）时回到顶部。 */
   let scrollRestored = $state(false);
 
   $effect(() => {
     const current = results;
     if (scrollRestored || current === null || current.items.length === 0) return;
     scrollRestored = true;
-    if (searchScroll.key !== queryKey() || searchScroll.top <= 0) return;
-    const top = searchScroll.top;
+    const top = searchScroll.key === queryKey() ? searchScroll.top : 0;
     requestAnimationFrame(() => {
       const main = document.querySelector("main");
       if (main === null) return;
