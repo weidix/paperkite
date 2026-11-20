@@ -78,11 +78,19 @@
     if (viewStore.current.kind !== "search") return;
     const key = queryKey();
     if (key === lastKey && refreshSeq === lastRefresh && blockBump.value === lastBump) return;
+    if (key !== lastKey && lastKey !== "__init__") resetScroll();
     lastKey = key;
     lastRefresh = refreshSeq;
     lastBump = blockBump.value;
     load();
   });
+
+  /** 切换检索条件时回到顶部：结果集已换，沿用上一次的滚动量会落到无关位置。 */
+  function resetScroll(): void {
+    searchScroll.key = queryKey();
+    searchScroll.top = 0;
+    document.querySelector("main")?.scrollTo({ top: 0 });
+  }
 
   const days = $derived(groupByDay(results?.items ?? []));
   const terms = $derived(queryTerms(view?.q ?? ""));
