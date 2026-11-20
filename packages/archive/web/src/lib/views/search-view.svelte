@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import { MessagesSquare, RefreshCw, Search, UserRound, X } from "lucide-svelte";
   import { searchMessages, searchSenders, type SearchQuery } from "$lib/api";
   import { chatLabel, dayLabel, fmtCount, fmtLocalRange, truncate } from "$lib/format";
@@ -29,8 +28,6 @@
   let generation = 0;
 
   let q = $state("");
-  /** 已提交的关键词条件（输入框在提交后清空，滚动恢复键以条件为准）。 */
-  let conditionQ = $state("");
   let selectedChats = $state<string[]>([]);
   let from = $state("");
   let to = $state("");
@@ -45,7 +42,6 @@
 
   $effect(() => {
     if (viewStore.current.kind !== "search") return;
-    conditionQ = viewStore.current.q;
     selectedChats = [...viewStore.current.chats];
     from = viewStore.current.from;
     to = viewStore.current.to;
@@ -91,19 +87,36 @@
   const days = $derived(groupByDay(results?.items ?? []));
   const terms = $derived(queryTerms(view?.q ?? ""));
 
+  /** 列表首次渲染后按上次记录的位置恢复一次。 */
+  let scrollRestored = $state(false);
+
   $effect(() => {
-    if (!results || results.items.length === 0) return;
-    const key = queryKey();
-    if (searchScroll.key === key && searchScroll.top > 0) {
-      const top = searchScroll.top;
-      searchScroll.key = "";
-      requestAnimationFrame(() => document.querySelector("main")?.scrollTo({ top }));
-    }
+    const current = results;
+    if (scrollRestored || current === null || current.items.length === 0) return;
+    scrollRestored = true;
+    if (searchScroll.key !== queryKey() || searchScroll.top <= 0) return;
+    const top = searchScroll.top;
+    requestAnimationFrame(() => {
+      const main = document.querySelector("main");
+      if (main === null) return;
+      main.scrollTo({ top });
+      // 行高在图片与字体就绪后可能微调，下一帧再对齐一次。
+      requestAnimationFrame(() => {
+        if (Math.abs(main.scrollTop - top) > 2) main.scrollTo({ top });
+      });
+    });
   });
 
-  onDestroy(() => {
-    searchScroll.key = localKey();
-    searchScroll.top = (document.querySelector("main")?.scrollTop ?? 0);
+  /** 滚动过程中持续记录位置：视图销毁时滚动量可能已被新内容压缩，只在销毁瞬间取值会丢。 */
+  $effect(() => {
+    const main = document.querySelector("main");
+    if (main === null) return;
+    const onScroll = (): void => {
+      searchScroll.key = queryKey();
+      searchScroll.top = main.scrollTop;
+    };
+    main.addEventListener("scroll", onScroll, { passive: true });
+    return () => main.removeEventListener("scroll", onScroll);
   });
 
   async function load(): Promise<void> {
@@ -230,19 +243,6 @@
       query.mode,
       (query.users ?? []).join(","),
       query.forwardFrom ?? ""
-    ]);
-  }
-
-  /** 卸载瞬间的检索条件标识（此时 URL 可能已切走，取本地同步值）。 */
-  function localKey(): string {
-    return JSON.stringify([
-      conditionQ,
-      selectedChats.join(","),
-      isoDate(from, false) ?? "",
-      isoDate(to, true) ?? "",
-      mode,
-      (view?.users ?? []).join(","),
-      view?.forwardFrom ?? ""
     ]);
   }
 
